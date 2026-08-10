@@ -977,6 +977,14 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
             <span>{version.key}</span>
           </div>
 
+          <ClassificationPicker
+            song={song}
+            options={classificationOptions}
+            onAddOption={onAddClassificationOption}
+            onRemoveOption={onRemoveClassificationOption}
+            onUpdateSong={onUpdateSong}
+          />
+
           <select
             value={version.id}
             onChange={(e) => onSelectVersion(e.target.value)}
