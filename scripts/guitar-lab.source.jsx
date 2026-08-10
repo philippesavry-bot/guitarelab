@@ -143,6 +143,25 @@ const DEFAULT_SONGS = [
 const SONGS_STORAGE_KEY = 'guitar-lab:songs';
 const CLASSIFICATIONS_STORAGE_KEY = 'guitar-lab:classifications';
 
+// Lit plusieurs fichiers image en parallèle et renvoie leurs data-URL dans l'ordre choisi
+function readFilesAsDataUrls(files) {
+  return Promise.all(
+    Array.from(files).map(
+      file =>
+        new Promise(resolve => {
+          const reader = new FileReader();
+          reader.onload = ev => resolve(ev.target.result);
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(file);
+        }),
+    ),
+  ).then(list => list.filter(Boolean));
+}
+
+function newId() {
+  return Date.now().toString() + Math.random().toString(36).slice(2);
+}
+
 function SaveStatusBadge({ status }) {
   if (status === 'idle') return null;
   const config = {
