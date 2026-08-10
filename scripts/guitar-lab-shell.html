@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Guitar Lab — Mes fiches de formation guitare</title>
+    <meta name="description" content="Bibliothèque et fiches de travail pour mes morceaux de guitare, avec sauvegarde locale et synchronisation par fichier iCloud." />
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <script>
+      tailwind.config = {
+        theme: { extend: { colors: { gray: { 750: '#333d4b' } } } },
+      };
+    </script>
+    <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/lucide@0.470.0/dist/umd/lucide.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js" crossorigin></script>
+    <style>
+      html, body, #root { height: 100%; }
+      body { margin: 0; background: #111827; color: #fff; -webkit-text-size-adjust: 100%; }
+      #boot { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; font: 500 14px/1.4 system-ui, sans-serif; color: #fbbf24; background: #111827; z-index: 50; }
+      #sync-bar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; display: flex; gap: 8px; align-items: center; padding: 6px 10px; padding-bottom: calc(6px + env(safe-area-inset-bottom)); background: rgba(17,24,39,.95); border-top: 1px solid #374151; font: 500 11px/1.2 system-ui, sans-serif; }
+      #sync-bar button { background: #1f2937; border: 1px solid #4b5563; color: #e5e7eb; border-radius: 6px; padding: 6px 10px; font: inherit; cursor: pointer; }
+      #sync-bar button.primary { background: #b45309; border-color: #d97706; color: #fff; }
+      #sync-bar span { color: #9ca3af; }
+      #sync-bar.hidden { display: none; }
+      #root { padding-bottom: 44px; }
+    </style>
+  </head>
+  <body>
+    <div id="boot">Chargement de Guitar Lab…</div>
+    <div id="root"></div>
+
+    <div id="sync-bar">
+      <button class="primary" id="sync-export">☁️ Sauvegarder vers iCloud</button>
+      <button id="sync-import">📂 Charger depuis iCloud</button>
+      <span id="sync-status"></span>
+      <button id="sync-hide" style="margin-left:auto">✕</button>
+      <input type="file" id="sync-file" accept="application/json,.json" style="display:none" />
+    </div>
+
+    <script>
+      // --- Stockage persistant local (remplace window.storage du prototype) ---
+      var LS_PREFIX = 'guitar-lab-html:';
+      window.storage = {
+        get: function (key) {
+          try {
+            var v = localStorage.getItem(LS_PREFIX + key);
+            return Promise.resolve(v === null ? null : { value: v });
+          } catch (e) { return Promise.resolve(null); }
+        },
+        set: function (key, value) {
+          try { localStorage.setItem(LS_PREFIX + key, value); return Promise.resolve(true); }
+          catch (e) { return Promise.resolve(false); }
+        },
+      };
+
+      // --- Synchronisation par fichier (iCloud Drive via l'app Fichiers) ---
+      var SYNC_KEYS = ['guitar-lab:songs', 'guitar-lab:classifications'];
+      var statusEl = document.getElementById('sync-status');
+      function setStatus(msg) { statusEl.textContent = msg; }
+      var lastExport = localStorage.getItem(LS_PREFIX + 'lastExport');
+      if (lastExport) setStatus('Dernière sauvegarde iCloud : ' + lastExport);
+
+      document.getElementById('sync-export').addEventListener('click', function () {
+        var payload = { app: 'guitar-lab', version: 1, exportedAt: new Date().toISOString(), data: {} };
+        SYNC_KEYS.forEach(function (k) { payload.data[k] = localStorage.getItem(LS_PREFIX + k); });
+        var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'guitar-lab-' + new Date().toISOString().slice(0, 10) + '.json';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
+        var stamp = new Date().toLocaleString('fr-FR');
+        localStorage.setItem(LS_PREFIX + 'lastExport', stamp);
+        setStatus('Exporté — choisis « Enregistrer dans Fichiers » → iCloud Drive');
+      });
+
+      var fileInput = document.getElementById('sync-file');
+      document.getElementById('sync-import').addEventListener('click', function () { fileInput.click(); });
+      fileInput.addEventListener('change', function () {
+        var file = fileInput.files && fileInput.files[0];
+        if (!file) return;
+        var reader = new FileReader();
+        reader.onload = function (ev) {
+          try {
+            var payload = JSON.parse(ev.target.result);
+            if (!payload || !payload.data) throw new Error('format');
+            SYNC_KEYS.forEach(function (k) {
+              if (typeof payload.data[k] === 'string') localStorage.setItem(LS_PREFIX + k, payload.data[k]);
+            });
+            setStatus('Données importées, rechargement…');
+            setTimeout(function () { location.reload(); }, 400);
+          } catch (e) {
+            setStatus('Fichier illisible : ' + (e.message || e));
+          }
+        };
+        reader.readAsText(file);
+        fileInput.value = '';
+      });
+
+      document.getElementById('sync-hide').addEventListener('click', function () {
+        document.getElementById('sync-bar').classList.add('hidden');
+        document.getElementById('root').style.paddingBottom = '0';
+      });
+
+      // --- Icônes lucide exposées comme composants React ---
+      (function () {
+        var source = (window.lucide && window.lucide.icons) || window.lucide || {};
+        var cache = {};
+        function toComponent(name, node) {
+          if (cache[name]) return cache[name];
+          var C = function (props) {
+            props = props || {};
+            var size = props.size || 24;
+            var attrs = {
+              xmlns: 'http://www.w3.org/2000/svg', width: size, height: size,
+              viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
+              strokeWidth: props.strokeWidth || 2, strokeLinecap: 'round', strokeLinejoin: 'round',
+              className: props.className, style: props.style, onClick: props.onClick,
+            };
+            // node = ["svg", attrs, children] (format lucide UMD)
+            var raw = (node && node[2]) || [];
+            var children = raw.map(function (child, i) {
+              return React.createElement(child[0], Object.assign({ key: i }, child[1] || {}));
+            });
+            return React.createElement('svg', attrs, children);
+          };
+          C.displayName = name;
+          cache[name] = C;
+          return C;
+        }
+        window.Icons = new Proxy({}, {
+          get: function (_t, name) {
+            if (typeof name !== 'string') return undefined;
+            var node = source[name] || source[name.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()];
+            return toComponent(name, node);
+          },
+        });
+      })();
+    </script>
+
+    <script type="text/babel" data-presets="react">
+      const { useState, useRef, useEffect } = React;
+      const {
+        ChevronDown, ChevronRight, ChevronLeft, Plus, Music, X, Star, Menu, Edit2,
+        Trash2, Play, Pause, BookOpen, Maximize2, Minimize2, ArrowDown, ArrowUp, Volume2, VolumeX,
+        TrendingUp, Calendar, Zap, Search,
+      } = window.Icons;
+
+/* __APP_CODE__ */
+
+      const bootEl = document.getElementById('boot');
+      if (bootEl) bootEl.remove();
+      ReactDOM.createRoot(document.getElementById('root')).render(<GuitarApp />);
+    </script>
+  </body>
+</html>
