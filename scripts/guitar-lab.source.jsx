@@ -1419,10 +1419,24 @@ function CenterPanel({ version, updateVersion }) {
   return (
     <>
       <div className="bg-gray-750 border-b border-gray-700 p-2 flex-shrink-0 flex-wrap flex items-center gap-2">
-        <label className="px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold cursor-pointer flex items-center gap-1">
+        <label className="px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold cursor-pointer flex items-center gap-1" title="Importer plusieurs photos à la fois">
           📁 Importer
           <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="hidden" />
         </label>
+
+        <div className="flex items-center gap-1 text-xs">
+          <span className="text-gray-400">Taille:</span>
+          {[['sm', 'S'], ['md', 'M'], ['full', '100%']].map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setImgHeight(key)}
+              className={`px-1.5 py-1 rounded font-semibold ${imgHeight === key ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+              title="Hauteur des photos empilées"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
         <button
           onClick={() => setIsAutoScrolling(!isAutoScrolling)}
