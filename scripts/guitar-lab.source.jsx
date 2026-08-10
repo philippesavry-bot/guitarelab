@@ -1229,25 +1229,25 @@ function SectionBuilder({ section, index, version, updateVersion }) {
 
   return (
     <div className={`rounded border-l-4 ${style.border} ${style.tint} border border-gray-600 text-xs overflow-hidden`}>
-      <div className="flex items-center gap-1.5 px-2 py-1">
-        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${style.dot}`} />
+      <div className="flex items-center gap-1 px-2 py-0.5">
+        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${style.dot}`} />
         <button
           onClick={toggleCollapsed}
           className="flex-shrink-0 text-gray-400 hover:text-amber-400 transition"
           title={collapsed ? 'Déplier la section' : 'Replier la section'}
         >
-          {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
         </button>
         <input
           type="text"
           list="section-name-suggestions"
           value={section.section}
           onChange={(e) => updateSection({ section: e.target.value })}
-          placeholder="Intro, Couplet, Refrain, Pont, Outro"
-          className={`w-28 bg-gray-800 border border-gray-600 rounded px-1.5 py-0.5 font-semibold focus:outline-none focus:border-amber-500 ${style.text}`}
+          placeholder="Intro, Couplet..."
+          className={`w-20 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-[11px] font-semibold focus:outline-none focus:border-amber-500 ${style.text}`}
         />
-        <div className="flex items-center gap-1 ml-1">
-          <span className="text-gray-400 text-[10px] font-semibold">L</span>
+        <div className="flex items-center gap-0.5">
+          <span className="text-gray-400 text-[9px] font-semibold">L</span>
           <input
             type="number"
             min={1}
@@ -1256,11 +1256,11 @@ function SectionBuilder({ section, index, version, updateVersion }) {
               const rows = parseInt(e.target.value, 10) || 1;
               resizeGrid(section.cols || 4, rows);
             }}
-            className="w-8 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-center text-[10px] focus:outline-none focus:border-amber-500"
+            className="w-6 bg-gray-800 border border-gray-600 rounded px-0.5 py-0.5 text-center text-[10px] focus:outline-none focus:border-amber-500"
           />
         </div>
-        <div className="flex items-center gap-1">
-          <span className="text-gray-400 text-[10px] font-semibold">C</span>
+        <div className="flex items-center gap-0.5">
+          <span className="text-gray-400 text-[9px] font-semibold">C</span>
           <input
             type="number"
             min={1}
@@ -1269,7 +1269,7 @@ function SectionBuilder({ section, index, version, updateVersion }) {
               const cols = parseInt(e.target.value, 10) || 1;
               resizeGrid(cols, rowCount);
             }}
-            className="w-8 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-center text-[10px] focus:outline-none focus:border-amber-500"
+            className="w-6 bg-gray-800 border border-gray-600 rounded px-0.5 py-0.5 text-center text-[10px] focus:outline-none focus:border-amber-500"
           />
         </div>
         {collapsed && (
