@@ -1760,36 +1760,32 @@ function ChordThumbnailsPanel({ version, updateVersion }) {
   const canAddMore = thumbnails.length < 5;
   const [editingId, setEditingId] = useState(null);
 
-  const addThumbnail = (dataUrl) => {
-    updateVersion({ chordThumbnails: [...(version.chordThumbnails || []), { id: Date.now().toString() + Math.random().toString(36).slice(2), src: dataUrl }] });
+  const addThumbnails = (dataUrls) => {
+    const current = version.chordThumbnails || [];
+    const room = 5 - current.length;
+    if (room <= 0 || !dataUrls.length) return;
+    const added = dataUrls.slice(0, room).map(src => ({ id: newId(), src }));
+    updateVersion({ chordThumbnails: [...current, ...added] });
   };
 
   const handleFileUpload = (e) => {
     const files = Array.from(e.target.files || []);
-    const remainingSlots = 5 - thumbnails.length;
-    files.slice(0, remainingSlots).forEach(file => {
-      const reader = new FileReader();
-      reader.onload = (event) => addThumbnail(event.target.result);
-      reader.readAsDataURL(file);
-    });
     e.target.value = '';
+    readFilesAsDataUrls(files).then(addThumbnails);
   };
 
   const handlePaste = (e) => {
     if (!canAddMore) return;
-    const items = e.clipboardData?.items || [];
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        const file = item.getAsFile();
-        if (!file) continue;
-        const reader = new FileReader();
-        reader.onload = (event) => addThumbnail(event.target.result);
-        reader.readAsDataURL(file);
-        e.preventDefault();
-        break;
-      }
-    }
+    const files = Array.from(e.clipboardData?.items || [])
+      .filter(i => i.type.startsWith('image/'))
+      .map(i => i.getAsFile())
+      .filter(Boolean);
+    if (!files.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    readFilesAsDataUrls(files).then(addThumbnails);
   };
+
 
   const removeThumbnail = (id) => {
     updateVersion({ chordThumbnails: thumbnails.filter(t => t.id !== id) });
