@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 
 // Suggestions de noms de section (structure du morceau)
-const SECTION_NAME_SUGGESTIONS = ['Intro', 'Couplet', 'Pré-refrain', 'Refrain', 'Pont', 'Interlude', 'Solo', 'Outro', 'Coda'];
+const SECTION_NAME_SUGGESTIONS = ['Intro', 'Couplet', 'Refrain', 'Pont', 'Outro'];
 
 // Couleurs associées aux types de section usuels, pour les distinguer visuellement d'un coup d'œil
 const SECTION_COLOR_MAP = {
@@ -1229,23 +1229,49 @@ function SectionBuilder({ section, index, version, updateVersion }) {
 
   return (
     <div className={`rounded border-l-4 ${style.border} ${style.tint} border border-gray-600 text-xs overflow-hidden`}>
-      <div className="flex items-center gap-2 px-2 py-1">
-        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${style.dot}`} />
+      <div className="flex items-center gap-1 px-2 py-0.5">
+        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${style.dot}`} />
         <button
           onClick={toggleCollapsed}
           className="flex-shrink-0 text-gray-400 hover:text-amber-400 transition"
           title={collapsed ? 'Déplier la section' : 'Replier la section'}
         >
-          {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
         </button>
         <input
           type="text"
           list="section-name-suggestions"
           value={section.section}
           onChange={(e) => updateSection({ section: e.target.value })}
-          placeholder="Intro, Couplet, Refrain..."
-          className={`flex-1 min-w-0 bg-gray-800 border border-gray-600 rounded px-2 py-0.5 font-semibold focus:outline-none focus:border-amber-500 ${style.text}`}
+          placeholder="Intro, Couplet..."
+          className={`w-20 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-[11px] font-semibold focus:outline-none focus:border-amber-500 ${style.text}`}
         />
+        <div className="flex items-center gap-0.5">
+          <span className="text-gray-400 text-[9px] font-semibold">L</span>
+          <input
+            type="number"
+            min={1}
+            value={rowCount}
+            onChange={(e) => {
+              const rows = parseInt(e.target.value, 10) || 1;
+              resizeGrid(section.cols || 4, rows);
+            }}
+            className="w-6 bg-gray-800 border border-gray-600 rounded px-0.5 py-0.5 text-center text-[10px] focus:outline-none focus:border-amber-500"
+          />
+        </div>
+        <div className="flex items-center gap-0.5">
+          <span className="text-gray-400 text-[9px] font-semibold">C</span>
+          <input
+            type="number"
+            min={1}
+            value={section.cols || 4}
+            onChange={(e) => {
+              const cols = parseInt(e.target.value, 10) || 1;
+              resizeGrid(cols, rowCount);
+            }}
+            className="w-6 bg-gray-800 border border-gray-600 rounded px-0.5 py-0.5 text-center text-[10px] focus:outline-none focus:border-amber-500"
+          />
+        </div>
         {collapsed && (
           <span className="flex-shrink-0 text-gray-400 text-[10px] whitespace-nowrap">
             {section.cols}×{rowCount}
@@ -1255,26 +1281,11 @@ function SectionBuilder({ section, index, version, updateVersion }) {
 
       {!collapsed && (
         <div className="px-2 pb-1.5">
-          {/* Barre compacte : rythme + dimensions de la grille */}
-          <div className="flex items-center gap-2 flex-wrap mb-1">
-            <div className="flex items-center gap-1">
-              <span className="text-gray-400 text-[10px] font-semibold">Rythme:</span>
-              <button onClick={() => addRhythm('down')} title="Ajouter coup vers le bas" className="w-6 h-5 bg-blue-700 hover:bg-blue-600 rounded flex items-center justify-center"><ArrowDown className="w-3 h-3" /></button>
-              <button onClick={() => addRhythm('up')} title="Ajouter coup vers le haut" className="w-6 h-5 bg-green-700 hover:bg-green-600 rounded flex items-center justify-center"><ArrowUp className="w-3 h-3" /></button>
-              <button onClick={() => addRhythm('mute')} title="Ajouter mute" className="w-6 h-5 bg-gray-600 hover:bg-gray-500 rounded flex items-center justify-center"><X className="w-3 h-3" /></button>
-            </div>
-            <div className="flex items-center gap-1 text-[10px]">
-              <span>Cases:</span>
-              <button onClick={() => resizeGrid(section.cols - 1, rowCount)} className="w-5 h-5 bg-gray-600 hover:bg-gray-500 rounded leading-none">−</button>
-              <span className="w-3 text-center">{section.cols}</span>
-              <button onClick={() => resizeGrid(section.cols + 1, rowCount)} className="w-5 h-5 bg-gray-600 hover:bg-gray-500 rounded leading-none">+</button>
-            </div>
-            <div className="flex items-center gap-1 text-[10px]">
-              <span>Lignes:</span>
-              <button onClick={() => resizeGrid(section.cols, rowCount - 1)} className="w-5 h-5 bg-gray-600 hover:bg-gray-500 rounded leading-none">−</button>
-              <span className="w-3 text-center">{rowCount}</span>
-              <button onClick={() => resizeGrid(section.cols, rowCount + 1)} className="w-5 h-5 bg-gray-600 hover:bg-gray-500 rounded leading-none">+</button>
-            </div>
+          {/* Barre de rythme sans libellé */}
+          <div className="flex items-center gap-1 flex-wrap mb-1">
+            <button onClick={() => addRhythm('down')} title="Ajouter coup vers le bas" className="w-6 h-5 bg-blue-700 hover:bg-blue-600 rounded flex items-center justify-center"><ArrowDown className="w-3 h-3" /></button>
+            <button onClick={() => addRhythm('up')} title="Ajouter coup vers le haut" className="w-6 h-5 bg-green-700 hover:bg-green-600 rounded flex items-center justify-center"><ArrowUp className="w-3 h-3" /></button>
+            <button onClick={() => addRhythm('mute')} title="Ajouter mute" className="w-6 h-5 bg-gray-600 hover:bg-gray-500 rounded flex items-center justify-center"><X className="w-3 h-3" /></button>
           </div>
 
           {section.rhythm.length > 0 && (
@@ -1287,7 +1298,6 @@ function SectionBuilder({ section, index, version, updateVersion }) {
               ))}
             </div>
           )}
-
 
           <div className="overflow-x-auto">
             <div className="grid w-max gap-0.5" style={{ gridTemplateColumns: `repeat(${section.cols}, 2.5rem)` }}>
