@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 
 // Suggestions de noms de section (structure du morceau)
-const SECTION_NAME_SUGGESTIONS = ['Intro', 'Couplet', 'Pré-refrain', 'Refrain', 'Pont', 'Interlude', 'Solo', 'Outro', 'Coda'];
+const SECTION_NAME_SUGGESTIONS = ['Intro', 'Couplet', 'Refrain', 'Pont', 'Outro'];
 
 // Couleurs associées aux types de section usuels, pour les distinguer visuellement d'un coup d'œil
 const SECTION_COLOR_MAP = {
