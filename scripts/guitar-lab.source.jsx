@@ -904,7 +904,87 @@ function SongEditModal({ song, onChange, onSave, onCancel }) {
   );
 }
 
-function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVersion, onUpdateSong }) {
+function ClassificationPicker({ song, options, onAddOption, onRemoveOption, onUpdateSong }) {
+  const [open, setOpen] = useState(false);
+  const [newLabel, setNewLabel] = useState('');
+  const selected = song.classifications || [];
+
+  const toggle = (label) => {
+    const next = selected.includes(label)
+      ? selected.filter(c => c !== label)
+      : [...selected, label];
+    onUpdateSong({ ...song, classifications: next });
+  };
+
+  const submitNew = () => {
+    const clean = newLabel.trim();
+    if (!clean) return;
+    if (!options.includes(clean)) onAddOption?.(clean);
+    if (!selected.includes(clean)) onUpdateSong({ ...song, classifications: [...selected, clean] });
+    setNewLabel('');
+  };
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="px-2 py-2 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded text-xs flex items-center gap-1 max-w-[220px]"
+        title="Type et catégories de classement (défini en bibliothèque)"
+      >
+        <span className="truncate">
+          🏷️ {selected.length > 0 ? selected.join(' · ') : 'Classement…'}
+        </span>
+        <ChevronDown className="w-3 h-3 flex-shrink-0" />
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 mt-1 z-50 w-64 bg-gray-800 border border-gray-600 rounded shadow-2xl p-2">
+            <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">Classement du morceau</p>
+            <div className="max-h-56 overflow-y-auto space-y-0.5">
+              {options.length === 0 && (
+                <p className="text-xs text-gray-500 px-1 py-2">Aucune étiquette. Ajoute la première ci-dessous.</p>
+              )}
+              {options.map(label => (
+                <div key={label} className="flex items-center gap-1 group">
+                  <button
+                    onClick={() => toggle(label)}
+                    className={`flex-1 text-left px-2 py-1.5 rounded text-xs flex items-center gap-2 ${selected.includes(label) ? 'bg-amber-600/25 text-amber-300' : 'hover:bg-gray-700 text-gray-200'}`}
+                  >
+                    <span className="w-3 text-center">{selected.includes(label) ? '✓' : ''}</span>
+                    <span className="truncate">{label}</span>
+                  </button>
+                  {onRemoveOption && (
+                    <button
+                      onClick={() => onRemoveOption(label)}
+                      className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 px-1 text-xs"
+                      title="Supprimer cette étiquette de la liste"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-1 mt-2 pt-2 border-t border-gray-700">
+              <input
+                value={newLabel}
+                onChange={(e) => setNewLabel(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && submitNew()}
+                placeholder="Nouvelle étiquette…"
+                className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs focus:outline-none focus:border-amber-500"
+              />
+              <button onClick={submitNew} className="px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold">+</button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVersion, onUpdateSong, classificationOptions = [], onAddClassificationOption, onRemoveClassificationOption }) {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
 
