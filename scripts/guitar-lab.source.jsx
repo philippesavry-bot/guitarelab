@@ -560,6 +560,8 @@ export default function GuitarApp() {
             onSelectVersion={setSelectedVersionId}
             onUpdateSong={updateSong}
             classificationOptions={classificationOptions}
+            onAddClassificationOption={addClassificationOption}
+            onRemoveClassificationOption={removeClassificationOption}
           />
         )
       )}
