@@ -1459,37 +1459,42 @@ function CenterPanel({ version, updateVersion }) {
         <span className="text-xs text-gray-400">BPM</span>
       </div>
 
-      <div ref={galleryRef} className="flex-1 overflow-y-auto bg-gray-900 p-4 space-y-4" style={{ touchAction: 'pan-y' }}>
+      <div ref={galleryRef} className="flex-1 overflow-y-auto bg-gray-900 p-4 space-y-4" style={{ touchAction: 'pan-y' }} onPaste={handlePaste}>
         {images.length > 0 ? (
-          images.map(img => (
+          images.map((img, idx) => (
             <div key={img.id} className="relative group" style={{ touchAction: 'pan-y' }}>
               <img
                 src={img.src}
-                alt="Tablature"
+                alt={`Tablature ${idx + 1}`}
                 draggable={false}
-                className="w-full max-h-96 object-contain bg-black rounded border border-gray-700 select-none"
+                className={`w-full ${HEIGHTS[imgHeight]} object-contain bg-black rounded border border-gray-700 select-none`}
                 style={{ touchAction: 'pan-y' }}
               />
-              <button
-                onClick={() => setEditingImageId(img.id)}
-                className="absolute top-2 right-12 bg-amber-700 hover:bg-amber-600 rounded-full p-2 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition"
-                title="Éditer cette image"
-              >
-                <Edit2 className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => deleteImage(img.id)}
-                className="absolute top-2 right-2 bg-red-900 hover:bg-red-800 rounded-full p-2 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              <span className="absolute top-2 left-2 bg-black/70 text-gray-300 text-[10px] px-1.5 py-0.5 rounded">
+                {idx + 1}/{images.length}
+              </span>
+              <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition">
+                <button onClick={() => moveImage(img.id, -1)} disabled={idx === 0} className="bg-gray-800/90 hover:bg-gray-700 disabled:opacity-30 rounded-full p-2" title="Monter">
+                  <ArrowUp className="w-4 h-4" />
+                </button>
+                <button onClick={() => moveImage(img.id, 1)} disabled={idx === images.length - 1} className="bg-gray-800/90 hover:bg-gray-700 disabled:opacity-30 rounded-full p-2" title="Descendre">
+                  <ArrowDown className="w-4 h-4" />
+                </button>
+                <button onClick={() => setEditingImageId(img.id)} className="bg-amber-700 hover:bg-amber-600 rounded-full p-2" title="Éditer cette image">
+                  <Edit2 className="w-4 h-4" />
+                </button>
+                <button onClick={() => deleteImage(img.id)} className="bg-red-900 hover:bg-red-800 rounded-full p-2" title="Supprimer">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           ))
         ) : (
           <div className="flex items-center justify-center h-full text-gray-500 text-center">
             <div>
               <Music className="w-12 h-12 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">Importe une image de tablature</p>
+              <p className="text-sm">Importe ou colle une ou plusieurs images de tablature</p>
+              <p className="text-xs mt-1 opacity-70">Elles s'affichent empilées, l'une sous l'autre</p>
             </div>
           </div>
         )}
