@@ -288,6 +288,25 @@ const DEFAULT_SONGS = [
 const SONGS_STORAGE_KEY = 'guitar-lab:songs';
 const CLASSIFICATIONS_STORAGE_KEY = 'guitar-lab:classifications';
 
+// Lit plusieurs fichiers image en parallèle et renvoie leurs data-URL dans l'ordre choisi
+function readFilesAsDataUrls(files) {
+  return Promise.all(
+    Array.from(files).map(
+      file =>
+        new Promise(resolve => {
+          const reader = new FileReader();
+          reader.onload = ev => resolve(ev.target.result);
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(file);
+        }),
+    ),
+  ).then(list => list.filter(Boolean));
+}
+
+function newId() {
+  return Date.now().toString() + Math.random().toString(36).slice(2);
+}
+
 function SaveStatusBadge({ status }) {
   if (status === 'idle') return null;
   const config = {
@@ -705,6 +724,8 @@ function GuitarApp() {
             onSelectVersion={setSelectedVersionId}
             onUpdateSong={updateSong}
             classificationOptions={classificationOptions}
+            onAddClassificationOption={addClassificationOption}
+            onRemoveClassificationOption={removeClassificationOption}
           />
         )
       )}
@@ -1028,7 +1049,87 @@ function SongEditModal({ song, onChange, onSave, onCancel }) {
   );
 }
 
-function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVersion, onUpdateSong }) {
+function ClassificationPicker({ song, options, onAddOption, onRemoveOption, onUpdateSong }) {
+  const [open, setOpen] = useState(false);
+  const [newLabel, setNewLabel] = useState('');
+  const selected = song.classifications || [];
+
+  const toggle = (label) => {
+    const next = selected.includes(label)
+      ? selected.filter(c => c !== label)
+      : [...selected, label];
+    onUpdateSong({ ...song, classifications: next });
+  };
+
+  const submitNew = () => {
+    const clean = newLabel.trim();
+    if (!clean) return;
+    if (!options.includes(clean)) onAddOption?.(clean);
+    if (!selected.includes(clean)) onUpdateSong({ ...song, classifications: [...selected, clean] });
+    setNewLabel('');
+  };
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="px-2 py-2 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded text-xs flex items-center gap-1 max-w-[220px]"
+        title="Type et catégories de classement (défini en bibliothèque)"
+      >
+        <span className="truncate">
+          🏷️ {selected.length > 0 ? selected.join(' · ') : 'Classement…'}
+        </span>
+        <ChevronDown className="w-3 h-3 flex-shrink-0" />
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 mt-1 z-50 w-64 bg-gray-800 border border-gray-600 rounded shadow-2xl p-2">
+            <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">Classement du morceau</p>
+            <div className="max-h-56 overflow-y-auto space-y-0.5">
+              {options.length === 0 && (
+                <p className="text-xs text-gray-500 px-1 py-2">Aucune étiquette. Ajoute la première ci-dessous.</p>
+              )}
+              {options.map(label => (
+                <div key={label} className="flex items-center gap-1 group">
+                  <button
+                    onClick={() => toggle(label)}
+                    className={`flex-1 text-left px-2 py-1.5 rounded text-xs flex items-center gap-2 ${selected.includes(label) ? 'bg-amber-600/25 text-amber-300' : 'hover:bg-gray-700 text-gray-200'}`}
+                  >
+                    <span className="w-3 text-center">{selected.includes(label) ? '✓' : ''}</span>
+                    <span className="truncate">{label}</span>
+                  </button>
+                  {onRemoveOption && (
+                    <button
+                      onClick={() => onRemoveOption(label)}
+                      className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 px-1 text-xs"
+                      title="Supprimer cette étiquette de la liste"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-1 mt-2 pt-2 border-t border-gray-700">
+              <input
+                value={newLabel}
+                onChange={(e) => setNewLabel(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && submitNew()}
+                placeholder="Nouvelle étiquette…"
+                className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs focus:outline-none focus:border-amber-500"
+              />
+              <button onClick={submitNew} className="px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold">+</button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVersion, onUpdateSong, classificationOptions = [], onAddClassificationOption, onRemoveClassificationOption }) {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
 
@@ -1100,6 +1201,14 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
             <span className="text-gray-500">•</span>
             <span>{version.key}</span>
           </div>
+
+          <ClassificationPicker
+            song={song}
+            options={classificationOptions}
+            onAddOption={onAddClassificationOption}
+            onRemoveOption={onRemoveClassificationOption}
+            onUpdateSong={onUpdateSong}
+          />
 
           <select
             value={version.id}
@@ -1399,17 +1508,46 @@ function CenterPanel({ version, updateVersion }) {
     return () => clearInterval(timer);
   }, [metronomeActive, bpm]);
 
+  // Hauteur d'affichage des photos empilées : compact / moyen / entier
+  const [imgHeight, setImgHeight] = useState('md');
+  const HEIGHTS = { sm: 'max-h-64', md: 'max-h-96', full: 'max-h-none' };
+
+  const addImages = (dataUrls) => {
+    if (!dataUrls.length) return;
+    const added = dataUrls.map(src => ({ id: newId(), src, x: 0, y: 0, scale: 1 }));
+    updateVersion({ images: [...(version?.images || []), ...added] });
+  };
+
   const handleImageUpload = (e) => {
     const files = Array.from(e.target.files || []);
-    files.forEach(file => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        updateVersion({ images: [...images, { id: Date.now().toString() + Math.random().toString(36).slice(2), src: event.target.result, x: 0, y: 0, scale: 1 }] });
-      };
-      reader.readAsDataURL(file);
-    });
     e.target.value = '';
+    readFilesAsDataUrls(files).then(addImages);
   };
+
+  // Coller depuis le presse-papiers : accepte plusieurs images d'un coup
+  const handlePaste = (e) => {
+    const items = Array.from(e.clipboardData?.items || []);
+    const files = items.filter(i => i.type.startsWith('image/')).map(i => i.getAsFile()).filter(Boolean);
+    if (!files.length) return;
+    e.preventDefault();
+    readFilesAsDataUrls(files).then(addImages);
+  };
+
+  useEffect(() => {
+    const onDocPaste = (e) => handlePaste(e);
+    document.addEventListener('paste', onDocPaste);
+    return () => document.removeEventListener('paste', onDocPaste);
+  }, [version?.id, version?.images]);
+
+  const moveImage = (id, dir) => {
+    const list = [...(version?.images || [])];
+    const i = list.findIndex(img => img.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    updateVersion({ images: list });
+  };
+
 
   const deleteImage = (id) => {
     updateVersion({ images: images.filter(i => i.id !== id) });
@@ -1426,10 +1564,24 @@ function CenterPanel({ version, updateVersion }) {
   return (
     <>
       <div className="bg-gray-750 border-b border-gray-700 p-2 flex-shrink-0 flex-wrap flex items-center gap-2">
-        <label className="px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold cursor-pointer flex items-center gap-1">
+        <label className="px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold cursor-pointer flex items-center gap-1" title="Importer plusieurs photos à la fois">
           📁 Importer
           <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="hidden" />
         </label>
+
+        <div className="flex items-center gap-1 text-xs">
+          <span className="text-gray-400">Taille:</span>
+          {[['sm', 'S'], ['md', 'M'], ['full', '100%']].map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setImgHeight(key)}
+              className={`px-1.5 py-1 rounded font-semibold ${imgHeight === key ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+              title="Hauteur des photos empilées"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
         <button
           onClick={() => setIsAutoScrolling(!isAutoScrolling)}
@@ -1466,37 +1618,42 @@ function CenterPanel({ version, updateVersion }) {
         <span className="text-xs text-gray-400">BPM</span>
       </div>
 
-      <div ref={galleryRef} className="flex-1 overflow-y-auto bg-gray-900 p-4 space-y-4" style={{ touchAction: 'pan-y' }}>
+      <div ref={galleryRef} className="flex-1 overflow-y-auto bg-gray-900 p-4 space-y-4" style={{ touchAction: 'pan-y' }} onPaste={handlePaste}>
         {images.length > 0 ? (
-          images.map(img => (
+          images.map((img, idx) => (
             <div key={img.id} className="relative group" style={{ touchAction: 'pan-y' }}>
               <img
                 src={img.src}
-                alt="Tablature"
+                alt={`Tablature ${idx + 1}`}
                 draggable={false}
-                className="w-full max-h-96 object-contain bg-black rounded border border-gray-700 select-none"
+                className={`w-full ${HEIGHTS[imgHeight]} object-contain bg-black rounded border border-gray-700 select-none`}
                 style={{ touchAction: 'pan-y' }}
               />
-              <button
-                onClick={() => setEditingImageId(img.id)}
-                className="absolute top-2 right-12 bg-amber-700 hover:bg-amber-600 rounded-full p-2 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition"
-                title="Éditer cette image"
-              >
-                <Edit2 className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => deleteImage(img.id)}
-                className="absolute top-2 right-2 bg-red-900 hover:bg-red-800 rounded-full p-2 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              <span className="absolute top-2 left-2 bg-black/70 text-gray-300 text-[10px] px-1.5 py-0.5 rounded">
+                {idx + 1}/{images.length}
+              </span>
+              <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition">
+                <button onClick={() => moveImage(img.id, -1)} disabled={idx === 0} className="bg-gray-800/90 hover:bg-gray-700 disabled:opacity-30 rounded-full p-2" title="Monter">
+                  <ArrowUp className="w-4 h-4" />
+                </button>
+                <button onClick={() => moveImage(img.id, 1)} disabled={idx === images.length - 1} className="bg-gray-800/90 hover:bg-gray-700 disabled:opacity-30 rounded-full p-2" title="Descendre">
+                  <ArrowDown className="w-4 h-4" />
+                </button>
+                <button onClick={() => setEditingImageId(img.id)} className="bg-amber-700 hover:bg-amber-600 rounded-full p-2" title="Éditer cette image">
+                  <Edit2 className="w-4 h-4" />
+                </button>
+                <button onClick={() => deleteImage(img.id)} className="bg-red-900 hover:bg-red-800 rounded-full p-2" title="Supprimer">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           ))
         ) : (
           <div className="flex items-center justify-center h-full text-gray-500 text-center">
             <div>
               <Music className="w-12 h-12 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">Importe une image de tablature</p>
+              <p className="text-sm">Importe ou colle une ou plusieurs images de tablature</p>
+              <p className="text-xs mt-1 opacity-70">Elles s'affichent empilées, l'une sous l'autre</p>
             </div>
           </div>
         )}
@@ -1748,36 +1905,32 @@ function ChordThumbnailsPanel({ version, updateVersion }) {
   const canAddMore = thumbnails.length < 5;
   const [editingId, setEditingId] = useState(null);
 
-  const addThumbnail = (dataUrl) => {
-    updateVersion({ chordThumbnails: [...(version.chordThumbnails || []), { id: Date.now().toString() + Math.random().toString(36).slice(2), src: dataUrl }] });
+  const addThumbnails = (dataUrls) => {
+    const current = version.chordThumbnails || [];
+    const room = 5 - current.length;
+    if (room <= 0 || !dataUrls.length) return;
+    const added = dataUrls.slice(0, room).map(src => ({ id: newId(), src }));
+    updateVersion({ chordThumbnails: [...current, ...added] });
   };
 
   const handleFileUpload = (e) => {
     const files = Array.from(e.target.files || []);
-    const remainingSlots = 5 - thumbnails.length;
-    files.slice(0, remainingSlots).forEach(file => {
-      const reader = new FileReader();
-      reader.onload = (event) => addThumbnail(event.target.result);
-      reader.readAsDataURL(file);
-    });
     e.target.value = '';
+    readFilesAsDataUrls(files).then(addThumbnails);
   };
 
   const handlePaste = (e) => {
     if (!canAddMore) return;
-    const items = e.clipboardData?.items || [];
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        const file = item.getAsFile();
-        if (!file) continue;
-        const reader = new FileReader();
-        reader.onload = (event) => addThumbnail(event.target.result);
-        reader.readAsDataURL(file);
-        e.preventDefault();
-        break;
-      }
-    }
+    const files = Array.from(e.clipboardData?.items || [])
+      .filter(i => i.type.startsWith('image/'))
+      .map(i => i.getAsFile())
+      .filter(Boolean);
+    if (!files.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    readFilesAsDataUrls(files).then(addThumbnails);
   };
+
 
   const removeThumbnail = (id) => {
     updateVersion({ chordThumbnails: thumbnails.filter(t => t.id !== id) });
