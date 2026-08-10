@@ -1363,17 +1363,46 @@ function CenterPanel({ version, updateVersion }) {
     return () => clearInterval(timer);
   }, [metronomeActive, bpm]);
 
+  // Hauteur d'affichage des photos empilées : compact / moyen / entier
+  const [imgHeight, setImgHeight] = useState('md');
+  const HEIGHTS = { sm: 'max-h-64', md: 'max-h-96', full: 'max-h-none' };
+
+  const addImages = (dataUrls) => {
+    if (!dataUrls.length) return;
+    const added = dataUrls.map(src => ({ id: newId(), src, x: 0, y: 0, scale: 1 }));
+    updateVersion({ images: [...(version?.images || []), ...added] });
+  };
+
   const handleImageUpload = (e) => {
     const files = Array.from(e.target.files || []);
-    files.forEach(file => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        updateVersion({ images: [...images, { id: Date.now().toString() + Math.random().toString(36).slice(2), src: event.target.result, x: 0, y: 0, scale: 1 }] });
-      };
-      reader.readAsDataURL(file);
-    });
     e.target.value = '';
+    readFilesAsDataUrls(files).then(addImages);
   };
+
+  // Coller depuis le presse-papiers : accepte plusieurs images d'un coup
+  const handlePaste = (e) => {
+    const items = Array.from(e.clipboardData?.items || []);
+    const files = items.filter(i => i.type.startsWith('image/')).map(i => i.getAsFile()).filter(Boolean);
+    if (!files.length) return;
+    e.preventDefault();
+    readFilesAsDataUrls(files).then(addImages);
+  };
+
+  useEffect(() => {
+    const onDocPaste = (e) => handlePaste(e);
+    document.addEventListener('paste', onDocPaste);
+    return () => document.removeEventListener('paste', onDocPaste);
+  }, [version?.id, version?.images]);
+
+  const moveImage = (id, dir) => {
+    const list = [...(version?.images || [])];
+    const i = list.findIndex(img => img.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    updateVersion({ images: list });
+  };
+
 
   const deleteImage = (id) => {
     updateVersion({ images: images.filter(i => i.id !== id) });
