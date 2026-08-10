@@ -121,10 +121,10 @@
               strokeWidth: props.strokeWidth || 2, strokeLinecap: 'round', strokeLinejoin: 'round',
               className: props.className, style: props.style, onClick: props.onClick,
             };
-            var children = (node || []).map(function (child, i) {
-              var tag = child[0];
-              var childProps = Object.assign({ key: i }, child[1] || {});
-              return React.createElement(tag, childProps);
+            // node = ["svg", attrs, children] (format lucide UMD)
+            var raw = (node && node[2]) || [];
+            var children = raw.map(function (child, i) {
+              return React.createElement(child[0], Object.assign({ key: i }, child[1] || {}));
             });
             return React.createElement('svg', attrs, children);
           };
