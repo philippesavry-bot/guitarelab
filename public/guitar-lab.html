@@ -1262,17 +1262,6 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
             onUpdateSong={onUpdateSong}
           />
 
-          <select
-            value={version.id}
-            onChange={(e) => onSelectVersion(e.target.value)}
-            className="px-2 py-2 bg-gray-700 border border-gray-600 rounded text-xs focus:outline-none focus:border-amber-500"
-          >
-            {song.versions.map(v => (
-              <option key={v.id} value={v.id}>
-                {v.label}
-              </option>
-            ))}
-          </select>
         </div>
       </div>
 
