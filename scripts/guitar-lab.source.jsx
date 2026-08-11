@@ -1109,6 +1109,14 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
             <span>{version.key}</span>
           </div>
 
+          <button
+            onClick={() => setPerformance(true)}
+            className="px-3 py-2 bg-amber-600 hover:bg-amber-500 rounded transition text-sm font-semibold flex items-center gap-1"
+            title="Mode prestation : plein écran, photos qui défilent"
+          >
+            🎤 Prestation
+          </button>
+
           <ClassificationPicker
             song={song}
             options={classificationOptions}
@@ -1119,6 +1127,11 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
 
         </div>
       </div>
+
+      {performance && (
+        <PerformanceMode song={song} version={version} onClose={() => setPerformance(false)} />
+      )}
+
 
       <div className="flex-1 flex overflow-hidden gap-0.5 bg-gray-900 p-0.5 relative">
         {isCompact && !leftCollapsed && (
