@@ -1039,6 +1039,8 @@ function ClassificationPicker({ song, options, onAddOption, onRemoveOption, onUp
 function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVersion, onUpdateSong, classificationOptions = [], onAddClassificationOption, onRemoveClassificationOption }) {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [performance, setPerformance] = useState(false);
+
 
   // Mode compact (tablette/écran étroit) : les bandeaux passent en volets superposés au lieu d'être côte à côte
   const [isCompact, setIsCompact] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 1080);
