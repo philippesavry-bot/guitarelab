@@ -511,7 +511,7 @@ export default function GuitarApp() {
                   </div>
                 </div>
               ) : groupBy === 'none' ? (
-                <div className={`p-4 ${viewMode === 'detailed' ? 'grid grid-cols-1 gap-3' : 'space-y-1'}`}>
+                <div className={`p-4 ${viewMode === 'detailed' ? 'grid grid-cols-1 gap-3' : viewMode === 'tiles' ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2' : 'space-y-1'}`}>
                   {sortedSongs.map(song => (
                     <SongItem
                       key={song.id}
