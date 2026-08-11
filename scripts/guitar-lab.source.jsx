@@ -444,18 +444,25 @@ export default function GuitarApp() {
                     </div>
                     <div>
                       <label className="text-xs text-gray-500 block mb-2">Affichage :</label>
-                      <div className="flex gap-2">
+                      <div className="flex gap-1">
                         <button
                           onClick={() => setViewMode('detailed')}
                           className={`flex-1 px-2 py-2 rounded text-xs font-semibold transition ${viewMode === 'detailed' ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
                         >
-                          📇 Détaillé
+                          📇
                         </button>
                         <button
                           onClick={() => setViewMode('compact')}
                           className={`flex-1 px-2 py-2 rounded text-xs font-semibold transition ${viewMode === 'compact' ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
                         >
-                          📋 Compact
+                          📋
+                        </button>
+                        <button
+                          onClick={() => setViewMode('tiles')}
+                          className={`flex-1 px-2 py-2 rounded text-xs font-semibold transition ${viewMode === 'tiles' ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+                          title="Petites tuiles"
+                        >
+                          🀫
                         </button>
                       </div>
                     </div>
