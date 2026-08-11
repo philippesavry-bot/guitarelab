@@ -444,18 +444,25 @@ export default function GuitarApp() {
                     </div>
                     <div>
                       <label className="text-xs text-gray-500 block mb-2">Affichage :</label>
-                      <div className="flex gap-2">
+                      <div className="flex gap-1">
                         <button
                           onClick={() => setViewMode('detailed')}
                           className={`flex-1 px-2 py-2 rounded text-xs font-semibold transition ${viewMode === 'detailed' ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
                         >
-                          📇 Détaillé
+                          📇
                         </button>
                         <button
                           onClick={() => setViewMode('compact')}
                           className={`flex-1 px-2 py-2 rounded text-xs font-semibold transition ${viewMode === 'compact' ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
                         >
-                          📋 Compact
+                          📋
+                        </button>
+                        <button
+                          onClick={() => setViewMode('tiles')}
+                          className={`flex-1 px-2 py-2 rounded text-xs font-semibold transition ${viewMode === 'tiles' ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+                          title="Petites tuiles"
+                        >
+                          🀫
                         </button>
                       </div>
                     </div>
@@ -504,7 +511,7 @@ export default function GuitarApp() {
                   </div>
                 </div>
               ) : groupBy === 'none' ? (
-                <div className={`p-4 ${viewMode === 'detailed' ? 'grid grid-cols-1 gap-3' : 'space-y-1'}`}>
+                <div className={`p-4 ${viewMode === 'detailed' ? 'grid grid-cols-1 gap-3' : viewMode === 'tiles' ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2' : 'space-y-1'}`}>
                   {sortedSongs.map(song => (
                     <SongItem
                       key={song.id}
@@ -536,7 +543,7 @@ export default function GuitarApp() {
                         {groupKey} <span className="text-xs text-gray-500 ml-1">({groupSongs.length})</span>
                       </button>
                       {expandedGroups[groupKey] && (
-                        <div className={`bg-gray-800 border border-t-0 border-gray-600 rounded-b-lg overflow-hidden ${viewMode === 'detailed' ? 'grid grid-cols-1 gap-2 p-3' : 'space-y-0.5 p-2'}`}>
+                        <div className={`bg-gray-800 border border-t-0 border-gray-600 rounded-b-lg overflow-hidden ${viewMode === 'detailed' ? 'grid grid-cols-1 gap-2 p-3' : viewMode === 'tiles' ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 p-2' : 'space-y-0.5 p-2'}`}>
                           {groupSongs.map(song => (
                             <SongItem
                               key={song.id}
@@ -648,6 +655,51 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
     onUpdate(editData);
     setIsEditing(false);
   };
+
+  if (viewMode === 'tiles') {
+    return (
+      <>
+        <div
+          onClick={onSelect}
+          className={`relative p-2 rounded-lg border transition cursor-pointer overflow-hidden ${
+            isSelected ? 'border-amber-500 bg-amber-500/15' : 'border-gray-600 bg-gray-750 hover:bg-gray-700'
+          }`}
+        >
+          <div className="flex items-start justify-between gap-1 mb-1">
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
+              className="hover:opacity-75 transition flex-shrink-0"
+            >
+              <Star className={`w-3.5 h-3.5 ${song.isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-500'}`} />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              className="p-0.5 hover:bg-red-900 rounded transition flex-shrink-0"
+            >
+              <Trash2 className="w-3 h-3 text-red-400" />
+            </button>
+          </div>
+          <h3 className="font-bold text-xs leading-tight line-clamp-2 mb-0.5 min-h-[2rem]">{song.title}</h3>
+          <p className="text-[10px] text-gray-400 truncate mb-1.5">{song.artist}</p>
+          <div className="w-full bg-gray-600 rounded-full h-1 mb-1">
+            <div className="bg-amber-500 h-full rounded-full" style={{ width: `${song.progress}%` }} />
+          </div>
+          <div className="flex items-center justify-between text-[10px] text-gray-400">
+            <span>{song.progress}%</span>
+            <span>{new Date(song.updatedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}</span>
+          </div>
+        </div>
+        {isEditing && (
+          <SongEditModal
+            song={editData}
+            onChange={setEditData}
+            onSave={saveEdit}
+            onCancel={() => { setEditData(song); setIsEditing(false); }}
+          />
+        )}
+      </>
+    );
+  }
 
   if (viewMode === 'compact') {
     return (
