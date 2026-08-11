@@ -656,6 +656,51 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
     setIsEditing(false);
   };
 
+  if (viewMode === 'tiles') {
+    return (
+      <>
+        <div
+          onClick={onSelect}
+          className={`relative p-2 rounded-lg border transition cursor-pointer overflow-hidden ${
+            isSelected ? 'border-amber-500 bg-amber-500/15' : 'border-gray-600 bg-gray-750 hover:bg-gray-700'
+          }`}
+        >
+          <div className="flex items-start justify-between gap-1 mb-1">
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
+              className="hover:opacity-75 transition flex-shrink-0"
+            >
+              <Star className={`w-3.5 h-3.5 ${song.isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-500'}`} />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              className="p-0.5 hover:bg-red-900 rounded transition flex-shrink-0"
+            >
+              <Trash2 className="w-3 h-3 text-red-400" />
+            </button>
+          </div>
+          <h3 className="font-bold text-xs leading-tight line-clamp-2 mb-0.5 min-h-[2rem]">{song.title}</h3>
+          <p className="text-[10px] text-gray-400 truncate mb-1.5">{song.artist}</p>
+          <div className="w-full bg-gray-600 rounded-full h-1 mb-1">
+            <div className="bg-amber-500 h-full rounded-full" style={{ width: `${song.progress}%` }} />
+          </div>
+          <div className="flex items-center justify-between text-[10px] text-gray-400">
+            <span>{song.progress}%</span>
+            <span>{new Date(song.updatedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}</span>
+          </div>
+        </div>
+        {isEditing && (
+          <SongEditModal
+            song={editData}
+            onChange={setEditData}
+            onSave={saveEdit}
+            onCancel={() => { setEditData(song); setIsEditing(false); }}
+          />
+        )}
+      </>
+    );
+  }
+
   if (viewMode === 'compact') {
     return (
       <div className={`flex items-center gap-2 px-3 py-2 rounded transition ${isSelected ? 'bg-amber-600 text-white' : 'bg-gray-700 hover:bg-gray-650 text-gray-100'}`}>
