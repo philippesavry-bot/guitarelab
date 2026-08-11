@@ -543,7 +543,7 @@ export default function GuitarApp() {
                         {groupKey} <span className="text-xs text-gray-500 ml-1">({groupSongs.length})</span>
                       </button>
                       {expandedGroups[groupKey] && (
-                        <div className={`bg-gray-800 border border-t-0 border-gray-600 rounded-b-lg overflow-hidden ${viewMode === 'detailed' ? 'grid grid-cols-1 gap-2 p-3' : 'space-y-0.5 p-2'}`}>
+                        <div className={`bg-gray-800 border border-t-0 border-gray-600 rounded-b-lg overflow-hidden ${viewMode === 'detailed' ? 'grid grid-cols-1 gap-2 p-3' : viewMode === 'tiles' ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 p-2' : 'space-y-0.5 p-2'}`}>
                           {groupSongs.map(song => (
                             <SongItem
                               key={song.id}
