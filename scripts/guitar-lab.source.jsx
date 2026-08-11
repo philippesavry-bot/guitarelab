@@ -1238,14 +1238,15 @@ function SectionBuilder({ section, index, version, updateVersion }) {
         >
           {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
         </button>
-        <input
-          type="text"
-          list="section-name-suggestions"
+        <select
           value={section.section}
           onChange={(e) => updateSection({ section: e.target.value })}
-          placeholder="Intro, Couplet..."
-          className={`w-20 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-[11px] font-semibold focus:outline-none focus:border-amber-500 ${style.text}`}
-        />
+          className={`w-[5.5rem] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-[11px] font-semibold focus:outline-none focus:border-amber-500 ${style.text}`}
+        >
+          {SECTION_NAME_SUGGESTIONS.map((name) => (
+            <option key={name} value={name}>{name}</option>
+          ))}
+        </select>
         <div className="flex items-center gap-0.5">
           <span className="text-gray-400 text-[9px] font-semibold">L</span>
           <input
