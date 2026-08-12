@@ -1042,21 +1042,32 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
   const [performance, setPerformance] = useState(false);
 
 
-  // Mode compact (tablette/écran étroit) : les bandeaux passent en volets superposés au lieu d'être côte à côte
-  const [isCompact, setIsCompact] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 1080);
+  // Mode compact (téléphone) : tous les panneaux en volets superposés
+  // Mode étroit (tablette verticale) : la structure reste affichée à gauche des photos, seul le panneau droit passe en volet
+  const [isCompact, setIsCompact] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 700);
+  const [isNarrow, setIsNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 1080);
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 1080px)');
-    const handler = (e) => setIsCompact(e.matches);
-    handler(mq);
-    (mq.addEventListener ? mq.addEventListener('change', handler) : mq.addListener(handler));
-    return () => (mq.removeEventListener ? mq.removeEventListener('change', handler) : mq.removeListener(handler));
+    const mqC = window.matchMedia('(max-width: 700px)');
+    const mqN = window.matchMedia('(max-width: 1080px)');
+    const hC = (e) => setIsCompact(e.matches);
+    const hN = (e) => setIsNarrow(e.matches);
+    hC(mqC); hN(mqN);
+    (mqC.addEventListener ? mqC.addEventListener('change', hC) : mqC.addListener(hC));
+    (mqN.addEventListener ? mqN.addEventListener('change', hN) : mqN.addListener(hN));
+    return () => {
+      (mqC.removeEventListener ? mqC.removeEventListener('change', hC) : mqC.removeListener(hC));
+      (mqN.removeEventListener ? mqN.removeEventListener('change', hN) : mqN.removeListener(hN));
+    };
   }, []);
 
-  // À l'entrée en mode compact, les volets se ferment par défaut ; en sortie, ils reviennent ouverts côte à côte
+  // Volets fermés par défaut quand ils sont superposés
   useEffect(() => {
     setLeftCollapsed(isCompact);
-    setRightCollapsed(isCompact);
   }, [isCompact]);
+  useEffect(() => {
+    setRightCollapsed(isNarrow);
+  }, [isNarrow]);
+
 
   const updateVersion = (updates) => {
     const updatedSong = {
@@ -1139,7 +1150,7 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
         {isCompact && !leftCollapsed && (
           <div className="fixed inset-0 bg-black/60 z-30" onClick={() => setLeftCollapsed(true)} />
         )}
-        {isCompact && !rightCollapsed && (
+        {isNarrow && !rightCollapsed && (
           <div className="fixed inset-0 bg-black/60 z-30" onClick={() => setRightCollapsed(true)} />
         )}
 
@@ -1147,7 +1158,7 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
           className={
             isCompact
               ? `fixed inset-y-0 left-0 z-40 w-72 max-w-[85vw] bg-gray-800 border-r border-gray-700 flex flex-col overflow-hidden transition-transform duration-200 shadow-2xl ${leftCollapsed ? '-translate-x-full' : 'translate-x-0'}`
-              : `bg-gray-800 border border-gray-700 rounded flex flex-col overflow-hidden transition-all duration-200 flex-shrink-0 ${leftCollapsed ? 'w-0 border-0' : 'w-56'}`
+              : `bg-gray-800 border border-gray-700 rounded flex flex-col overflow-hidden transition-all duration-200 flex-shrink-0 ${leftCollapsed ? 'w-0 border-0' : (isNarrow ? 'w-48' : 'w-56')}`
           }
         >
           <LeftPanel version={version} updateVersion={updateVersion} />
@@ -1167,7 +1178,7 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
           <CenterPanel version={version} updateVersion={updateVersion} />
         </div>
 
-        {!isCompact && (
+        {!isNarrow && (
           <button
             onClick={() => setRightCollapsed(!rightCollapsed)}
             className="flex-shrink-0 w-4 self-stretch bg-gray-800 border border-gray-700 rounded hover:bg-gray-700 transition flex items-center justify-center group"
@@ -1179,7 +1190,7 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
 
         <div
           className={
-            isCompact
+            isNarrow
               ? `fixed inset-y-0 right-0 z-40 w-80 max-w-[85vw] bg-gray-800 border-l border-gray-700 flex flex-col overflow-hidden transition-transform duration-200 shadow-2xl ${rightCollapsed ? 'translate-x-full' : 'translate-x-0'}`
               : `bg-gray-800 border border-gray-700 rounded flex flex-col overflow-hidden transition-all duration-200 flex-shrink-0 ${rightCollapsed ? 'w-0 border-0' : 'w-80'}`
           }
@@ -1380,13 +1391,38 @@ function SectionBuilder({ section, index, version, updateVersion }) {
 
   const toggleCollapsed = () => updateSection({ collapsed: !section.collapsed });
 
+  const duplicateSection = () => {
+    const stamp = Date.now().toString();
+    const copy = {
+      ...section,
+      id: stamp,
+      rhythm: (section.rhythm || []).map((r, i) => ({ ...r, id: `${stamp}-r${i}` })),
+      cells: (section.cells || []).map((c, i) => ({ ...c, id: `${stamp}-c${i}` })),
+    };
+    const next = [...version.structure];
+    next.splice(index + 1, 0, copy);
+    updateVersion({ structure: next });
+  };
+
+  const moveSection = (dir) => {
+    const target = index + dir;
+    if (target < 0 || target >= version.structure.length) return;
+    const next = [...version.structure];
+    [next[index], next[target]] = [next[target], next[index]];
+    updateVersion({ structure: next });
+  };
+
+  const removeSection = () => {
+    updateVersion({ structure: version.structure.filter(s => s.id !== section.id) });
+  };
+
   const style = getSectionStyle(section.section);
   const collapsed = !!section.collapsed;
   const rowCount = section.rows || Math.max(1, Math.round(section.cells.length / (section.cols || 1)));
 
   return (
     <div className={`rounded border-l-4 ${style.border} ${style.tint} border border-gray-600 text-xs overflow-hidden`}>
-      <div className="flex items-center gap-1 px-2 py-0.5">
+      <div className="flex items-center gap-1 flex-wrap px-2 py-0.5">
         <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${style.dot}`} />
         <button
           onClick={toggleCollapsed}
@@ -1398,7 +1434,7 @@ function SectionBuilder({ section, index, version, updateVersion }) {
         <select
           value={section.section}
           onChange={(e) => updateSection({ section: e.target.value })}
-          className={`w-[5.5rem] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-[11px] font-semibold focus:outline-none focus:border-amber-500 ${style.text}`}
+          className={`w-[4.75rem] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-[11px] font-semibold focus:outline-none focus:border-amber-500 ${style.text}`}
         >
           {SECTION_NAME_SUGGESTIONS.map((name) => (
             <option key={name} value={name}>{name}</option>
@@ -1435,6 +1471,16 @@ function SectionBuilder({ section, index, version, updateVersion }) {
             {section.cols}×{rowCount}
           </span>
         )}
+        <div className="ml-auto flex items-center gap-0.5 flex-shrink-0">
+          <button onClick={() => moveSection(-1)} disabled={index === 0} title="Déplacer le bloc vers le haut"
+            className="w-4 h-4 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-30 text-[9px] leading-none flex items-center justify-center">↑</button>
+          <button onClick={() => moveSection(1)} disabled={index === version.structure.length - 1} title="Déplacer le bloc vers le bas"
+            className="w-4 h-4 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-30 text-[9px] leading-none flex items-center justify-center">↓</button>
+          <button onClick={duplicateSection} title="Dupliquer le bloc"
+            className="w-4 h-4 rounded bg-gray-700 hover:bg-amber-600 text-[9px] leading-none flex items-center justify-center">⧉</button>
+          <button onClick={removeSection} title="Supprimer le bloc"
+            className="w-4 h-4 rounded bg-gray-700 hover:bg-red-600 text-[9px] leading-none flex items-center justify-center">×</button>
+        </div>
       </div>
 
       {!collapsed && (
@@ -1470,6 +1516,13 @@ function SectionBuilder({ section, index, version, updateVersion }) {
   );
 }
 
+// Réduit la police quand le texte dépasse la largeur de la case
+function fitFontSize(text, base, min, perChar, maxChars) {
+  const len = (text || '').length;
+  if (len <= maxChars) return base;
+  return Math.max(min, base - (len - maxChars) * perChar);
+}
+
 function ChordCell({ cell, onUpdate, onToggleSplit }) {
   return (
     <div className="relative w-10 h-10 bg-gray-900 border border-gray-600 text-xs">
@@ -1479,11 +1532,11 @@ function ChordCell({ cell, onUpdate, onToggleSplit }) {
       {cell.split ? (
         <>
           <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(to top right, transparent calc(50% - 1px), #4b5563 calc(50% - 1px), #4b5563 calc(50% + 1px), transparent calc(50% + 1px))' }} />
-          <input value={cell.top} onChange={(e) => onUpdate({ top: e.target.value })} className="absolute top-0.5 right-0.5 w-4 bg-transparent text-right text-yellow-300 font-bold text-[9px] focus:outline-none" />
-          <input value={cell.bottom} onChange={(e) => onUpdate({ bottom: e.target.value })} className="absolute bottom-0.5 left-0.5 w-4 bg-transparent text-left text-yellow-300 font-bold text-[9px] focus:outline-none" />
+          <input value={cell.top} onChange={(e) => onUpdate({ top: e.target.value })} style={{ fontSize: `${fitFontSize(cell.top, 9, 5.5, 1.2, 3)}px` }} className="absolute top-0.5 right-0.5 w-4.5 bg-transparent text-right text-yellow-300 font-bold leading-none focus:outline-none" />
+          <input value={cell.bottom} onChange={(e) => onUpdate({ bottom: e.target.value })} style={{ fontSize: `${fitFontSize(cell.bottom, 9, 5.5, 1.2, 3)}px` }} className="absolute bottom-0.5 left-0.5 w-4.5 bg-transparent text-left text-yellow-300 font-bold leading-none focus:outline-none" />
         </>
       ) : (
-        <input value={cell.chord} onChange={(e) => onUpdate({ chord: e.target.value })} className="absolute inset-0 w-full h-full bg-transparent text-center text-yellow-300 font-bold text-sm focus:outline-none" />
+        <input value={cell.chord} onChange={(e) => onUpdate({ chord: e.target.value })} style={{ fontSize: `${fitFontSize(cell.chord, 14, 7, 1.6, 3)}px` }} className="absolute inset-0 w-full h-full bg-transparent text-center text-yellow-300 font-bold leading-none focus:outline-none" />
       )}
     </div>
   );
