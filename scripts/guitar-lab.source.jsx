@@ -3642,9 +3642,12 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
         </div>
 
         <div className="flex gap-2 text-xs flex-wrap mb-2">
-          <span className="px-2 py-1 bg-gray-600 rounded">{song.type === 'fingerstyle' ? '🎸 Fingerstyle' : '🎤 À chanter'}</span>
-          <span className="px-2 py-1 bg-gray-600 rounded">{song.family}</span>
+          {song.songType && <span className="px-2 py-1 bg-gray-600 rounded">{song.songType === 'instrumental' ? '🎸 Instrumental' : '🎤 Chanté'}</span>}
+          {song.technique && <span className="px-2 py-1 bg-gray-600 rounded">✋ {song.technique}</span>}
+          {song.language && <span className="px-2 py-1 bg-gray-600 rounded">🌍 {song.language}</span>}
+          {song.style && <span className="px-2 py-1 bg-gray-600 rounded">🎵 {song.style}</span>}
         </div>
+
 
         {song.tags.length > 0 && (
           <div className="flex gap-1 flex-wrap mb-2">
