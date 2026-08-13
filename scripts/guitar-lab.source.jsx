@@ -39,6 +39,51 @@ function getSectionStyle(name) {
   return SECTION_FALLBACK_COLORS[hash % SECTION_FALLBACK_COLORS.length];
 }
 
+// Difficulté du morceau, matérialisée par un médiator coloré (vert / orange / rouge)
+const DIFFICULTY_ORDER = ['easy', 'medium', 'hard'];
+const DIFFICULTY_META = {
+  easy: { label: 'Facile', color: '#22c55e', group: '🟢 Facile' },
+  medium: { label: 'Moyen', color: '#f59e0b', group: '🟠 Moyen' },
+  hard: { label: 'Difficile', color: '#ef4444', group: '🔴 Difficile' },
+};
+function getDifficulty(song) {
+  return DIFFICULTY_ORDER.includes(song?.difficulty) ? song.difficulty : 'medium';
+}
+function nextDifficulty(current) {
+  const i = DIFFICULTY_ORDER.indexOf(getDifficulty({ difficulty: current }));
+  return DIFFICULTY_ORDER[(i + 1) % DIFFICULTY_ORDER.length];
+}
+
+// Médiator de guitare : triangle arrondi, pointe vers le bas
+function PickIcon({ difficulty = 'medium', size = 14, className = '' }) {
+  const meta = DIFFICULTY_META[getDifficulty({ difficulty })];
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} aria-label={meta.label} role="img">
+      <path
+        d="M12 22.5c-3.2-2-8.5-7.4-8.5-13C3.5 6 7.3 3.5 12 3.5S20.5 6 20.5 9.5c0 5.6-5.3 11-8.5 13z"
+        fill={meta.color}
+        stroke="rgba(0,0,0,0.35)"
+        strokeWidth="1"
+      />
+    </svg>
+  );
+}
+
+// Bouton médiator : clic = rotation Facile → Moyen → Difficile
+function DifficultyPick({ difficulty, onChange, size = 14, className = '' }) {
+  const d = getDifficulty({ difficulty });
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onChange && onChange(nextDifficulty(d)); }}
+      className={`flex-shrink-0 hover:opacity-75 transition ${className}`}
+      title={`Difficulté : ${DIFFICULTY_META[d].label} (cliquer pour changer)`}
+    >
+      <PickIcon difficulty={d} size={size} />
+    </button>
+  );
+}
+
 
 // Étiquettes de classement (facile, fingerstyle, chant, anglais...), modifiables à choix multiples par morceau
 const DEFAULT_CLASSIFICATIONS = ['Française facile', 'Anglaise facile', 'À travailler', 'À chanter', 'Fingerstyle'];
@@ -49,6 +94,7 @@ const DEFAULT_SONGS = [
       artist: 'Indochine',
       title: "L'Aventurier",
       classifications: ['Française facile', 'À chanter'],
+      difficulty: 'easy',
       progress: 75,
       isFavorite: true,
       tags: ['années 80', 'guitare acoustique'],
@@ -75,6 +121,7 @@ const DEFAULT_SONGS = [
       artist: 'Pink Floyd',
       title: 'Comfortably Numb',
       classifications: ['Anglaise facile', 'À chanter'],
+      difficulty: 'medium',
       progress: 45,
       isFavorite: false,
       tags: ['rock', 'classique'],
@@ -92,6 +139,7 @@ const DEFAULT_SONGS = [
       artist: 'Pink Floyd',
       title: 'Another Brick in the Wall',
       classifications: ['Anglaise facile', 'À chanter'],
+      difficulty: 'easy',
       progress: 85,
       isFavorite: true,
       tags: ['rock', 'classique', 'éducation'],
@@ -109,6 +157,7 @@ const DEFAULT_SONGS = [
       artist: 'Ben Harper',
       title: 'Burn One Down',
       classifications: ['À travailler', 'Fingerstyle'],
+      difficulty: 'hard',
       progress: 15,
       isFavorite: false,
       tags: ['reggae', 'picking avancé'],
@@ -126,6 +175,7 @@ const DEFAULT_SONGS = [
       artist: 'Indochine',
       title: 'Canción Del Mariachi',
       classifications: ['Française facile', 'Fingerstyle'],
+      difficulty: 'medium',
       progress: 30,
       isFavorite: false,
       tags: ['picking', 'difficile'],
@@ -292,6 +342,12 @@ export default function GuitarApp() {
     if (sortBy === 'progress-desc') return b.progress - a.progress;
     if (sortBy === 'recent') return new Date(b.updatedAt) - new Date(a.updatedAt);
     if (sortBy === 'old') return new Date(a.updatedAt) - new Date(b.updatedAt);
+    if (sortBy === 'difficulty-asc' || sortBy === 'difficulty-desc') {
+      const da = DIFFICULTY_ORDER.indexOf(getDifficulty(a));
+      const db = DIFFICULTY_ORDER.indexOf(getDifficulty(b));
+      if (da !== db) return sortBy === 'difficulty-asc' ? da - db : db - da;
+      return new Date(b.updatedAt) - new Date(a.updatedAt);
+    }
     return 0;
   });
 
@@ -308,6 +364,7 @@ export default function GuitarApp() {
       artist: 'Nouvel artiste',
       title: 'Nouveau morceau',
       classifications: ['À travailler'],
+      difficulty: 'medium',
       progress: 0,
       isFavorite: false,
       tags: [],
@@ -370,6 +427,8 @@ export default function GuitarApp() {
         else if (song.progress >= 30) key = '⏳ En cours (30-70%)';
         else key = '📚 Débutant (0-30%)';
         pushTo(key, song);
+      } else if (groupBy === 'difficulty') {
+        pushTo(DIFFICULTY_META[getDifficulty(song)].group, song);
       }
     });
     return groups;
@@ -425,6 +484,7 @@ export default function GuitarApp() {
                         <option value="artist">🎤 Artiste</option>
                         <option value="classification">🏷️ Classement</option>
                         <option value="progress">📊 Progression</option>
+                        <option value="difficulty">🎸 Difficulté</option>
                         <option value="none">Sans regroupement</option>
                       </select>
                     </div>
@@ -440,6 +500,8 @@ export default function GuitarApp() {
                         <option value="old">📅 Ancien d'abord</option>
                         <option value="progress-desc">📈 Progression (haut→bas)</option>
                         <option value="progress-asc">📉 Progression (bas→haut)</option>
+                        <option value="difficulty-asc">🟢 Difficulté (facile→difficile)</option>
+                        <option value="difficulty-desc">🔴 Difficulté (difficile→facile)</option>
                       </select>
                     </div>
                     <div>
@@ -679,7 +741,10 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
               <Trash2 className="w-3 h-3 text-red-400" />
             </button>
           </div>
-          <h3 className="font-bold text-xs leading-tight line-clamp-2 mb-0.5 min-h-[2rem]">{song.title}</h3>
+          <div className="flex items-start gap-1 mb-0.5 min-h-[2rem]">
+            <DifficultyPick difficulty={song.difficulty} size={12} className="mt-0.5" onChange={(d) => onUpdate({ ...song, difficulty: d })} />
+            <h3 className="font-bold text-xs leading-tight line-clamp-2 flex-1">{song.title}</h3>
+          </div>
           <p className="text-[10px] text-gray-400 truncate mb-1.5">{song.artist}</p>
           <div className="w-full bg-gray-600 rounded-full h-1 mb-1">
             <div className="bg-amber-500 h-full rounded-full" style={{ width: `${song.progress}%` }} />
@@ -707,6 +772,7 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
         <button onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }} className="hover:opacity-75">
           <Star className={`w-4 h-4 ${song.isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-400'}`} />
         </button>
+        <DifficultyPick difficulty={song.difficulty} size={14} onChange={(d) => onUpdate({ ...song, difficulty: d })} />
         <div className="flex-1 min-w-0 cursor-pointer" onClick={onSelect}>
           <div className="text-sm font-semibold truncate">{song.title}</div>
           <div className="text-xs text-gray-300 truncate">{song.artist}</div>
@@ -747,6 +813,7 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
               >
                 <Star className={`w-4 h-4 ${song.isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-500'}`} />
               </button>
+              <DifficultyPick difficulty={song.difficulty} size={15} onChange={(d) => onUpdate({ ...song, difficulty: d })} />
               <h3 className="font-bold truncate text-sm">{song.title}</h3>
             </div>
             <p className="text-xs text-gray-400 truncate">{song.artist}</p>
@@ -849,6 +916,22 @@ function SongEditModal({ song, onChange, onSave, onCancel }) {
         </div>
 
         <div className="p-4 space-y-3">
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">Difficulté</label>
+            <div className="flex gap-2">
+              {DIFFICULTY_ORDER.map(d => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => onChange({ ...song, difficulty: d })}
+                  className={`flex-1 flex items-center justify-center gap-1 px-2 py-2 rounded text-xs font-semibold transition border ${getDifficulty(song) === d ? 'bg-gray-600 border-amber-500' : 'bg-gray-700 border-gray-600 hover:bg-gray-600'}`}
+                >
+                  <PickIcon difficulty={d} size={14} />
+                  {DIFFICULTY_META[d].label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div>
             <label className="text-xs text-gray-400 block mb-1">Titre</label>
             <input
@@ -1110,7 +1193,10 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
           </div>
 
           <div className="text-center flex-1 min-w-0">
-            <h2 className="text-base font-bold truncate">{song.title}</h2>
+            <h2 className="text-base font-bold truncate flex items-center justify-center gap-1.5">
+              <DifficultyPick difficulty={song.difficulty} size={16} onChange={(d) => onUpdateSong({ ...song, difficulty: d })} />
+              <span className="truncate">{song.title}</span>
+            </h2>
             <p className="text-xs text-gray-400 truncate">{song.artist}</p>
           </div>
 
