@@ -94,6 +94,7 @@ const DEFAULT_SONGS = [
       artist: 'Indochine',
       title: "L'Aventurier",
       classifications: ['Française facile', 'À chanter'],
+      difficulty: 'easy',
       progress: 75,
       isFavorite: true,
       tags: ['années 80', 'guitare acoustique'],
@@ -120,6 +121,7 @@ const DEFAULT_SONGS = [
       artist: 'Pink Floyd',
       title: 'Comfortably Numb',
       classifications: ['Anglaise facile', 'À chanter'],
+      difficulty: 'medium',
       progress: 45,
       isFavorite: false,
       tags: ['rock', 'classique'],
@@ -137,6 +139,7 @@ const DEFAULT_SONGS = [
       artist: 'Pink Floyd',
       title: 'Another Brick in the Wall',
       classifications: ['Anglaise facile', 'À chanter'],
+      difficulty: 'easy',
       progress: 85,
       isFavorite: true,
       tags: ['rock', 'classique', 'éducation'],
@@ -154,6 +157,7 @@ const DEFAULT_SONGS = [
       artist: 'Ben Harper',
       title: 'Burn One Down',
       classifications: ['À travailler', 'Fingerstyle'],
+      difficulty: 'hard',
       progress: 15,
       isFavorite: false,
       tags: ['reggae', 'picking avancé'],
@@ -171,6 +175,7 @@ const DEFAULT_SONGS = [
       artist: 'Indochine',
       title: 'Canción Del Mariachi',
       classifications: ['Française facile', 'Fingerstyle'],
+      difficulty: 'medium',
       progress: 30,
       isFavorite: false,
       tags: ['picking', 'difficile'],
@@ -337,6 +342,12 @@ export default function GuitarApp() {
     if (sortBy === 'progress-desc') return b.progress - a.progress;
     if (sortBy === 'recent') return new Date(b.updatedAt) - new Date(a.updatedAt);
     if (sortBy === 'old') return new Date(a.updatedAt) - new Date(b.updatedAt);
+    if (sortBy === 'difficulty-asc' || sortBy === 'difficulty-desc') {
+      const da = DIFFICULTY_ORDER.indexOf(getDifficulty(a));
+      const db = DIFFICULTY_ORDER.indexOf(getDifficulty(b));
+      if (da !== db) return sortBy === 'difficulty-asc' ? da - db : db - da;
+      return new Date(b.updatedAt) - new Date(a.updatedAt);
+    }
     return 0;
   });
 
@@ -353,6 +364,7 @@ export default function GuitarApp() {
       artist: 'Nouvel artiste',
       title: 'Nouveau morceau',
       classifications: ['À travailler'],
+      difficulty: 'hard',
       progress: 0,
       isFavorite: false,
       tags: [],
@@ -415,6 +427,8 @@ export default function GuitarApp() {
         else if (song.progress >= 30) key = '⏳ En cours (30-70%)';
         else key = '📚 Débutant (0-30%)';
         pushTo(key, song);
+      } else if (groupBy === 'difficulty') {
+        pushTo(DIFFICULTY_META[getDifficulty(song)].group, song);
       }
     });
     return groups;
@@ -470,6 +484,7 @@ export default function GuitarApp() {
                         <option value="artist">🎤 Artiste</option>
                         <option value="classification">🏷️ Classement</option>
                         <option value="progress">📊 Progression</option>
+                        <option value="difficulty">🎸 Difficulté</option>
                         <option value="none">Sans regroupement</option>
                       </select>
                     </div>
@@ -485,6 +500,8 @@ export default function GuitarApp() {
                         <option value="old">📅 Ancien d'abord</option>
                         <option value="progress-desc">📈 Progression (haut→bas)</option>
                         <option value="progress-asc">📉 Progression (bas→haut)</option>
+                        <option value="difficulty-asc">🟢 Difficulté (facile→difficile)</option>
+                        <option value="difficulty-desc">🔴 Difficulté (difficile→facile)</option>
                       </select>
                     </div>
                     <div>
