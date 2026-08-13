@@ -88,107 +88,2898 @@ function DifficultyPick({ difficulty, onChange, size = 14, className = '' }) {
 // Étiquettes de classement (facile, fingerstyle, chant, anglais...), modifiables à choix multiples par morceau
 const DEFAULT_CLASSIFICATIONS = ['Française facile', 'Anglaise facile', 'À travailler', 'À chanter', 'Fingerstyle'];
 
-const DEFAULT_SONGS = [
-    {
-      id: '1',
-      artist: 'Indochine',
-      title: "L'Aventurier",
-      classifications: ['Française facile', 'À chanter'],
-      difficulty: 'easy',
-      progress: 75,
-      isFavorite: true,
-      tags: ['années 80', 'guitare acoustique'],
-      youtubeUrls: [{ id: 'y1', url: '' }],
-      versions: [{
-        id: 'v1', label: 'Facile', bpm: 120, capo: 0, key: 'Em',
-        structure: [{
-          id: 's1', section: 'Intro', cols: 4, rows: 1,
-          rhythm: [{ id: 'r1', type: 'down' }, { id: 'r2', type: 'down' }, { id: 'r3', type: 'up' }, { id: 'r4', type: 'mute' }],
-          cells: [
-            { id: 'c1', split: false, chord: 'Am', top: '', bottom: '' },
-            { id: 'c2', split: false, chord: 'Am', top: '', bottom: '' },
-            { id: 'c3', split: false, chord: 'E', top: '', bottom: '' },
-            { id: 'c4', split: false, chord: 'E', top: '', bottom: '' },
-          ],
-        }],
-        images: [], notes: 'Bien travailler le rythme',
-      }],
-      createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: '2',
-      artist: 'Pink Floyd',
-      title: 'Comfortably Numb',
-      classifications: ['Anglaise facile', 'À chanter'],
-      difficulty: 'medium',
-      progress: 45,
-      isFavorite: false,
-      tags: ['rock', 'classique'],
-      youtubeUrls: [{ id: 'y2', url: '' }],
-      versions: [{
-        id: 'v2', label: 'Facile', bpm: 100, capo: 0, key: 'Em',
-        structure: [{ id: 's2', section: 'Couplet', cols: 4, rows: 1, rhythm: [], cells: Array.from({ length: 4 }, (_, i) => ({ id: `c${i}`, split: false, chord: '', top: '', bottom: '' })) }],
-        images: [], notes: '',
-      }],
-      createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: '3',
-      artist: 'Pink Floyd',
-      title: 'Another Brick in the Wall',
-      classifications: ['Anglaise facile', 'À chanter'],
-      difficulty: 'easy',
-      progress: 85,
-      isFavorite: true,
-      tags: ['rock', 'classique', 'éducation'],
-      youtubeUrls: [{ id: 'y3', url: '' }],
-      versions: [{
-        id: 'v3', label: 'Facile', bpm: 95, capo: 0, key: 'Dm',
-        structure: [],
-        images: [], notes: '',
-      }],
-      createdAt: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: '4',
-      artist: 'Ben Harper',
-      title: 'Burn One Down',
-      classifications: ['À travailler', 'Fingerstyle'],
-      difficulty: 'hard',
-      progress: 15,
-      isFavorite: false,
-      tags: ['reggae', 'picking avancé'],
-      youtubeUrls: [{ id: 'y4', url: '' }],
-      versions: [{
-        id: 'v4', label: 'Facile', bpm: 110, capo: 0, key: 'A',
-        structure: [],
-        images: [], notes: '',
-      }],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      id: '5',
-      artist: 'Indochine',
-      title: 'Canción Del Mariachi',
-      classifications: ['Française facile', 'Fingerstyle'],
-      difficulty: 'medium',
-      progress: 30,
-      isFavorite: false,
-      tags: ['picking', 'difficile'],
-      youtubeUrls: [{ id: 'y5', url: '' }],
-      versions: [{
-        id: 'v5', label: 'Facile', bpm: 90, capo: 0, key: 'G',
-        structure: [],
-        images: [], notes: '',
-      }],
-      createdAt: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    },
+const REPERTOIRE = [
+  {
+    "id": "1",
+    "title": "Cendrillon",
+    "artist": "Téléphone",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Rock français",
+    "difficulty": "medium",
+    "progress": 45,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "rock",
+      "80s"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "1-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "1-v",
+        "label": "Facile",
+        "bpm": 140,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "2",
+    "title": "Still Loving You",
+    "artist": "Scorpions",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Power ballad",
+    "difficulty": "medium",
+    "progress": 35,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "ballade",
+      "rock"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "2-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "2-v",
+        "label": "Facile",
+        "bpm": 72,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "3",
+    "title": "Mistral gagnant",
+    "artist": "Renaud",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Chanson française",
+    "difficulty": "easy",
+    "progress": 75,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "nostalgie"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "3-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "3-v",
+        "label": "Facile",
+        "bpm": 90,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "4",
+    "title": "Stairway to Heaven",
+    "artist": "Led Zeppelin",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Rock progressif",
+    "difficulty": "hard",
+    "progress": 45,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "classique rock",
+      "tempo variable"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "4-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "4-v",
+        "label": "Facile",
+        "bpm": 72,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "5",
+    "title": "Bonne idée",
+    "artist": "Jean-Jacques Goldman",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Pop rock",
+    "difficulty": "medium",
+    "progress": 25,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "5-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "5-v",
+        "label": "Facile",
+        "bpm": 120,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "6",
+    "title": "Hey Jude",
+    "artist": "The Beatles",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Pop rock",
+    "difficulty": "easy",
+    "progress": 70,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "classique"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "6-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "6-v",
+        "label": "Facile",
+        "bpm": 72,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "7",
+    "title": "Let It Be",
+    "artist": "The Beatles",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Pop",
+    "difficulty": "easy",
+    "progress": 90,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "classique"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "7-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "7-v",
+        "label": "Facile",
+        "bpm": 72,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "8",
+    "title": "Brothers in Arms",
+    "artist": "Dire Straits",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Rock atmosphérique",
+    "difficulty": "hard",
+    "progress": 30,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "lent",
+      "ambiance"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "8-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "8-v",
+        "label": "Facile",
+        "bpm": 60,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "9",
+    "title": "Dans les yeux d'Émilie",
+    "artist": "Joe Dassin",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Variété française",
+    "difficulty": "easy",
+    "progress": 55,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "9-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "9-v",
+        "label": "Facile",
+        "bpm": 100,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "10",
+    "title": "Je te promets",
+    "artist": "Johnny Hallyday",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Rock variété",
+    "difficulty": "medium",
+    "progress": 85,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "10-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "10-v",
+        "label": "Facile",
+        "bpm": 110,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "11",
+    "title": "Diego (libre dans sa tête)",
+    "artist": "Michel Berger / France Gall",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Variété",
+    "difficulty": "medium",
+    "progress": 80,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "à vérifier artiste"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "11-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "11-v",
+        "label": "Facile",
+        "bpm": 95,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "12",
+    "title": "Rosie",
+    "artist": "Francis Cabrel",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Folk chanson",
+    "difficulty": "medium",
+    "progress": 55,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "12-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "12-v",
+        "label": "Facile",
+        "bpm": 100,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "13",
+    "title": "Space Oddity",
+    "artist": "David Bowie",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Rock/Folk",
+    "difficulty": "medium",
+    "progress": 85,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "tempo variable"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "13-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "13-v",
+        "label": "Facile",
+        "bpm": 140,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "14",
+    "title": "Ces idées-là",
+    "artist": "Louis Bertignac (Detroit)",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Rock français",
+    "difficulty": "medium",
+    "progress": 70,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "14-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "14-v",
+        "label": "Facile",
+        "bpm": 120,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "15",
+    "title": "Puisque tu pars",
+    "artist": "Jean-Jacques Goldman",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Pop rock",
+    "difficulty": "medium",
+    "progress": 70,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "15-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "15-v",
+        "label": "Facile",
+        "bpm": 120,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "16",
+    "title": "Knockin' on Heaven's Door",
+    "artist": "Guns N' Roses",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Rock",
+    "difficulty": "easy",
+    "progress": 95,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "reprise"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "16-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "16-v",
+        "label": "Facile",
+        "bpm": 140,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "17",
+    "title": "Creep",
+    "artist": "Radiohead",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Alternative rock",
+    "difficulty": "easy",
+    "progress": 35,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "17-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "17-v",
+        "label": "Facile",
+        "bpm": 92,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "18",
+    "title": "Killing Me Softly",
+    "artist": "Roberta Flack",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Soul",
+    "difficulty": "medium",
+    "progress": 20,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "18-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "18-v",
+        "label": "Facile",
+        "bpm": 80,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "19",
+    "title": "Comme toi",
+    "artist": "Jean-Jacques Goldman",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Pop",
+    "difficulty": "easy",
+    "progress": 50,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "19-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "19-v",
+        "label": "Facile",
+        "bpm": 120,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "20",
+    "title": "Pas toi",
+    "artist": "Jean-Jacques Goldman",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Pop rock",
+    "difficulty": "medium",
+    "progress": 15,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "20-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "20-v",
+        "label": "Facile",
+        "bpm": 130,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "21",
+    "title": "Mrs. Robinson",
+    "artist": "Simon & Garfunkel",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Folk rock",
+    "difficulty": "medium",
+    "progress": 15,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "21-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "21-v",
+        "label": "Facile",
+        "bpm": 95,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "22",
+    "title": "The Sound of Silence",
+    "artist": "Simon & Garfunkel",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Folk",
+    "difficulty": "medium",
+    "progress": 30,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "classique"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "22-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "22-v",
+        "label": "Facile",
+        "bpm": 106,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "23",
+    "title": "Toute la musique que j'aime",
+    "artist": "Johnny Hallyday",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Rock variété",
+    "difficulty": "medium",
+    "progress": 40,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "23-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "23-v",
+        "label": "Facile",
+        "bpm": 120,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "24",
+    "title": "Gabrielle",
+    "artist": "Johnny Hallyday",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Rock",
+    "difficulty": "hard",
+    "progress": 25,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "à vérifier titre exact"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "24-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "24-v",
+        "label": "Facile",
+        "bpm": 130,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "25",
+    "title": "Que je t'aime",
+    "artist": "Johnny Hallyday",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Ballade rock",
+    "difficulty": "medium",
+    "progress": 60,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "25-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "25-v",
+        "label": "Facile",
+        "bpm": 75,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "26",
+    "title": "I Wish It Would Rain",
+    "artist": "The Temptations",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Motown soul",
+    "difficulty": "medium",
+    "progress": 75,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "à vérifier artiste"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "26-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "26-v",
+        "label": "Facile",
+        "bpm": 90,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "27",
+    "title": "Diamonds & Rust",
+    "artist": "Joan Baez",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Folk",
+    "difficulty": "hard",
+    "progress": 35,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "27-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "27-v",
+        "label": "Facile",
+        "bpm": 110,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "28",
+    "title": "Dust in the Wind",
+    "artist": "Kansas",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Folk rock",
+    "difficulty": "medium",
+    "progress": 50,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "arpèges"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "28-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "28-v",
+        "label": "Facile",
+        "bpm": 78,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "29",
+    "title": "Your Song",
+    "artist": "Elton John",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Pop ballad",
+    "difficulty": "medium",
+    "progress": 50,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "29-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "29-v",
+        "label": "Facile",
+        "bpm": 80,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "30",
+    "title": "No Woman No Cry",
+    "artist": "Bob Marley",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Reggae",
+    "difficulty": "easy",
+    "progress": 85,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "30-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "30-v",
+        "label": "Facile",
+        "bpm": 78,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "31",
+    "title": "Blowin' in the Wind",
+    "artist": "Bob Dylan",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Folk",
+    "difficulty": "easy",
+    "progress": 75,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "classique"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "31-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "31-v",
+        "label": "Facile",
+        "bpm": 100,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "32",
+    "title": "Wish You Were Here",
+    "artist": "Pink Floyd",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Rock",
+    "difficulty": "medium",
+    "progress": 15,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "classique"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "32-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "32-v",
+        "label": "Facile",
+        "bpm": 65,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "33",
+    "title": "Je marche seul",
+    "artist": "Jean-Jacques Goldman",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Rock",
+    "difficulty": "medium",
+    "progress": 10,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "33-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "33-v",
+        "label": "Facile",
+        "bpm": 140,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "34",
+    "title": "Wonderful Tonight",
+    "artist": "Eric Clapton",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Ballade rock",
+    "difficulty": "medium",
+    "progress": 30,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "34-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "34-v",
+        "label": "Facile",
+        "bpm": 72,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "35",
+    "title": "La cabane du pêcheur",
+    "artist": "Francis Cabrel",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Chanson folk",
+    "difficulty": "medium",
+    "progress": 10,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "35-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "35-v",
+        "label": "Facile",
+        "bpm": 100,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "36",
+    "title": "Sarbacane",
+    "artist": "Francis Cabrel",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Chanson",
+    "difficulty": "medium",
+    "progress": 35,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "36-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "36-v",
+        "label": "Facile",
+        "bpm": 90,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "37",
+    "title": "Wild World",
+    "artist": "Cat Stevens",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Folk pop",
+    "difficulty": "easy",
+    "progress": 10,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "37-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "37-v",
+        "label": "Facile",
+        "bpm": 140,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "38",
+    "title": "Father and Son",
+    "artist": "Cat Stevens",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Folk",
+    "difficulty": "easy",
+    "progress": 60,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "38-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "38-v",
+        "label": "Facile",
+        "bpm": 90,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "39",
+    "title": "Words",
+    "artist": "F.R. David",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Pop 80s",
+    "difficulty": "easy",
+    "progress": 60,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "à vérifier artiste - ambigu"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "39-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "39-v",
+        "label": "Facile",
+        "bpm": 120,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "40",
+    "title": "What a Feeling (Flashdance)",
+    "artist": "Irene Cara",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Pop 80s",
+    "difficulty": "medium",
+    "progress": 20,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "40-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "40-v",
+        "label": "Facile",
+        "bpm": 130,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "41",
+    "title": "I Just Called to Say I Love You",
+    "artist": "Stevie Wonder",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Pop soul",
+    "difficulty": "easy",
+    "progress": 70,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "41-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "41-v",
+        "label": "Facile",
+        "bpm": 85,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "42",
+    "title": "Seras-tu là ?",
+    "artist": "Michel Berger",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Chanson",
+    "difficulty": "medium",
+    "progress": 85,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "à vérifier"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "42-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "42-v",
+        "label": "Facile",
+        "bpm": 80,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "43",
+    "title": "House of the Rising Sun",
+    "artist": "The Animals",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Folk rock",
+    "difficulty": "medium",
+    "progress": 75,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "classique",
+      "arpèges possibles"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "43-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "43-v",
+        "label": "Facile",
+        "bpm": 115,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "44",
+    "title": "Fly Me to the Moon",
+    "artist": "Frank Sinatra",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Jazz standard",
+    "difficulty": "medium",
+    "progress": 20,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "swing"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "44-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "44-v",
+        "label": "Facile",
+        "bpm": 120,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "45",
+    "title": "We Are the World",
+    "artist": "USA for Africa",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Pop",
+    "difficulty": "easy",
+    "progress": 70,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "45-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "45-v",
+        "label": "Facile",
+        "bpm": 90,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "46",
+    "title": "Stand by Me",
+    "artist": "Ben E. King",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Soul",
+    "difficulty": "easy",
+    "progress": 90,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "classique"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "46-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "46-v",
+        "label": "Facile",
+        "bpm": 118,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "47",
+    "title": "Every Breath You Take",
+    "artist": "The Police",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Rock pop",
+    "difficulty": "medium",
+    "progress": 50,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "47-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "47-v",
+        "label": "Facile",
+        "bpm": 117,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "48",
+    "title": "Hallelujah",
+    "artist": "Leonard Cohen",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Folk ballad",
+    "difficulty": "easy",
+    "progress": 90,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "classique",
+      "à confirmer si Alleluia = Hallelujah"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "48-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "48-v",
+        "label": "Facile",
+        "bpm": 76,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "49",
+    "title": "Forever Young",
+    "artist": "Alphaville",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Synth pop",
+    "difficulty": "easy",
+    "progress": 90,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "49-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "49-v",
+        "label": "Facile",
+        "bpm": 120,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "50",
+    "title": "Canon in D",
+    "artist": "Pachelbel",
+    "language": "Autre",
+    "songType": "instrumental",
+    "technique": "fingerstyle",
+    "style": "Classique",
+    "difficulty": "hard",
+    "progress": 40,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "arpèges",
+      "progression harmonique"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "50-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "50-v",
+        "label": "Facile",
+        "bpm": 90,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "51",
+    "title": "Can't Help Falling in Love",
+    "artist": "Elvis Presley",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Ballade",
+    "difficulty": "easy",
+    "progress": 75,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "classique"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "51-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "51-v",
+        "label": "Facile",
+        "bpm": 85,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "52",
+    "title": "A Whiter Shade of Pale",
+    "artist": "Procol Harum",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Rock/baroque pop",
+    "difficulty": "medium",
+    "progress": 20,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "52-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "52-v",
+        "label": "Facile",
+        "bpm": 74,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "53",
+    "title": "Perfect",
+    "artist": "Ed Sheeran",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Pop ballad",
+    "difficulty": "medium",
+    "progress": 80,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "53-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "53-v",
+        "label": "Facile",
+        "bpm": 63,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "54",
+    "title": "La corrida",
+    "artist": "Francis Cabrel",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Chanson",
+    "difficulty": "medium",
+    "progress": 65,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "54-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "54-v",
+        "label": "Facile",
+        "bpm": 110,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "55",
+    "title": "It's a Heartache",
+    "artist": "Bonnie Tyler",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Pop rock",
+    "difficulty": "easy",
+    "progress": 95,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "55-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "55-v",
+        "label": "Facile",
+        "bpm": 100,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "56",
+    "title": "Nothing Else Matters",
+    "artist": "Metallica",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Metal ballad",
+    "difficulty": "hard",
+    "progress": 35,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "intro arpégée"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "56-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "56-v",
+        "label": "Facile",
+        "bpm": 60,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "57",
+    "title": "Hélène",
+    "artist": "Roch Voisine",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Pop variété",
+    "difficulty": "medium",
+    "progress": 85,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "57-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "57-v",
+        "label": "Facile",
+        "bpm": 120,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "58",
+    "title": "Tous les cris les S.O.S.",
+    "artist": "Daniel Balavoine",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Rock variété",
+    "difficulty": "medium",
+    "progress": 75,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "58-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "58-v",
+        "label": "Facile",
+        "bpm": 130,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "59",
+    "title": "J'ai demandé à la lune",
+    "artist": "Indochine",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Rock pop",
+    "difficulty": "medium",
+    "progress": 55,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "59-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "59-v",
+        "label": "Facile",
+        "bpm": 140,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "60",
+    "title": "Station 13",
+    "artist": "Indochine",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Rock",
+    "difficulty": "medium",
+    "progress": 20,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "à vérifier bpm"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "60-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "60-v",
+        "label": "Facile",
+        "bpm": 130,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "61",
+    "title": "The Winner Takes It All",
+    "artist": "ABBA",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Pop ballad",
+    "difficulty": "medium",
+    "progress": 65,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "61-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "61-v",
+        "label": "Facile",
+        "bpm": 80,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "62",
+    "title": "Le Sud",
+    "artist": "Nino Ferrer",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Chanson pop",
+    "difficulty": "easy",
+    "progress": 85,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "62-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "62-v",
+        "label": "Facile",
+        "bpm": 110,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "63",
+    "title": "Losing My Religion",
+    "artist": "R.E.M.",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Alternative rock",
+    "difficulty": "medium",
+    "progress": 55,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "riff mandoline original"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "63-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "63-v",
+        "label": "Facile",
+        "bpm": 124,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "64",
+    "title": "Tears in Heaven",
+    "artist": "Eric Clapton",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Ballade folk",
+    "difficulty": "medium",
+    "progress": 50,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "64-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "64-v",
+        "label": "Facile",
+        "bpm": 80,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "65",
+    "title": "Quelque chose de Tennessee",
+    "artist": "Johnny Hallyday",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Ballade rock",
+    "difficulty": "medium",
+    "progress": 50,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "65-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "65-v",
+        "label": "Facile",
+        "bpm": 75,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "66",
+    "title": "Don't Cry",
+    "artist": "Guns N' Roses",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Rock ballad",
+    "difficulty": "medium",
+    "progress": 30,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "66-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "66-v",
+        "label": "Facile",
+        "bpm": 70,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "67",
+    "title": "Je te donne",
+    "artist": "Jean-Jacques Goldman",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Pop rock",
+    "difficulty": "medium",
+    "progress": 55,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "67-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "67-v",
+        "label": "Facile",
+        "bpm": 120,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "68",
+    "title": "Nos célébrations",
+    "artist": "Indochine",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Rock pop",
+    "difficulty": "medium",
+    "progress": 80,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "68-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "68-v",
+        "label": "Facile",
+        "bpm": 120,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "69",
+    "title": "L'amour ou la tendresse",
+    "artist": "Eddy de Pretto",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Pop urbain",
+    "difficulty": "medium",
+    "progress": 75,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "titre à confirmer"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "69-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "69-v",
+        "label": "Facile",
+        "bpm": 90,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "70",
+    "title": "Mon fils ma bataille",
+    "artist": "Daniel Balavoine",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Variété rock",
+    "difficulty": "medium",
+    "progress": 75,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "70-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "70-v",
+        "label": "Facile",
+        "bpm": 110,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "71",
+    "title": "Couleur menthe à l'eau",
+    "artist": "Eddy Mitchell",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Variété rock'n'roll",
+    "difficulty": "easy",
+    "progress": 85,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "71-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "71-v",
+        "label": "Facile",
+        "bpm": 110,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "72",
+    "title": "La route de Memphis",
+    "artist": "Eddy Mitchell",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Rock'n'roll",
+    "difficulty": "easy",
+    "progress": 85,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "72-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "72-v",
+        "label": "Facile",
+        "bpm": 140,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "73",
+    "title": "La dernière séance",
+    "artist": "Eddy Mitchell",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Variété",
+    "difficulty": "easy",
+    "progress": 75,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "73-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "73-v",
+        "label": "Facile",
+        "bpm": 110,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "74",
+    "title": "Mad World",
+    "artist": "Gary Jules",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Ballade synth pop (reprise)",
+    "difficulty": "easy",
+    "progress": 70,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "74-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "74-v",
+        "label": "Facile",
+        "bpm": 85,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "75",
+    "title": "Wonderwall",
+    "artist": "Oasis",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Britpop",
+    "difficulty": "easy",
+    "progress": 90,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "classique"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "75-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "75-v",
+        "label": "Facile",
+        "bpm": 87,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "76",
+    "title": "Prayer in C",
+    "artist": "Lilly Wood & The Prick",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Folk pop",
+    "difficulty": "easy",
+    "progress": 50,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "76-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "76-v",
+        "label": "Facile",
+        "bpm": 100,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "77",
+    "title": "Against All Odds",
+    "artist": "Phil Collins",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Pop ballad",
+    "difficulty": "medium",
+    "progress": 80,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "77-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "77-v",
+        "label": "Facile",
+        "bpm": 65,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "78",
+    "title": "Unchained Melody",
+    "artist": "The Righteous Brothers",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Ballade soul",
+    "difficulty": "medium",
+    "progress": 70,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "78-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "78-v",
+        "label": "Facile",
+        "bpm": 104,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "79",
+    "title": "Bad Habits",
+    "artist": "Ed Sheeran",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Pop dance",
+    "difficulty": "medium",
+    "progress": 30,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "79-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "79-v",
+        "label": "Facile",
+        "bpm": 126,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "80",
+    "title": "La Isla Bonita",
+    "artist": "Madonna",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Pop latin",
+    "difficulty": "hard",
+    "progress": 50,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "80-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "80-v",
+        "label": "Facile",
+        "bpm": 100,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "81",
+    "title": "Unintended",
+    "artist": "Muse",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Rock alternatif ballade",
+    "difficulty": "medium",
+    "progress": 55,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "arpèges classiques"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "81-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "81-v",
+        "label": "Facile",
+        "bpm": 140,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "82",
+    "title": "Chi Mai",
+    "artist": "Ennio Morricone",
+    "language": "Autre",
+    "songType": "instrumental",
+    "technique": "fingerstyle",
+    "style": "Classique cinéma",
+    "difficulty": "hard",
+    "progress": 65,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "bande originale"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "82-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "82-v",
+        "label": "Facile",
+        "bpm": 90,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "83",
+    "title": "Layla (version acoustique)",
+    "artist": "Eric Clapton",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Blues rock unplugged",
+    "difficulty": "hard",
+    "progress": 35,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "83-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "83-v",
+        "label": "Facile",
+        "bpm": 110,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "84",
+    "title": "Enjoy the Silence",
+    "artist": "Depeche Mode",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Synth pop (reprise acoustique)",
+    "difficulty": "medium",
+    "progress": 50,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "84-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "84-v",
+        "label": "Facile",
+        "bpm": 120,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "85",
+    "title": "Photograph",
+    "artist": "Ed Sheeran",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Pop ballad",
+    "difficulty": "medium",
+    "progress": 35,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "85-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "85-v",
+        "label": "Facile",
+        "bpm": 108,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "86",
+    "title": "Let Her Go",
+    "artist": "Passenger",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "Folk pop",
+    "difficulty": "medium",
+    "progress": 30,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "86-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "86-v",
+        "label": "Facile",
+        "bpm": 75,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "87",
+    "title": "Emmenez-moi",
+    "artist": "Charles Aznavour",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Chanson française",
+    "difficulty": "medium",
+    "progress": 75,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [
+      "classique"
+    ],
+    "youtubeUrls": [
+      {
+        "id": "87-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "87-v",
+        "label": "Facile",
+        "bpm": 130,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "88",
+    "title": "The Drugs Don't Work",
+    "artist": "The Verve",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "battement",
+    "style": "Britpop ballade",
+    "difficulty": "easy",
+    "progress": 85,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "youtubeUrls": [
+      {
+        "id": "88-y",
+        "url": ""
+      }
+    ],
+    "versions": [
+      {
+        "id": "88-v",
+        "label": "Facile",
+        "bpm": 75,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  }
 ];
+
+const LIBRARY_SEED_DATE = new Date('2026-08-13T06:00:00.000Z').toISOString();
+const DEFAULT_SONGS = REPERTOIRE.map(s => ({ ...s, createdAt: LIBRARY_SEED_DATE, updatedAt: LIBRARY_SEED_DATE }));
 
 const SONGS_STORAGE_KEY = 'guitar-lab:songs';
 const CLASSIFICATIONS_STORAGE_KEY = 'guitar-lab:classifications';
