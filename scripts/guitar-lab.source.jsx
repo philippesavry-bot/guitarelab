@@ -39,6 +39,51 @@ function getSectionStyle(name) {
   return SECTION_FALLBACK_COLORS[hash % SECTION_FALLBACK_COLORS.length];
 }
 
+// Difficulté du morceau, matérialisée par un médiator coloré (vert / orange / rouge)
+const DIFFICULTY_ORDER = ['easy', 'medium', 'hard'];
+const DIFFICULTY_META = {
+  easy: { label: 'Facile', color: '#22c55e', group: '🟢 Facile' },
+  medium: { label: 'Moyen', color: '#f59e0b', group: '🟠 Moyen' },
+  hard: { label: 'Difficile', color: '#ef4444', group: '🔴 Difficile' },
+};
+function getDifficulty(song) {
+  return DIFFICULTY_ORDER.includes(song?.difficulty) ? song.difficulty : 'medium';
+}
+function nextDifficulty(current) {
+  const i = DIFFICULTY_ORDER.indexOf(getDifficulty({ difficulty: current }));
+  return DIFFICULTY_ORDER[(i + 1) % DIFFICULTY_ORDER.length];
+}
+
+// Médiator de guitare : triangle arrondi, pointe vers le bas
+function PickIcon({ difficulty = 'medium', size = 14, className = '' }) {
+  const meta = DIFFICULTY_META[getDifficulty({ difficulty })];
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} className={className} aria-label={meta.label} role="img">
+      <path
+        d="M12 22.5c-3.2-2-8.5-7.4-8.5-13C3.5 6 7.3 3.5 12 3.5S20.5 6 20.5 9.5c0 5.6-5.3 11-8.5 13z"
+        fill={meta.color}
+        stroke="rgba(0,0,0,0.35)"
+        strokeWidth="1"
+      />
+    </svg>
+  );
+}
+
+// Bouton médiator : clic = rotation Facile → Moyen → Difficile
+function DifficultyPick({ difficulty, onChange, size = 14, className = '' }) {
+  const d = getDifficulty({ difficulty });
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onChange && onChange(nextDifficulty(d)); }}
+      className={`flex-shrink-0 hover:opacity-75 transition ${className}`}
+      title={`Difficulté : ${DIFFICULTY_META[d].label} (cliquer pour changer)`}
+    >
+      <PickIcon difficulty={d} size={size} />
+    </button>
+  );
+}
+
 
 // Étiquettes de classement (facile, fingerstyle, chant, anglais...), modifiables à choix multiples par morceau
 const DEFAULT_CLASSIFICATIONS = ['Française facile', 'Anglaise facile', 'À travailler', 'À chanter', 'Fingerstyle'];
