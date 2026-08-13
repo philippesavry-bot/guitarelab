@@ -364,7 +364,7 @@ export default function GuitarApp() {
       artist: 'Nouvel artiste',
       title: 'Nouveau morceau',
       classifications: ['À travailler'],
-      difficulty: 'hard',
+      difficulty: 'medium',
       progress: 0,
       isFavorite: false,
       tags: [],
@@ -741,7 +741,10 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
               <Trash2 className="w-3 h-3 text-red-400" />
             </button>
           </div>
-          <h3 className="font-bold text-xs leading-tight line-clamp-2 mb-0.5 min-h-[2rem]">{song.title}</h3>
+          <div className="flex items-start gap-1 mb-0.5 min-h-[2rem]">
+            <DifficultyPick difficulty={song.difficulty} size={12} className="mt-0.5" onChange={(d) => onUpdate({ ...song, difficulty: d })} />
+            <h3 className="font-bold text-xs leading-tight line-clamp-2 flex-1">{song.title}</h3>
+          </div>
           <p className="text-[10px] text-gray-400 truncate mb-1.5">{song.artist}</p>
           <div className="w-full bg-gray-600 rounded-full h-1 mb-1">
             <div className="bg-amber-500 h-full rounded-full" style={{ width: `${song.progress}%` }} />
@@ -769,6 +772,7 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
         <button onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }} className="hover:opacity-75">
           <Star className={`w-4 h-4 ${song.isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-400'}`} />
         </button>
+        <DifficultyPick difficulty={song.difficulty} size={14} onChange={(d) => onUpdate({ ...song, difficulty: d })} />
         <div className="flex-1 min-w-0 cursor-pointer" onClick={onSelect}>
           <div className="text-sm font-semibold truncate">{song.title}</div>
           <div className="text-xs text-gray-300 truncate">{song.artist}</div>
@@ -809,6 +813,7 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
               >
                 <Star className={`w-4 h-4 ${song.isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-500'}`} />
               </button>
+              <DifficultyPick difficulty={song.difficulty} size={15} onChange={(d) => onUpdate({ ...song, difficulty: d })} />
               <h3 className="font-bold truncate text-sm">{song.title}</h3>
             </div>
             <p className="text-xs text-gray-400 truncate">{song.artist}</p>
@@ -911,6 +916,22 @@ function SongEditModal({ song, onChange, onSave, onCancel }) {
         </div>
 
         <div className="p-4 space-y-3">
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">Difficulté</label>
+            <div className="flex gap-2">
+              {DIFFICULTY_ORDER.map(d => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => onChange({ ...song, difficulty: d })}
+                  className={`flex-1 flex items-center justify-center gap-1 px-2 py-2 rounded text-xs font-semibold transition border ${getDifficulty(song) === d ? 'bg-gray-600 border-amber-500' : 'bg-gray-700 border-gray-600 hover:bg-gray-600'}`}
+                >
+                  <PickIcon difficulty={d} size={14} />
+                  {DIFFICULTY_META[d].label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div>
             <label className="text-xs text-gray-400 block mb-1">Titre</label>
             <input
@@ -1172,7 +1193,10 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
           </div>
 
           <div className="text-center flex-1 min-w-0">
-            <h2 className="text-base font-bold truncate">{song.title}</h2>
+            <h2 className="text-base font-bold truncate flex items-center justify-center gap-1.5">
+              <DifficultyPick difficulty={song.difficulty} size={16} onChange={(d) => onUpdateSong({ ...song, difficulty: d })} />
+              <span className="truncate">{song.title}</span>
+            </h2>
             <p className="text-xs text-gray-400 truncate">{song.artist}</p>
           </div>
 
