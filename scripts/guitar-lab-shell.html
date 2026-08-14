@@ -58,7 +58,7 @@
       };
 
       // --- Synchronisation par fichier (iCloud Drive via l'app Fichiers) ---
-      var SYNC_KEYS = ['guitar-lab:songs', 'guitar-lab:classifications'];
+      var SYNC_KEYS = ['guitar-lab:songs:v2', 'guitar-lab:songs', 'guitar-lab:classifications'];
       var statusEl = document.getElementById('sync-status');
       function setStatus(msg) { statusEl.textContent = msg; }
       var lastExport = localStorage.getItem(LS_PREFIX + 'lastExport');
