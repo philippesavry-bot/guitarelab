@@ -3949,31 +3949,81 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
   );
 }
 
-function SongEditModal({ song, onChange, onSave, onCancel }) {
+// Suggère des mots-clés à partir des informations du morceau (aide "IA" locale, sans réseau)
+function suggestKeywords(song) {
+  const out = [];
+  const push = (t) => { const c = (t || '').trim(); if (c && !out.includes(c)) out.push(c); };
+  const d = getDifficulty(song);
+  push(d === 'easy' ? 'facile' : d === 'hard' ? 'difficile' : 'intermédiaire');
+  if (song.technique === 'fingerstyle') { push('fingerstyle'); push('arpèges'); }
+  if (song.technique === 'rythmique') { push('rythmique'); push('accords ouverts'); }
+  if (song.technique === 'les deux') { push('picking'); push('rythmique'); }
+  if (song.songType === 'instrumental') push('instrumental'); else push('chant + guitare');
+  if (song.language) push(song.language.toLowerCase());
+  (song.style || '').split(/[,/]+/).forEach(s => push(s.toLowerCase()));
+  const capo = song.versions?.[0]?.capo;
+  if (capo) push(`capo ${capo}`);
+  const bpm = song.versions?.[0]?.bpm;
+  if (bpm) push(bpm < 80 ? 'tempo lent' : bpm > 130 ? 'tempo rapide' : 'tempo moyen');
+  (song.artist || '').split(/[,&]+/).forEach(a => push(a.trim().toLowerCase()));
+  if (song.progress >= 70) push('à entretenir'); else if (song.progress > 0) push('en cours');
+  else push('à démarrer');
+  return out.filter(t => !(song.tags || []).includes(t)).slice(0, 8);
+}
+
+function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions = [], onAddClassificationOption, title = '✏️ Éditer' }) {
   const [newTag, setNewTag] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [newClassification, setNewClassification] = useState('');
 
-  const addTag = () => {
-    if (newTag.trim()) {
-      onChange({
-        ...song,
-        tags: [...song.tags, newTag],
-      });
-      setNewTag('');
-    }
+  const tags = song.tags || [];
+  const classifications = song.classifications || [];
+  const links = song.youtubeUrls || [];
+  const firstVersion = song.versions?.[0];
+
+  const addTag = (value) => {
+    const clean = (value ?? newTag).trim();
+    if (!clean || tags.includes(clean)) return;
+    onChange({ ...song, tags: [...tags, clean] });
+    setNewTag('');
+    setSuggestions(s => s.filter(t => t !== clean));
   };
 
-  const removeTag = (tag) => {
-    onChange({
-      ...song,
-      tags: song.tags.filter(t => t !== tag),
-    });
+  const removeTag = (tag) => onChange({ ...song, tags: tags.filter(t => t !== tag) });
+
+  const toggleClassification = (label) => {
+    if (!label) return;
+    const next = classifications.includes(label)
+      ? classifications.filter(c => c !== label)
+      : [...classifications, label];
+    onChange({ ...song, classifications: next });
   };
+
+  const createClassification = () => {
+    const clean = newClassification.trim();
+    if (!clean) return;
+    onAddClassificationOption?.(clean);
+    if (!classifications.includes(clean)) onChange({ ...song, classifications: [...classifications, clean] });
+    setNewClassification('');
+  };
+
+  const setCapo = (value) => {
+    if (!firstVersion) return;
+    const capo = Math.max(0, Math.min(12, parseInt(value) || 0));
+    onChange({ ...song, versions: song.versions.map((v, i) => (i === 0 ? { ...v, capo } : v)) });
+  };
+
+  const updateLink = (id, url) => onChange({ ...song, youtubeUrls: links.map(l => (l.id === id ? { ...l, url } : l)) });
+  const addLink = () => onChange({ ...song, youtubeUrls: [...links, { id: newId(), url: '' }] });
+  const removeLink = (id) => onChange({ ...song, youtubeUrls: links.filter(l => l.id !== id) });
+
+  const inputCls = 'w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500';
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-800 rounded-lg max-w-md w-full max-h-96 overflow-y-auto border border-gray-700 shadow-2xl">
-        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-center">
-          <h3 className="font-bold text-amber-400">✏️ Éditer</h3>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-800 rounded-lg max-w-lg w-full max-h-[85vh] overflow-y-auto border border-gray-700 shadow-2xl">
+        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-center z-10">
+          <h3 className="font-bold text-amber-400">{title}</h3>
           <button onClick={onCancel} className="p-1 hover:bg-gray-700 rounded">
             <X className="w-4 h-4" />
           </button>
@@ -3996,72 +4046,40 @@ function SongEditModal({ song, onChange, onSave, onCancel }) {
               ))}
             </div>
           </div>
+
           <div>
             <label className="text-xs text-gray-400 block mb-1">Titre</label>
-            <input
-              type="text"
-              value={song.title}
-              onChange={(e) => onChange({ ...song, title: e.target.value })}
-              className="w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
-            />
+            <input type="text" value={song.title} onChange={(e) => onChange({ ...song, title: e.target.value })} className={inputCls} />
           </div>
 
           <div>
             <label className="text-xs text-gray-400 block mb-1">Artiste</label>
-            <input
-              type="text"
-              value={song.artist}
-              onChange={(e) => onChange({ ...song, artist: e.target.value })}
-              className="w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
-            />
+            <input type="text" value={song.artist} onChange={(e) => onChange({ ...song, artist: e.target.value })} className={inputCls} />
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-xs text-gray-400 block mb-1">Type</label>
-              <select
-                value={song.songType || ''}
-                onChange={(e) => onChange({ ...song, songType: e.target.value })}
-                className="w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
-              >
+              <select value={song.songType || ''} onChange={(e) => onChange({ ...song, songType: e.target.value })} className={inputCls}>
                 <option value="chanté">🎤 Chanté</option>
                 <option value="instrumental">🎸 Instrumental</option>
               </select>
             </div>
             <div>
-              <label className="text-xs text-gray-400 block mb-1">Progression</label>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                value={song.progress}
-                onChange={(e) => onChange({ ...song, progress: parseInt(e.target.value) || 0 })}
-                className="w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
               <label className="text-xs text-gray-400 block mb-1">Technique</label>
-              <select
-                value={song.technique || ''}
-                onChange={(e) => onChange({ ...song, technique: e.target.value })}
-                className="w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
-              >
+              <select value={song.technique || ''} onChange={(e) => onChange({ ...song, technique: e.target.value })} className={inputCls}>
                 <option value="">—</option>
                 <option value="fingerstyle">Fingerstyle</option>
                 <option value="rythmique">Rythmique</option>
                 <option value="les deux">Les deux</option>
               </select>
             </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-xs text-gray-400 block mb-1">Langue</label>
-              <select
-                value={song.language || ''}
-                onChange={(e) => onChange({ ...song, language: e.target.value })}
-                className="w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
-              >
+              <select value={song.language || ''} onChange={(e) => onChange({ ...song, language: e.target.value })} className={inputCls}>
                 <option value="">—</option>
                 <option value="FR">FR</option>
                 <option value="EN">EN</option>
@@ -4069,22 +4087,159 @@ function SongEditModal({ song, onChange, onSave, onCancel }) {
                 <option value="Instrumental">Instrumental</option>
               </select>
             </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Style</label>
+              <input
+                type="text"
+                value={song.style || ''}
+                placeholder="Rock français, Pop, Blues…"
+                onChange={(e) => onChange({ ...song, style: e.target.value })}
+                className={inputCls}
+              />
+            </div>
           </div>
 
-          <div>
-            <label className="text-xs text-gray-400 block mb-1">Style</label>
-            <input
-              type="text"
-              value={song.style || ''}
-              placeholder="Rock français, Pop, Blues…"
-              onChange={(e) => onChange({ ...song, style: e.target.value })}
-              className="w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
-            />
-          </div>
-
+          {/* Progression : curseur + valeur */}
           <div>
             <div className="flex justify-between items-center mb-1">
-              <label className="text-xs text-gray-400">Tags</label>
+              <label className="text-xs text-gray-400">Progression</label>
+              <span className="text-xs font-bold text-amber-400">{song.progress || 0}%</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min="0"
+                max="100"
+                step="5"
+                value={song.progress || 0}
+                onChange={(e) => onChange({ ...song, progress: parseInt(e.target.value) || 0 })}
+                className="flex-1 accent-amber-500"
+              />
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={song.progress || 0}
+                onChange={(e) => onChange({ ...song, progress: Math.max(0, Math.min(100, parseInt(e.target.value) || 0)) })}
+                className="w-16 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-center focus:outline-none focus:border-amber-500"
+              />
+            </div>
+          </div>
+
+          {/* Capodastre */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Capodastre (case)</label>
+              <input
+                type="number"
+                min="0"
+                max="12"
+                value={firstVersion?.capo ?? 0}
+                onChange={(e) => setCapo(e.target.value)}
+                className={inputCls}
+                disabled={!firstVersion}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Tonalité</label>
+              <input
+                type="text"
+                value={firstVersion?.key || ''}
+                placeholder="Em, G…"
+                onChange={(e) => firstVersion && onChange({ ...song, versions: song.versions.map((v, i) => (i === 0 ? { ...v, key: e.target.value } : v)) })}
+                className={inputCls}
+                disabled={!firstVersion}
+              />
+            </div>
+          </div>
+
+          {/* Classement */}
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">Classement</label>
+            <select
+              value=""
+              onChange={(e) => { toggleClassification(e.target.value); e.target.value = ''; }}
+              className={inputCls}
+            >
+              <option value="">+ Ajouter / retirer un classement…</option>
+              {classificationOptions.map(label => (
+                <option key={label} value={label}>{classifications.includes(label) ? `✓ ${label}` : label}</option>
+              ))}
+            </select>
+            <div className="flex gap-1 mt-2">
+              <input
+                type="text"
+                placeholder="Nouveau classement…"
+                value={newClassification}
+                onChange={(e) => setNewClassification(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && createClassification()}
+                className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs focus:outline-none focus:border-amber-500"
+              />
+              <button onClick={createClassification} className="px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold transition">+</button>
+            </div>
+            {classifications.length > 0 && (
+              <div className="flex gap-1 flex-wrap mt-2">
+                {classifications.map(label => (
+                  <div key={label} className="px-2 py-1 bg-amber-600/30 text-amber-200 rounded text-xs flex items-center gap-1">
+                    🏷️ {label}
+                    <button onClick={() => toggleClassification(label)} className="hover:opacity-75"><X className="w-3 h-3" /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Pochette */}
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">Pochette (URL de l'image)</label>
+            <div className="flex gap-2 items-start">
+              <input
+                type="url"
+                value={song.imageUrl || ''}
+                placeholder="https://…/pochette.jpg"
+                onChange={(e) => onChange({ ...song, imageUrl: e.target.value })}
+                className={inputCls}
+              />
+              {song.imageUrl ? (
+                <img src={song.imageUrl} alt="Pochette" className="w-12 h-12 object-cover rounded border border-gray-600 flex-shrink-0" />
+              ) : (
+                <div className="w-12 h-12 rounded border border-gray-600 bg-gray-700 flex items-center justify-center text-gray-500 text-lg flex-shrink-0">♪</div>
+              )}
+            </div>
+          </div>
+
+          {/* Liens */}
+          <div>
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-xs text-gray-400">Liens (vidéo, tablature, paroles…)</label>
+              <button onClick={addLink} className="text-xs px-2 py-0.5 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded">+ Lien</button>
+            </div>
+            <div className="space-y-1">
+              {links.length === 0 && <p className="text-xs text-gray-500">Aucun lien.</p>}
+              {links.map(link => (
+                <div key={link.id} className="flex gap-1 items-center">
+                  <input
+                    type="url"
+                    value={link.url || ''}
+                    placeholder="https://…"
+                    onChange={(e) => updateLink(link.id, e.target.value)}
+                    className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs focus:outline-none focus:border-amber-500"
+                  />
+                  {link.url ? (
+                    <a href={link.url} target="_blank" rel="noreferrer" className="px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs hover:bg-gray-600">↗</a>
+                  ) : null}
+                  <button onClick={() => removeLink(link.id)} className="px-2 py-1 hover:bg-red-900 rounded text-xs text-red-400">
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Mots-clés + aide IA */}
+          <div>
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-xs text-gray-400">Mots-clés</label>
               <button onClick={() => onChange({ ...song, isFavorite: !song.isFavorite })} className="text-xs hover:opacity-75">
                 {song.isFavorite ? '⭐ Favori' : '☆ Ajouter aux favoris'}
               </button>
@@ -4092,21 +4247,32 @@ function SongEditModal({ song, onChange, onSave, onCancel }) {
             <div className="flex gap-1 mb-2">
               <input
                 type="text"
-                placeholder="Nouveau tag..."
+                placeholder="Nouveau mot-clé…"
                 value={newTag}
                 onChange={(e) => setNewTag(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && addTag()}
                 className="flex-1 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs focus:outline-none focus:border-amber-500"
               />
+              <button onClick={() => addTag()} className="px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold transition">+</button>
               <button
-                onClick={addTag}
-                className="px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold transition"
+                onClick={() => setSuggestions(suggestKeywords(song))}
+                title="Proposer des mots-clés à partir de la fiche"
+                className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-semibold transition"
               >
-                +
+                ✨ IA
               </button>
             </div>
+            {suggestions.length > 0 && (
+              <div className="flex gap-1 flex-wrap mb-2">
+                {suggestions.map(s => (
+                  <button key={s} onClick={() => addTag(s)} className="px-2 py-1 bg-indigo-600/25 text-indigo-200 border border-indigo-500/40 rounded text-xs hover:bg-indigo-600/40">
+                    + {s}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="flex gap-1 flex-wrap">
-              {song.tags.map(tag => (
+              {tags.map(tag => (
                 <div key={tag} className="px-2 py-1 bg-amber-600 text-white rounded text-xs flex items-center gap-1">
                   {tag}
                   <button onClick={() => removeTag(tag)} className="hover:opacity-75">
@@ -4130,6 +4296,7 @@ function SongEditModal({ song, onChange, onSave, onCancel }) {
     </div>
   );
 }
+
 
 function ClassificationPicker({ song, options, onAddOption, onRemoveOption, onUpdateSong }) {
   const [open, setOpen] = useState(false);
