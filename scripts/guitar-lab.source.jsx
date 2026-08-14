@@ -90,6 +90,175 @@ const DEFAULT_CLASSIFICATIONS = ['Française facile', 'Anglaise facile', 'À tra
 
 const REPERTOIRE = [
   {
+    "id": "93",
+    "title": "Fix you",
+    "artist": "Coldplay",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "fingerstyle",
+    "style": "",
+    "difficulty": "medium",
+    "progress": 20,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "imageUrl": "https://share.google/26yeCP5O7uUvj286G",
+    "youtubeUrls": [
+      {
+        "id": "93-y0",
+        "url": "https://youtu.be/QvYNn-FCb4Q?is=cCXpr7c8IeHObGWi"
+      }
+    ],
+    "versions": [
+      {
+        "id": "93-v",
+        "label": "Facile",
+        "bpm": 0,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "92",
+    "title": "Risk It All",
+    "artist": "Bruno Mars",
+    "language": "EN",
+    "songType": "instrumental",
+    "technique": "les deux",
+    "style": "",
+    "difficulty": "medium",
+    "progress": 20,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "imageUrl": "",
+    "youtubeUrls": [
+      {
+        "id": "92-y0",
+        "url": "https://youtu.be/DCFTYzwq564?is=K3aibrTx1hGm89de"
+      }
+    ],
+    "versions": [
+      {
+        "id": "92-v",
+        "label": "Facile",
+        "bpm": 0,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "91",
+    "title": "Redemption Song",
+    "artist": "Bob Marley",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "",
+    "difficulty": "easy",
+    "progress": 5,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "imageUrl": "",
+    "youtubeUrls": [
+      {
+        "id": "91-y0",
+        "url": "https://youtu.be/v1epaVLbxlw?is=c7j5CKnaK4LVa3iM"
+      }
+    ],
+    "versions": [
+      {
+        "id": "91-v",
+        "label": "Facile",
+        "bpm": 0,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "90",
+    "title": "L’aventurier",
+    "artist": "Indochine",
+    "language": "FR",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "",
+    "difficulty": "easy",
+    "progress": 30,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "imageUrl": "",
+    "youtubeUrls": [
+      {
+        "id": "90-y0",
+        "url": "https://youtu.be/O2MS37yoU6U?is=oVeUPEpMa-7IaTrw"
+      }
+    ],
+    "versions": [
+      {
+        "id": "90-v",
+        "label": "Facile",
+        "bpm": 0,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
+    "id": "89",
+    "title": "Shallow",
+    "artist": "Lady gaga & Bradley Cooper",
+    "language": "EN",
+    "songType": "chanté",
+    "technique": "les deux",
+    "style": "Pop",
+    "difficulty": "medium",
+    "progress": 30,
+    "classifications": [],
+    "isFavorite": false,
+    "tags": [],
+    "imageUrl": "",
+    "youtubeUrls": [
+      {
+        "id": "89-y0",
+        "url": "https://youtu.be/0TDHbiWQFkM?is=okoBuiLSSFYe_aUD"
+      },
+      {
+        "id": "89-y1",
+        "url": "https://youtu.be/11plqWEM8cc?is=maz10JhK-zznRXuH"
+      }
+    ],
+    "versions": [
+      {
+        "id": "89-v",
+        "label": "Facile",
+        "bpm": 0,
+        "capo": 0,
+        "key": "",
+        "structure": [],
+        "images": [],
+        "notes": ""
+      }
+    ]
+  },
+  {
     "id": "1",
     "title": "Cendrillon",
     "artist": "Téléphone",
@@ -105,6 +274,7 @@ const REPERTOIRE = [
       "rock",
       "80s"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "1-y",
@@ -140,6 +310,7 @@ const REPERTOIRE = [
       "ballade",
       "rock"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "2-y",
@@ -174,6 +345,7 @@ const REPERTOIRE = [
     "tags": [
       "nostalgie"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "3-y",
@@ -209,6 +381,7 @@ const REPERTOIRE = [
       "classique rock",
       "tempo variable"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "4-y",
@@ -241,6 +414,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "5-y",
@@ -275,6 +449,7 @@ const REPERTOIRE = [
     "tags": [
       "classique"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "6-y",
@@ -309,6 +484,7 @@ const REPERTOIRE = [
     "tags": [
       "classique"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "7-y",
@@ -344,6 +520,7 @@ const REPERTOIRE = [
       "lent",
       "ambiance"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "8-y",
@@ -371,15 +548,16 @@ const REPERTOIRE = [
     "songType": "chanté",
     "technique": "battement",
     "style": "Variété française",
-    "difficulty": "easy",
+    "difficulty": "medium",
     "progress": 55,
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
-        "id": "9-y",
-        "url": ""
+        "id": "9-y0",
+        "url": "https://youtu.be/6FjzAQwO6SQ?is=ZKJuLsU1swh8f0XS"
       }
     ],
     "versions": [
@@ -408,6 +586,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "10-y",
@@ -442,6 +621,7 @@ const REPERTOIRE = [
     "tags": [
       "à vérifier artiste"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "11-y",
@@ -474,6 +654,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "12-y",
@@ -508,10 +689,11 @@ const REPERTOIRE = [
     "tags": [
       "tempo variable"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
-        "id": "13-y",
-        "url": ""
+        "id": "13-y0",
+        "url": "https://youtu.be/TLjOWk2ryBc?is=XEuC6N7MQL3B0TOS"
       }
     ],
     "versions": [
@@ -540,6 +722,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "14-y",
@@ -572,6 +755,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "15-y",
@@ -606,6 +790,7 @@ const REPERTOIRE = [
     "tags": [
       "reprise"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "16-y",
@@ -638,6 +823,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "17-y",
@@ -670,6 +856,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "18-y",
@@ -702,6 +889,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "19-y",
@@ -734,6 +922,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "20-y",
@@ -766,6 +955,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "21-y",
@@ -800,6 +990,7 @@ const REPERTOIRE = [
     "tags": [
       "classique"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "22-y",
@@ -832,6 +1023,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "23-y",
@@ -866,6 +1058,7 @@ const REPERTOIRE = [
     "tags": [
       "à vérifier titre exact"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "24-y",
@@ -898,6 +1091,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "25-y",
@@ -932,6 +1126,7 @@ const REPERTOIRE = [
     "tags": [
       "à vérifier artiste"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "26-y",
@@ -964,6 +1159,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "27-y",
@@ -998,6 +1194,7 @@ const REPERTOIRE = [
     "tags": [
       "arpèges"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "28-y",
@@ -1030,10 +1227,11 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
-        "id": "29-y",
-        "url": ""
+        "id": "29-y0",
+        "url": "https://youtu.be/tM5f62IwMYY?is=iRu3xhbXVbljwsd4"
       }
     ],
     "versions": [
@@ -1062,6 +1260,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "30-y",
@@ -1096,6 +1295,7 @@ const REPERTOIRE = [
     "tags": [
       "classique"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "31-y",
@@ -1130,6 +1330,7 @@ const REPERTOIRE = [
     "tags": [
       "classique"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "32-y",
@@ -1162,6 +1363,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "33-y",
@@ -1194,6 +1396,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "34-y",
@@ -1226,10 +1429,11 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
-        "id": "35-y",
-        "url": ""
+        "id": "35-y0",
+        "url": "https://youtu.be/6yEmNkyM_qA?is=NHoiFG7G7ToUT4cs"
       }
     ],
     "versions": [
@@ -1258,6 +1462,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "https://m.media-amazon.com/images/I/81euA6pgv3L.jpg",
     "youtubeUrls": [
       {
         "id": "36-y",
@@ -1290,6 +1495,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "37-y",
@@ -1322,6 +1528,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "38-y",
@@ -1356,6 +1563,7 @@ const REPERTOIRE = [
     "tags": [
       "à vérifier artiste - ambigu"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "39-y",
@@ -1388,6 +1596,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "40-y",
@@ -1420,6 +1629,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "41-y",
@@ -1454,6 +1664,7 @@ const REPERTOIRE = [
     "tags": [
       "à vérifier"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "42-y",
@@ -1489,6 +1700,7 @@ const REPERTOIRE = [
       "classique",
       "arpèges possibles"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "43-y",
@@ -1523,6 +1735,7 @@ const REPERTOIRE = [
     "tags": [
       "swing"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "44-y",
@@ -1555,6 +1768,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "45-y",
@@ -1589,6 +1803,7 @@ const REPERTOIRE = [
     "tags": [
       "classique"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "46-y",
@@ -1621,6 +1836,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "47-y",
@@ -1656,6 +1872,7 @@ const REPERTOIRE = [
       "classique",
       "à confirmer si Alleluia = Hallelujah"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "48-y",
@@ -1688,6 +1905,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "49-y",
@@ -1723,6 +1941,7 @@ const REPERTOIRE = [
       "arpèges",
       "progression harmonique"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "50-y",
@@ -1757,6 +1976,7 @@ const REPERTOIRE = [
     "tags": [
       "classique"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "51-y",
@@ -1789,6 +2009,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "52-y",
@@ -1821,6 +2042,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "53-y",
@@ -1853,10 +2075,11 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
-        "id": "54-y",
-        "url": ""
+        "id": "54-y0",
+        "url": "https://youtu.be/fJ7xz0QydCY?is=cFJhfUoIG552Clem"
       }
     ],
     "versions": [
@@ -1885,6 +2108,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "55-y",
@@ -1919,6 +2143,7 @@ const REPERTOIRE = [
     "tags": [
       "intro arpégée"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "56-y",
@@ -1951,6 +2176,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "57-y",
@@ -1983,6 +2209,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "58-y",
@@ -2015,6 +2242,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "59-y",
@@ -2049,6 +2277,7 @@ const REPERTOIRE = [
     "tags": [
       "à vérifier bpm"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "60-y",
@@ -2081,6 +2310,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "61-y",
@@ -2113,10 +2343,19 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
-        "id": "62-y",
-        "url": ""
+        "id": "62-y0",
+        "url": "https://youtu.be/PZ-esSyDoxk?is=dpxaaRC1CHKtk56s"
+      },
+      {
+        "id": "62-y1",
+        "url": "https://youtu.be/QbytkMuYmF8?is=_B1ASHIK4-1eGJXi"
+      },
+      {
+        "id": "62-y2",
+        "url": "https://youtu.be/-PN8WGimr6o?is=ISWKEZpVuGXI5Cvm"
       }
     ],
     "versions": [
@@ -2147,6 +2386,7 @@ const REPERTOIRE = [
     "tags": [
       "riff mandoline original"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "63-y",
@@ -2179,6 +2419,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "64-y",
@@ -2211,10 +2452,11 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "https://share.google/Hy00IN4A99ifdCYsk",
     "youtubeUrls": [
       {
-        "id": "65-y",
-        "url": ""
+        "id": "65-y0",
+        "url": "https://youtu.be/Yo8rSAHyMro?is=0soonEtd2D-afPeK"
       }
     ],
     "versions": [
@@ -2243,6 +2485,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "66-y",
@@ -2275,6 +2518,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "67-y",
@@ -2307,6 +2551,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "68-y",
@@ -2341,6 +2586,7 @@ const REPERTOIRE = [
     "tags": [
       "titre à confirmer"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "69-y",
@@ -2373,6 +2619,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "70-y",
@@ -2405,6 +2652,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "71-y",
@@ -2437,6 +2685,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "72-y",
@@ -2469,6 +2718,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "73-y",
@@ -2501,6 +2751,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "74-y",
@@ -2535,6 +2786,7 @@ const REPERTOIRE = [
     "tags": [
       "classique"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "75-y",
@@ -2567,6 +2819,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "76-y",
@@ -2599,6 +2852,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "77-y",
@@ -2631,6 +2885,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "78-y",
@@ -2663,6 +2918,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "79-y",
@@ -2695,6 +2951,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "80-y",
@@ -2729,6 +2986,7 @@ const REPERTOIRE = [
     "tags": [
       "arpèges classiques"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "81-y",
@@ -2763,6 +3021,7 @@ const REPERTOIRE = [
     "tags": [
       "bande originale"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "82-y",
@@ -2795,6 +3054,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "83-y",
@@ -2827,6 +3087,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "84-y",
@@ -2859,6 +3120,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "85-y",
@@ -2891,6 +3153,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "86-y",
@@ -2925,6 +3188,7 @@ const REPERTOIRE = [
     "tags": [
       "classique"
     ],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "87-y",
@@ -2957,6 +3221,7 @@ const REPERTOIRE = [
     "classifications": [],
     "isFavorite": false,
     "tags": [],
+    "imageUrl": "",
     "youtubeUrls": [
       {
         "id": "88-y",
@@ -2981,7 +3246,7 @@ const REPERTOIRE = [
 const LIBRARY_SEED_DATE = new Date('2026-08-13T06:00:00.000Z').toISOString();
 const DEFAULT_SONGS = REPERTOIRE.map(s => ({ ...s, createdAt: LIBRARY_SEED_DATE, updatedAt: LIBRARY_SEED_DATE }));
 
-const SONGS_STORAGE_KEY = 'guitar-lab:songs';
+const SONGS_STORAGE_KEY = 'guitar-lab:songs:v2';
 const CLASSIFICATIONS_STORAGE_KEY = 'guitar-lab:classifications';
 
 // Lit plusieurs fichiers image en parallèle et renvoie leurs data-URL dans l'ordre choisi
@@ -3156,6 +3421,11 @@ export default function GuitarApp() {
       title: 'Nouveau morceau',
       classifications: ['À travailler'],
       difficulty: 'medium',
+      language: 'FR',
+      songType: 'chanté',
+      technique: 'les deux',
+      style: '',
+      imageUrl: '',
       progress: 0,
       isFavorite: false,
       tags: [],
@@ -3750,12 +4020,12 @@ function SongEditModal({ song, onChange, onSave, onCancel }) {
             <div>
               <label className="text-xs text-gray-400 block mb-1">Type</label>
               <select
-                value={song.type}
-                onChange={(e) => onChange({ ...song, type: e.target.value })}
+                value={song.songType || ''}
+                onChange={(e) => onChange({ ...song, songType: e.target.value })}
                 className="w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
               >
-                <option value="à chanter">🎤 À chanter</option>
-                <option value="fingerstyle">🎸 Fingerstyle</option>
+                <option value="chanté">🎤 Chanté</option>
+                <option value="instrumental">🎸 Instrumental</option>
               </select>
             </div>
             <div>
@@ -3765,23 +4035,51 @@ function SongEditModal({ song, onChange, onSave, onCancel }) {
                 min="0"
                 max="100"
                 value={song.progress}
-                onChange={(e) => onChange({ ...song, progress: parseInt(e.target.value) })}
+                onChange={(e) => onChange({ ...song, progress: parseInt(e.target.value) || 0 })}
                 className="w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
               />
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Technique</label>
+              <select
+                value={song.technique || ''}
+                onChange={(e) => onChange({ ...song, technique: e.target.value })}
+                className="w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
+              >
+                <option value="">—</option>
+                <option value="fingerstyle">Fingerstyle</option>
+                <option value="rythmique">Rythmique</option>
+                <option value="les deux">Les deux</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Langue</label>
+              <select
+                value={song.language || ''}
+                onChange={(e) => onChange({ ...song, language: e.target.value })}
+                className="w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
+              >
+                <option value="">—</option>
+                <option value="FR">FR</option>
+                <option value="EN">EN</option>
+                <option value="ES">ES</option>
+                <option value="Instrumental">Instrumental</option>
+              </select>
+            </div>
+          </div>
+
           <div>
-            <label className="text-xs text-gray-400 block mb-1">Catégorie</label>
-            <select
-              value={song.family}
-              onChange={(e) => onChange({ ...song, family: e.target.value })}
+            <label className="text-xs text-gray-400 block mb-1">Style</label>
+            <input
+              type="text"
+              value={song.style || ''}
+              placeholder="Rock français, Pop, Blues…"
+              onChange={(e) => onChange({ ...song, style: e.target.value })}
               className="w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
-            >
-              <option value="à travailler">À travailler</option>
-              <option value="française facile">Française facile</option>
-              <option value="anglaise facile">Anglaise facile</option>
-            </select>
+            />
           </div>
 
           <div>
