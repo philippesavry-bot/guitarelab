@@ -4015,12 +4015,12 @@ function SongEditModal({ song, onChange, onSave, onCancel }) {
             <div>
               <label className="text-xs text-gray-400 block mb-1">Type</label>
               <select
-                value={song.type}
-                onChange={(e) => onChange({ ...song, type: e.target.value })}
+                value={song.songType || ''}
+                onChange={(e) => onChange({ ...song, songType: e.target.value })}
                 className="w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
               >
-                <option value="à chanter">🎤 À chanter</option>
-                <option value="fingerstyle">🎸 Fingerstyle</option>
+                <option value="chanté">🎤 Chanté</option>
+                <option value="instrumental">🎸 Instrumental</option>
               </select>
             </div>
             <div>
@@ -4030,23 +4030,51 @@ function SongEditModal({ song, onChange, onSave, onCancel }) {
                 min="0"
                 max="100"
                 value={song.progress}
-                onChange={(e) => onChange({ ...song, progress: parseInt(e.target.value) })}
+                onChange={(e) => onChange({ ...song, progress: parseInt(e.target.value) || 0 })}
                 className="w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
               />
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Technique</label>
+              <select
+                value={song.technique || ''}
+                onChange={(e) => onChange({ ...song, technique: e.target.value })}
+                className="w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
+              >
+                <option value="">—</option>
+                <option value="fingerstyle">Fingerstyle</option>
+                <option value="rythmique">Rythmique</option>
+                <option value="les deux">Les deux</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Langue</label>
+              <select
+                value={song.language || ''}
+                onChange={(e) => onChange({ ...song, language: e.target.value })}
+                className="w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
+              >
+                <option value="">—</option>
+                <option value="FR">FR</option>
+                <option value="EN">EN</option>
+                <option value="ES">ES</option>
+                <option value="Instrumental">Instrumental</option>
+              </select>
+            </div>
+          </div>
+
           <div>
-            <label className="text-xs text-gray-400 block mb-1">Catégorie</label>
-            <select
-              value={song.family}
-              onChange={(e) => onChange({ ...song, family: e.target.value })}
+            <label className="text-xs text-gray-400 block mb-1">Style</label>
+            <input
+              type="text"
+              value={song.style || ''}
+              placeholder="Rock français, Pop, Blues…"
+              onChange={(e) => onChange({ ...song, style: e.target.value })}
               className="w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
-            >
-              <option value="à travailler">À travailler</option>
-              <option value="française facile">Française facile</option>
-              <option value="anglaise facile">Anglaise facile</option>
-            </select>
+            />
           </div>
 
           <div>
