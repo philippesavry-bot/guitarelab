@@ -3723,6 +3723,17 @@ export default function GuitarApp() {
           />
         )
       )}
+      {draftSong && (
+        <SongEditModal
+          song={draftSong}
+          onChange={setDraftSong}
+          onSave={confirmAddSong}
+          onCancel={() => setDraftSong(null)}
+          classificationOptions={classificationOptions}
+          onAddClassificationOption={addClassificationOption}
+          title="➕ Nouveau morceau"
+        />
+      )}
     </div>
   );
 }
