@@ -3831,6 +3831,7 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
 
   if (viewMode === 'compact') {
     return (
+      <>
       <div className={`flex items-center gap-2 px-3 py-2 rounded transition ${isSelected ? 'bg-amber-600 text-white' : 'bg-gray-700 hover:bg-gray-650 text-gray-100'}`}>
         <button onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }} className="hover:opacity-75">
           <Star className={`w-4 h-4 ${song.isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-400'}`} />
@@ -3853,6 +3854,17 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
           🗑️
         </button>
       </div>
+      {isEditing && (
+        <SongEditModal
+          song={editData}
+          onChange={setEditData}
+          onSave={saveEdit}
+          onCancel={() => { setEditData(song); setIsEditing(false); }}
+          classificationOptions={classificationOptions}
+          onAddClassificationOption={onAddClassificationOption}
+        />
+      )}
+      </>
     );
   }
 
