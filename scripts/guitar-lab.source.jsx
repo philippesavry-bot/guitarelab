@@ -3248,6 +3248,7 @@ const DEFAULT_SONGS = REPERTOIRE.map(s => ({ ...s, createdAt: LIBRARY_SEED_DATE,
 
 const SONGS_STORAGE_KEY = 'guitar-lab:songs:v2';
 const CLASSIFICATIONS_STORAGE_KEY = 'guitar-lab:classifications';
+const PREFS_STORAGE_KEY = 'guitar-lab:display-prefs';
 
 // Lit plusieurs fichiers image en parallèle et renvoie leurs data-URL dans l'ordre choisi
 function readFilesAsDataUrls(files) {
@@ -3377,6 +3378,54 @@ export default function GuitarApp() {
   const [viewMode, setViewMode] = useState('detailed');
   const [sortBy, setSortBy] = useState('favorite');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+  const [prefsSaved, setPrefsSaved] = useState(false);
+
+  // Chargement des préférences d'affichage enregistrées
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await window.storage.get(PREFS_STORAGE_KEY, false);
+        if (!cancelled && result?.value) {
+          const p = JSON.parse(result.value) || {};
+          if (p.viewMode) setViewMode(p.viewMode);
+          if (p.sortBy) setSortBy(p.sortBy);
+          if (p.groupBy) setGroupBy(p.groupBy);
+          if (p.classificationFilter) setClassificationFilter(p.classificationFilter);
+          if (typeof p.sidebarCollapsed === 'boolean') setSidebarCollapsed(p.sidebarCollapsed);
+        }
+      } catch (err) {
+        // Aucune préférence enregistrée
+      } finally {
+        if (!cancelled) setPrefsLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const saveDisplayPrefs = async () => {
+    try {
+      await window.storage.set(PREFS_STORAGE_KEY, JSON.stringify({
+        viewMode, sortBy, groupBy, classificationFilter, sidebarCollapsed,
+      }), false);
+      setPrefsSaved(true);
+      setTimeout(() => setPrefsSaved(false), 2000);
+    } catch (err) {
+      setPrefsSaved(false);
+    }
+  };
+
+  // Mémorisation automatique de l'affichage choisi
+  useEffect(() => {
+    if (!prefsLoaded) return;
+    const t = setTimeout(() => {
+      window.storage.set(PREFS_STORAGE_KEY, JSON.stringify({
+        viewMode, sortBy, groupBy, classificationFilter, sidebarCollapsed,
+      }), false).catch(() => {});
+    }, 500);
+    return () => clearTimeout(t);
+  }, [viewMode, sortBy, groupBy, classificationFilter, sidebarCollapsed, prefsLoaded]);
 
   const selectedSong = songs.find(s => s.id === selectedSongId);
   const selectedVersion = selectedSong?.versions.find(v => v.id === selectedVersionId) || selectedSong?.versions[0];
