@@ -3327,6 +3327,7 @@ export default function GuitarApp() {
 
   // Liste maîtresse des étiquettes de classement, modifiable et partagée entre la bibliothèque et l'écran de travail
   const [classificationOptions, setClassificationOptions] = useState(DEFAULT_CLASSIFICATIONS);
+  const [draftSong, setDraftSong] = useState(null);
   const [classificationsLoaded, setClassificationsLoaded] = useState(false);
   const classificationsSaveTimerRef = useRef(null);
 
@@ -3414,11 +3415,12 @@ export default function GuitarApp() {
     lastModified: songs.length > 0 ? new Date(Math.max(...songs.map(s => new Date(s.updatedAt)))).toLocaleDateString('fr-FR') : '-',
   };
 
-  const addSong = () => {
-    const newSong = {
-      id: Date.now().toString(),
-      artist: 'Nouvel artiste',
-      title: 'Nouveau morceau',
+  const makeNewSong = () => {
+    const now = Date.now().toString();
+    return {
+      id: now,
+      artist: '',
+      title: '',
       classifications: ['À travailler'],
       difficulty: 'medium',
       language: 'FR',
@@ -3429,20 +3431,20 @@ export default function GuitarApp() {
       progress: 0,
       isFavorite: false,
       tags: [],
-      youtubeUrls: [{ id: Date.now().toString() + '-y', url: '' }],
+      youtubeUrls: [{ id: now + '-y', url: '' }],
       versions: [{
-        id: Date.now().toString() + '-v',
+        id: now + '-v',
         label: 'Facile',
         bpm: 120,
         capo: 0,
         key: 'Em',
         structure: [{
-          id: Date.now().toString() + '-s',
-          section: 'Section',
+          id: now + '-s',
+          section: 'Intro',
           cols: 4,
           rows: 1,
           rhythm: [],
-          cells: Array.from({ length: 4 }, (_, i) => ({ id: `${Date.now()}-${i}`, split: false, chord: '', top: '', bottom: '' })),
+          cells: Array.from({ length: 4 }, (_, i) => ({ id: `${now}-${i}`, split: false, chord: '', top: '', bottom: '' })),
         }],
         images: [],
         notes: '',
@@ -3450,7 +3452,14 @@ export default function GuitarApp() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    setSongs([...songs, newSong]);
+  };
+
+  const addSong = () => setDraftSong(makeNewSong());
+
+  const confirmAddSong = () => {
+    if (!draftSong) return;
+    setSongs([...songs, { ...draftSong, updatedAt: new Date().toISOString() }]);
+    setDraftSong(null);
   };
 
   const deleteSong = (id) => {
@@ -3714,6 +3723,17 @@ export default function GuitarApp() {
           />
         )
       )}
+      {draftSong && (
+        <SongEditModal
+          song={draftSong}
+          onChange={setDraftSong}
+          onSave={confirmAddSong}
+          onCancel={() => setDraftSong(null)}
+          classificationOptions={classificationOptions}
+          onAddClassificationOption={addClassificationOption}
+          title="➕ Nouveau morceau"
+        />
+      )}
     </div>
   );
 }
@@ -3770,7 +3790,7 @@ function ClassificationManager({ options, onAdd, onRemove }) {
   );
 }
 
-function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUpdate, viewMode }) {
+function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUpdate, viewMode, classificationOptions = [], onAddClassificationOption }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState(song);
 
@@ -3821,6 +3841,8 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
             onChange={setEditData}
             onSave={saveEdit}
             onCancel={() => { setEditData(song); setIsEditing(false); }}
+            classificationOptions={classificationOptions}
+            onAddClassificationOption={onAddClassificationOption}
           />
         )}
       </>
@@ -3829,6 +3851,7 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
 
   if (viewMode === 'compact') {
     return (
+      <>
       <div className={`flex items-center gap-2 px-3 py-2 rounded transition ${isSelected ? 'bg-amber-600 text-white' : 'bg-gray-700 hover:bg-gray-650 text-gray-100'}`}>
         <button onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }} className="hover:opacity-75">
           <Star className={`w-4 h-4 ${song.isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-400'}`} />
@@ -3851,6 +3874,17 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
           🗑️
         </button>
       </div>
+      {isEditing && (
+        <SongEditModal
+          song={editData}
+          onChange={setEditData}
+          onSave={saveEdit}
+          onCancel={() => { setEditData(song); setIsEditing(false); }}
+          classificationOptions={classificationOptions}
+          onAddClassificationOption={onAddClassificationOption}
+        />
+      )}
+      </>
     );
   }
 
@@ -3943,6 +3977,8 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
             setEditData(song);
             setIsEditing(false);
           }}
+          classificationOptions={classificationOptions}
+          onAddClassificationOption={onAddClassificationOption}
         />
       )}
     </>
