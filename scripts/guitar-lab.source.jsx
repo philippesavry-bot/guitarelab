@@ -3770,7 +3770,7 @@ function ClassificationManager({ options, onAdd, onRemove }) {
   );
 }
 
-function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUpdate, viewMode }) {
+function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUpdate, viewMode, classificationOptions = [], onAddClassificationOption }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState(song);
 
