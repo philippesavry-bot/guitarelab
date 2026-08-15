@@ -3945,6 +3945,8 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
             setEditData(song);
             setIsEditing(false);
           }}
+          classificationOptions={classificationOptions}
+          onAddClassificationOption={onAddClassificationOption}
         />
       )}
     </>
