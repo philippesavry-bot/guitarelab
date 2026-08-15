@@ -3327,6 +3327,7 @@ export default function GuitarApp() {
 
   // Liste maîtresse des étiquettes de classement, modifiable et partagée entre la bibliothèque et l'écran de travail
   const [classificationOptions, setClassificationOptions] = useState(DEFAULT_CLASSIFICATIONS);
+  const [draftSong, setDraftSong] = useState(null);
   const [classificationsLoaded, setClassificationsLoaded] = useState(false);
   const classificationsSaveTimerRef = useRef(null);
 
