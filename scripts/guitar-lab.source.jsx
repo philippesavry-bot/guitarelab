@@ -3248,6 +3248,7 @@ const DEFAULT_SONGS = REPERTOIRE.map(s => ({ ...s, createdAt: LIBRARY_SEED_DATE,
 
 const SONGS_STORAGE_KEY = 'guitar-lab:songs:v2';
 const CLASSIFICATIONS_STORAGE_KEY = 'guitar-lab:classifications';
+const PREFS_STORAGE_KEY = 'guitar-lab:display-prefs';
 
 // Lit plusieurs fichiers image en parallèle et renvoie leurs data-URL dans l'ordre choisi
 function readFilesAsDataUrls(files) {
