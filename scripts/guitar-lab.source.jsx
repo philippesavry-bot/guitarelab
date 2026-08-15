@@ -3414,11 +3414,12 @@ export default function GuitarApp() {
     lastModified: songs.length > 0 ? new Date(Math.max(...songs.map(s => new Date(s.updatedAt)))).toLocaleDateString('fr-FR') : '-',
   };
 
-  const addSong = () => {
-    const newSong = {
-      id: Date.now().toString(),
-      artist: 'Nouvel artiste',
-      title: 'Nouveau morceau',
+  const makeNewSong = () => {
+    const now = Date.now().toString();
+    return {
+      id: now,
+      artist: '',
+      title: '',
       classifications: ['À travailler'],
       difficulty: 'medium',
       language: 'FR',
@@ -3429,20 +3430,20 @@ export default function GuitarApp() {
       progress: 0,
       isFavorite: false,
       tags: [],
-      youtubeUrls: [{ id: Date.now().toString() + '-y', url: '' }],
+      youtubeUrls: [{ id: now + '-y', url: '' }],
       versions: [{
-        id: Date.now().toString() + '-v',
+        id: now + '-v',
         label: 'Facile',
         bpm: 120,
         capo: 0,
         key: 'Em',
         structure: [{
-          id: Date.now().toString() + '-s',
-          section: 'Section',
+          id: now + '-s',
+          section: 'Intro',
           cols: 4,
           rows: 1,
           rhythm: [],
-          cells: Array.from({ length: 4 }, (_, i) => ({ id: `${Date.now()}-${i}`, split: false, chord: '', top: '', bottom: '' })),
+          cells: Array.from({ length: 4 }, (_, i) => ({ id: `${now}-${i}`, split: false, chord: '', top: '', bottom: '' })),
         }],
         images: [],
         notes: '',
@@ -3450,7 +3451,14 @@ export default function GuitarApp() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    setSongs([...songs, newSong]);
+  };
+
+  const addSong = () => setDraftSong(makeNewSong());
+
+  const confirmAddSong = () => {
+    if (!draftSong) return;
+    setSongs([...songs, { ...draftSong, updatedAt: new Date().toISOString() }]);
+    setDraftSong(null);
   };
 
   const deleteSong = (id) => {
