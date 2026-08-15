@@ -3821,6 +3821,8 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
             onChange={setEditData}
             onSave={saveEdit}
             onCancel={() => { setEditData(song); setIsEditing(false); }}
+            classificationOptions={classificationOptions}
+            onAddClassificationOption={onAddClassificationOption}
           />
         )}
       </>
