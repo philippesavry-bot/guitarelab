@@ -3377,6 +3377,43 @@ export default function GuitarApp() {
   const [viewMode, setViewMode] = useState('detailed');
   const [sortBy, setSortBy] = useState('favorite');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+  const [prefsSaved, setPrefsSaved] = useState(false);
+
+  // Chargement des préférences d'affichage enregistrées
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await window.storage.get(PREFS_STORAGE_KEY, false);
+        if (!cancelled && result?.value) {
+          const p = JSON.parse(result.value) || {};
+          if (p.viewMode) setViewMode(p.viewMode);
+          if (p.sortBy) setSortBy(p.sortBy);
+          if (p.groupBy) setGroupBy(p.groupBy);
+          if (p.classificationFilter) setClassificationFilter(p.classificationFilter);
+          if (typeof p.sidebarCollapsed === 'boolean') setSidebarCollapsed(p.sidebarCollapsed);
+        }
+      } catch (err) {
+        // Aucune préférence enregistrée
+      } finally {
+        if (!cancelled) setPrefsLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const saveDisplayPrefs = async () => {
+    try {
+      await window.storage.set(PREFS_STORAGE_KEY, JSON.stringify({
+        viewMode, sortBy, groupBy, classificationFilter, sidebarCollapsed,
+      }), false);
+      setPrefsSaved(true);
+      setTimeout(() => setPrefsSaved(false), 2000);
+    } catch (err) {
+      setPrefsSaved(false);
+    }
+  };
 
   const selectedSong = songs.find(s => s.id === selectedSongId);
   const selectedVersion = selectedSong?.versions.find(v => v.id === selectedVersionId) || selectedSong?.versions[0];
