@@ -3415,6 +3415,17 @@ export default function GuitarApp() {
     }
   };
 
+  // Mémorisation automatique de l'affichage choisi
+  useEffect(() => {
+    if (!prefsLoaded) return;
+    const t = setTimeout(() => {
+      window.storage.set(PREFS_STORAGE_KEY, JSON.stringify({
+        viewMode, sortBy, groupBy, classificationFilter, sidebarCollapsed,
+      }), false).catch(() => {});
+    }, 500);
+    return () => clearTimeout(t);
+  }, [viewMode, sortBy, groupBy, classificationFilter, sidebarCollapsed, prefsLoaded]);
+
   const selectedSong = songs.find(s => s.id === selectedSongId);
   const selectedVersion = selectedSong?.versions.find(v => v.id === selectedVersionId) || selectedSong?.versions[0];
 
