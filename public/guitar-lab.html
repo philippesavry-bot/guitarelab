@@ -3393,6 +3393,7 @@ const DEFAULT_SONGS = REPERTOIRE.map(s => ({ ...s, createdAt: LIBRARY_SEED_DATE,
 
 const SONGS_STORAGE_KEY = 'guitar-lab:songs:v2';
 const CLASSIFICATIONS_STORAGE_KEY = 'guitar-lab:classifications';
+const PREFS_STORAGE_KEY = 'guitar-lab:display-prefs';
 
 // Lit plusieurs fichiers image en parallèle et renvoie leurs data-URL dans l'ordre choisi
 function readFilesAsDataUrls(files) {
@@ -3522,6 +3523,54 @@ function GuitarApp() {
   const [viewMode, setViewMode] = useState('detailed');
   const [sortBy, setSortBy] = useState('favorite');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+  const [prefsSaved, setPrefsSaved] = useState(false);
+
+  // Chargement des préférences d'affichage enregistrées
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await window.storage.get(PREFS_STORAGE_KEY, false);
+        if (!cancelled && result?.value) {
+          const p = JSON.parse(result.value) || {};
+          if (p.viewMode) setViewMode(p.viewMode);
+          if (p.sortBy) setSortBy(p.sortBy);
+          if (p.groupBy) setGroupBy(p.groupBy);
+          if (p.classificationFilter) setClassificationFilter(p.classificationFilter);
+          if (typeof p.sidebarCollapsed === 'boolean') setSidebarCollapsed(p.sidebarCollapsed);
+        }
+      } catch (err) {
+        // Aucune préférence enregistrée
+      } finally {
+        if (!cancelled) setPrefsLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const saveDisplayPrefs = async () => {
+    try {
+      await window.storage.set(PREFS_STORAGE_KEY, JSON.stringify({
+        viewMode, sortBy, groupBy, classificationFilter, sidebarCollapsed,
+      }), false);
+      setPrefsSaved(true);
+      setTimeout(() => setPrefsSaved(false), 2000);
+    } catch (err) {
+      setPrefsSaved(false);
+    }
+  };
+
+  // Mémorisation automatique de l'affichage choisi
+  useEffect(() => {
+    if (!prefsLoaded) return;
+    const t = setTimeout(() => {
+      window.storage.set(PREFS_STORAGE_KEY, JSON.stringify({
+        viewMode, sortBy, groupBy, classificationFilter, sidebarCollapsed,
+      }), false).catch(() => {});
+    }, 500);
+    return () => clearTimeout(t);
+  }, [viewMode, sortBy, groupBy, classificationFilter, sidebarCollapsed, prefsLoaded]);
 
   const selectedSong = songs.find(s => s.id === selectedSongId);
   const selectedVersion = selectedSong?.versions.find(v => v.id === selectedVersionId) || selectedSong?.versions[0];
@@ -3544,6 +3593,11 @@ function GuitarApp() {
     if (sortBy === 'progress-desc') return b.progress - a.progress;
     if (sortBy === 'recent') return new Date(b.updatedAt) - new Date(a.updatedAt);
     if (sortBy === 'old') return new Date(a.updatedAt) - new Date(b.updatedAt);
+    if (sortBy === 'created-desc') return new Date(b.createdAt) - new Date(a.createdAt);
+    if (sortBy === 'created-asc') return new Date(a.createdAt) - new Date(b.createdAt);
+    if (sortBy === 'alpha-asc') return a.title.localeCompare(b.title, 'fr', { sensitivity: 'base' });
+    if (sortBy === 'alpha-desc') return b.title.localeCompare(a.title, 'fr', { sensitivity: 'base' });
+    if (sortBy === 'artist-asc') return a.artist.localeCompare(b.artist, 'fr', { sensitivity: 'base' });
     if (sortBy === 'difficulty-asc' || sortBy === 'difficulty-desc') {
       const da = DIFFICULTY_ORDER.indexOf(getDifficulty(a));
       const db = DIFFICULTY_ORDER.indexOf(getDifficulty(b));
@@ -3717,7 +3771,45 @@ function GuitarApp() {
                         <option value="progress-asc">📉 Progression (bas→haut)</option>
                         <option value="difficulty-asc">🟢 Difficulté (facile→difficile)</option>
                         <option value="difficulty-desc">🔴 Difficulté (difficile→facile)</option>
+                        <option value="created-desc">🆕 Date d'ajout (récent→ancien)</option>
+                        <option value="created-asc">🆕 Date d'ajout (ancien→récent)</option>
+                        <option value="alpha-asc">🔤 Titre (A→Z)</option>
+                        <option value="alpha-desc">🔤 Titre (Z→A)</option>
+                        <option value="artist-asc">🎤 Artiste (A→Z)</option>
                       </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500 block mb-2">Tris rapides :</label>
+                      <div className="grid grid-cols-2 gap-1">
+                        <button
+                          onClick={() => setSortBy('created-desc')}
+                          className={`px-2 py-2 rounded text-xs font-semibold transition text-left ${sortBy === 'created-desc' || sortBy === 'created-asc' ? 'bg-amber-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-1px_0_rgba(0,0,0,0.3)]' : 'bg-gray-700 hover:bg-gray-600'}`}
+                          title="Trier par date d'ajout"
+                        >
+                          🆕 Ajout
+                        </button>
+                        <button
+                          onClick={() => setSortBy(sortBy === 'recent' ? 'old' : 'recent')}
+                          className={`px-2 py-2 rounded text-xs font-semibold transition text-left ${sortBy === 'recent' || sortBy === 'old' ? 'bg-amber-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-1px_0_rgba(0,0,0,0.3)]' : 'bg-gray-700 hover:bg-gray-600'}`}
+                          title="Trier par date de modification"
+                        >
+                          📅 Modif
+                        </button>
+                        <button
+                          onClick={() => setSortBy(sortBy === 'alpha-asc' ? 'alpha-desc' : 'alpha-asc')}
+                          className={`px-2 py-2 rounded text-xs font-semibold transition text-left ${sortBy === 'alpha-asc' || sortBy === 'alpha-desc' ? 'bg-amber-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-1px_0_rgba(0,0,0,0.3)]' : 'bg-gray-700 hover:bg-gray-600'}`}
+                          title="Trier par titre"
+                        >
+                          🔤 Titre
+                        </button>
+                        <button
+                          onClick={() => setSortBy('artist-asc')}
+                          className={`px-2 py-2 rounded text-xs font-semibold transition text-left ${sortBy === 'artist-asc' ? 'bg-amber-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-1px_0_rgba(0,0,0,0.3)]' : 'bg-gray-700 hover:bg-gray-600'}`}
+                          title="Trier par artiste"
+                        >
+                          🎤 Artiste
+                        </button>
+                      </div>
                     </div>
                     <div>
                       <label className="text-xs text-gray-500 block mb-2">Affichage :</label>
@@ -3938,10 +4030,32 @@ function ClassificationManager({ options, onAdd, onRemove }) {
 function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUpdate, viewMode, classificationOptions = [], onAddClassificationOption }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState(song);
+  const [coverError, setCoverError] = useState(false);
+
+  useEffect(() => { setCoverError(false); }, [song.imageUrl]);
 
   const saveEdit = () => {
     onUpdate(editData);
     setIsEditing(false);
+  };
+
+  const CoverThumb = ({ size }) => {
+    const dim = size === 'sm' ? 'w-9 h-9' : size === 'md' ? 'w-full aspect-square' : 'w-14 h-14';
+    if (song.imageUrl && !coverError) {
+      return (
+        <img
+          src={song.imageUrl}
+          alt=""
+          onError={() => setCoverError(true)}
+          className={`${dim} object-cover rounded-md border border-gray-600 bg-gray-800 flex-shrink-0`}
+        />
+      );
+    }
+    return (
+      <div className={`${dim} rounded-md border border-gray-600 bg-gray-800 flex items-center justify-center flex-shrink-0 text-gray-600`}>
+        <Music className={size === 'sm' ? 'w-4 h-4' : 'w-6 h-6'} />
+      </div>
+    );
   };
 
   if (viewMode === 'tiles') {
@@ -3953,6 +4067,9 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
             isSelected ? 'border-amber-500 bg-amber-500/15' : 'border-gray-600 bg-gray-750 hover:bg-gray-700'
           }`}
         >
+          <div className="mb-1.5">
+            <CoverThumb size="md" />
+          </div>
           <div className="flex items-start justify-between gap-1 mb-1">
             <button
               onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
@@ -4001,6 +4118,7 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
         <button onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }} className="hover:opacity-75">
           <Star className={`w-4 h-4 ${song.isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-400'}`} />
         </button>
+        <CoverThumb size="sm" />
         <DifficultyPick difficulty={song.difficulty} size={14} onChange={(d) => onUpdate({ ...song, difficulty: d })} />
         <div className="flex-1 min-w-0 cursor-pointer" onClick={onSelect}>
           <div className="text-sm font-semibold truncate">{song.title}</div>
@@ -4042,21 +4160,24 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
         }`}
       >
         <div className="flex items-start justify-between gap-3 mb-2">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleFavorite();
-                }}
-                className="hover:opacity-75 transition flex-shrink-0"
-              >
-                <Star className={`w-4 h-4 ${song.isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-500'}`} />
-              </button>
-              <DifficultyPick difficulty={song.difficulty} size={15} onChange={(d) => onUpdate({ ...song, difficulty: d })} />
-              <h3 className="font-bold truncate text-sm">{song.title}</h3>
+          <div className="flex items-start gap-3 flex-1 min-w-0">
+            <CoverThumb size="lg" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleFavorite();
+                  }}
+                  className="hover:opacity-75 transition flex-shrink-0"
+                >
+                  <Star className={`w-4 h-4 ${song.isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-500'}`} />
+                </button>
+                <DifficultyPick difficulty={song.difficulty} size={15} onChange={(d) => onUpdate({ ...song, difficulty: d })} />
+                <h3 className="font-bold truncate text-sm">{song.title}</h3>
+              </div>
+              <p className="text-xs text-gray-400 truncate">{song.artist}</p>
             </div>
-            <p className="text-xs text-gray-400 truncate">{song.artist}</p>
           </div>
           <div className="flex gap-1 flex-shrink-0">
             <button
@@ -5320,7 +5441,8 @@ function ImageEditorModal({ src, onSave, onClose }) {
     const rect = canvasRef.current.getBoundingClientRect();
     const scaleX = canvasRef.current.width / rect.width;
     const scaleY = canvasRef.current.height / rect.height;
-    return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+    const point = (e.touches && e.touches[0]) ? e.touches[0] : ((e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e);
+    return { x: (point.clientX - rect.left) * scaleX, y: (point.clientY - rect.top) * scaleY };
   };
 
   const drawCropOverlay = (rect) => {
@@ -5340,6 +5462,7 @@ function ImageEditorModal({ src, onSave, onClose }) {
   };
 
   const handlePointerDown = (e) => {
+    e.preventDefault?.();
     e.target.setPointerCapture?.(e.pointerId);
     const pos = getPos(e);
     if (mode === 'draw') {
@@ -5361,6 +5484,7 @@ function ImageEditorModal({ src, onSave, onClose }) {
 
   const handlePointerMove = (e) => {
     if (mode === 'draw' && drawingRef.current) {
+      e.preventDefault?.();
       const pos = getPos(e);
       const ctx = canvasRef.current.getContext('2d');
       ctx.strokeStyle = color;
@@ -5373,6 +5497,7 @@ function ImageEditorModal({ src, onSave, onClose }) {
       ctx.stroke();
       lastPosRef.current = pos;
     } else if (mode === 'crop' && cropStartRef.current) {
+      e.preventDefault?.();
       const pos = getPos(e);
       const start = cropStartRef.current;
       const canvas = canvasRef.current;
@@ -5387,7 +5512,8 @@ function ImageEditorModal({ src, onSave, onClose }) {
     }
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e) => {
+    e.preventDefault?.();
     drawingRef.current = false;
     cropStartRef.current = null;
   };
@@ -5442,6 +5568,26 @@ function ImageEditorModal({ src, onSave, onClose }) {
     fitToCanvas(img);
   };
 
+  const supportsPointer = typeof window !== 'undefined' && !!window.PointerEvent;
+
+  const canvasEventProps = supportsPointer
+    ? {
+        onPointerDown: handlePointerDown,
+        onPointerMove: handlePointerMove,
+        onPointerUp: handlePointerUp,
+        onPointerLeave: handlePointerUp,
+      }
+    : {
+        onMouseDown: handlePointerDown,
+        onMouseMove: handlePointerMove,
+        onMouseUp: handlePointerUp,
+        onMouseLeave: handlePointerUp,
+        onTouchStart: handlePointerDown,
+        onTouchMove: handlePointerMove,
+        onTouchEnd: handlePointerUp,
+        onTouchCancel: handlePointerUp,
+      };
+
   return (
     <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
       <div className="bg-gray-800 border border-gray-600 rounded-lg p-4 max-w-full max-h-full flex flex-col gap-3">
@@ -5475,11 +5621,8 @@ function ImageEditorModal({ src, onSave, onClose }) {
           <canvas
             ref={canvasRef}
             className="block"
-            style={{ display: ready ? 'block' : 'none', cursor: mode === 'crop' ? 'crosshair' : mode === 'text' ? 'text' : 'crosshair' }}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerUp}
+            style={{ display: ready ? 'block' : 'none', cursor: mode === 'crop' ? 'crosshair' : mode === 'text' ? 'text' : 'crosshair', touchAction: 'none' }}
+            {...canvasEventProps}
           />
           {textInput && (
             <input
