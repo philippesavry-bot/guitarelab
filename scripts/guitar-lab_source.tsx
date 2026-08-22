@@ -54,6 +54,29 @@ function nextDifficulty(current) {
   return DIFFICULTY_ORDER[(i + 1) % DIFFICULTY_ORDER.length];
 }
 
+// Révision espacée : intervalle de rappel selon le niveau de maîtrise (progress)
+const DEFAULT_REVIEW_INTERVALS = { low: 2, mid: 5, high: 12 };
+function reviewIntervalDays(progress, intervals = DEFAULT_REVIEW_INTERVALS) {
+  if (progress >= 71) return intervals.high;
+  if (progress >= 34) return intervals.mid;
+  return intervals.low;
+}
+
+// Calcule les morceaux "à revoir" aujourd'hui : jamais pratiqués, ou dont l'intervalle est dépassé.
+// Trie par retard décroissant (le plus en retard d'abord) et retourne les `limit` premiers.
+function computeReviewQueue(songs, limit = 3, intervals = DEFAULT_REVIEW_INTERVALS) {
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+  const withDelay = songs.map(s => {
+    const last = s.lastPracticedAt ? new Date(s.lastPracticedAt).getTime() : null;
+    const interval = reviewIntervalDays(s.progress || 0, intervals) * DAY;
+    const overdueMs = last === null ? Infinity : (now - last - interval);
+    return { song: s, overdueMs };
+  }).filter(x => x.overdueMs > 0);
+  withDelay.sort((a, b) => b.overdueMs - a.overdueMs);
+  return withDelay.slice(0, limit).map(x => x.song);
+}
+
 // Extrait l'identifiant d'une vidéo YouTube depuis différents formats d'URL
 function extractYoutubeId(url) {
   if (!url) return null;
@@ -3548,6 +3571,7 @@ export default function GuitarApp() {
       progress: 0,
       isFavorite: false,
       isSetlist: false,
+      lastPracticedAt: null,
       tags: [],
       youtubeUrls: [{ id: now + '-y', url: '' }],
       versions: [{
@@ -3595,6 +3619,59 @@ export default function GuitarApp() {
 
   const toggleSetlist = (id) => {
     setSongs(songs.map(s => s.id === id ? { ...s, isSetlist: !s.isSetlist } : s));
+  };
+
+  const markPracticed = (id) => {
+    setSongs(songs.map(s => s.id === id ? { ...s, lastPracticedAt: new Date().toISOString() } : s));
+  };
+
+  const [reviewIntervals, setReviewIntervals] = useState(DEFAULT_REVIEW_INTERVALS);
+  const [reviewSettingsOpen, setReviewSettingsOpen] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await window.storage.get('guitar-lab:review-intervals', false);
+        if (result?.value) setReviewIntervals(JSON.parse(result.value));
+      } catch (err) { /* pas de préférence enregistrée */ }
+    })();
+  }, []);
+  const updateReviewIntervals = (next) => {
+    setReviewIntervals(next);
+    window.storage.set('guitar-lab:review-intervals', JSON.stringify(next), false).catch(() => {});
+  };
+
+  const reviewQueue = useMemo(() => computeReviewQueue(songs, 3, reviewIntervals), [songs, reviewIntervals]);
+
+  // Journal de pratique : sessions chronométrées (toutes chansons confondues) + objectif hebdomadaire
+  const [practiceSessions, setPracticeSessions] = useState([]);
+  const [weeklyGoalMinutes, setWeeklyGoalMinutes] = useState(120);
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await window.storage.get('guitar-lab:practice-sessions', false);
+        if (result?.value) setPracticeSessions(JSON.parse(result.value));
+      } catch (err) { /* pas de session enregistrée */ }
+      try {
+        const goalResult = await window.storage.get('guitar-lab:weekly-goal', false);
+        if (goalResult?.value) setWeeklyGoalMinutes(JSON.parse(goalResult.value));
+      } catch (err) { /* objectif par défaut */ }
+    })();
+  }, []);
+
+  const logPracticeSession = (songId, songTitle, durationSec) => {
+    if (durationSec < 5) return; // ignore les sessions trop courtes (déclenchement accidentel)
+    const entry = { id: newId(), songId, title: songTitle, date: new Date().toISOString(), durationSec };
+    setPracticeSessions(prev => {
+      const next = [...prev, entry].slice(-500); // on garde un historique raisonnable
+      window.storage.set('guitar-lab:practice-sessions', JSON.stringify(next), false).catch(() => {});
+      return next;
+    });
+    markPracticed(songId);
+  };
+
+  const updateWeeklyGoal = (minutes) => {
+    setWeeklyGoalMinutes(minutes);
+    window.storage.set('guitar-lab:weekly-goal', JSON.stringify(minutes), false).catch(() => {});
   };
 
   const organizeByGroup = () => {
@@ -3833,6 +3910,73 @@ export default function GuitarApp() {
 
             {/* LIBRARY CONTENT */}
             <div className="flex-1 overflow-y-auto">
+              <div className="m-4 mb-0 p-3 bg-amber-900/20 border border-amber-700/50 rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-amber-400 flex items-center gap-1.5">
+                    📅 {reviewQueue.length > 0 ? "À revoir aujourd'hui" : 'Révision espacée : tout est à jour ✅'}
+                  </h3>
+                  <button
+                    onClick={() => setReviewSettingsOpen(!reviewSettingsOpen)}
+                    className="p-1 hover:bg-gray-700 rounded transition"
+                    title="Régler les intervalles de révision"
+                  >
+                    ⚙️
+                  </button>
+                </div>
+
+                {reviewSettingsOpen && (
+                    <div className="mb-3 p-2 bg-gray-800 border border-gray-600 rounded-lg space-y-2">
+                      <p className="text-[11px] text-gray-400">Revoir un morceau tous les... (en jours)</p>
+                      {[
+                        { key: 'low', label: 'Peu maîtrisé (< 34%)' },
+                        { key: 'mid', label: 'Intermédiaire (34-70%)' },
+                        { key: 'high', label: 'Bien acquis (≥ 71%)' },
+                      ].map(row => (
+                        <div key={row.key} className="flex items-center justify-between gap-2">
+                          <span className="text-xs text-gray-300">{row.label}</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={90}
+                            value={reviewIntervals[row.key]}
+                            onChange={(e) => {
+                              const v = Math.max(1, Math.min(90, parseInt(e.target.value, 10) || 1));
+                              updateReviewIntervals({ ...reviewIntervals, [row.key]: v });
+                            }}
+                            className="w-16 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs text-right focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {reviewQueue.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {reviewQueue.map(s => (
+                        <div key={s.id} className="flex items-center gap-1.5 bg-gray-800 border border-gray-600 rounded-lg pl-2 pr-1 py-1">
+                          <button
+                            onClick={() => {
+                              setSelectedSongId(s.id);
+                              setSelectedVersionId(s.versions[0]?.id);
+                              setAppMode('editor');
+                            }}
+                            className="text-xs font-semibold hover:text-amber-400 transition text-left"
+                            title={s.artist}
+                          >
+                            {s.title}
+                          </button>
+                          <button
+                            onClick={() => markPracticed(s.id)}
+                            className="p-1 hover:bg-green-700 rounded transition"
+                            title="Marquer comme pratiqué aujourd'hui"
+                          >
+                            ✓
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               {sortedSongs.length === 0 ? (
                 <div className="flex items-center justify-center h-full">
                   <div className="text-center">
@@ -3920,6 +4064,10 @@ export default function GuitarApp() {
             classificationOptions={classificationOptions}
             onAddClassificationOption={addClassificationOption}
             onRemoveClassificationOption={removeClassificationOption}
+            practiceSessions={practiceSessions}
+            onLogPracticeSession={logPracticeSession}
+            weeklyGoalMinutes={weeklyGoalMinutes}
+            onUpdateWeeklyGoal={updateWeeklyGoal}
           />
         )
       )}
@@ -4666,7 +4814,7 @@ function ClassificationPicker({ song, options, onAddOption, onRemoveOption, onUp
   );
 }
 
-function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVersion, onUpdateSong, classificationOptions = [], onAddClassificationOption, onRemoveClassificationOption }) {
+function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVersion, onUpdateSong, classificationOptions = [], onAddClassificationOption, onRemoveClassificationOption, practiceSessions = [], onLogPracticeSession, weeklyGoalMinutes = 120, onUpdateWeeklyGoal }) {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [performance, setPerformance] = useState(false);
@@ -4675,6 +4823,31 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
   const validYoutubeLinks = (song.youtubeUrls || [])
     .map(l => ({ ...l, videoId: extractYoutubeId(l.url) }))
     .filter(l => l.videoId);
+
+  // Minuteur de pratique : chronomètre la session en cours sur ce morceau
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [timerSeconds, setTimerSeconds] = useState(0);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  useEffect(() => {
+    if (!timerRunning) return;
+    const interval = setInterval(() => setTimerSeconds(s => s + 1), 1000);
+    return () => clearInterval(interval);
+  }, [timerRunning]);
+  // Arrête et remet à zéro le chrono si on change de morceau
+  useEffect(() => {
+    setTimerRunning(false);
+    setTimerSeconds(0);
+  }, [song.id]);
+  const formatTimer = (sec) => {
+    const m = Math.floor(sec / 60).toString().padStart(2, '0');
+    const s = (sec % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+  const stopAndLogTimer = () => {
+    setTimerRunning(false);
+    if (timerSeconds > 0) onLogPracticeSession?.(song.id, song.title, timerSeconds);
+    setTimerSeconds(0);
+  };
 
   // Largeurs des bandeaux latéraux, réglables par glisser, mémorisées d'une session à l'autre
   const [leftPanelWidth, setLeftPanelWidth] = useState(224);
@@ -4846,6 +5019,56 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
             </div>
           )}
 
+          <div className="flex items-center gap-1 bg-gray-900 rounded p-1 border border-gray-700">
+            <span className="text-xs font-mono w-12 text-center">{formatTimer(timerSeconds)}</span>
+            {!timerRunning ? (
+              <button
+                onClick={() => setTimerRunning(true)}
+                className="p-1.5 bg-green-700 hover:bg-green-600 rounded transition"
+                title={timerSeconds > 0 ? 'Reprendre le chrono' : 'Démarrer une session de pratique'}
+              >
+                ▶️
+              </button>
+            ) : (
+              <button
+                onClick={() => setTimerRunning(false)}
+                className="p-1.5 bg-amber-700 hover:bg-amber-600 rounded transition"
+                title="Mettre en pause"
+              >
+                ⏸️
+              </button>
+            )}
+            {timerSeconds > 0 && (
+              <button
+                onClick={stopAndLogTimer}
+                className="p-1.5 bg-red-700 hover:bg-red-600 rounded transition"
+                title="Arrêter et enregistrer la session"
+              >
+                ⏹️
+              </button>
+            )}
+          </div>
+
+          <button
+            onClick={() => setHistoryOpen(true)}
+            className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded transition text-sm font-semibold flex items-center gap-1"
+            title="Journal de pratique et progression"
+          >
+            📊 Journal
+          </button>
+
+          <button
+            onClick={() => onUpdateSong({ ...song, lastPracticedAt: new Date().toISOString() })}
+            className={`px-3 py-2 rounded transition text-sm font-semibold flex items-center gap-1 ${
+              song.lastPracticedAt && new Date(song.lastPracticedAt).toDateString() === new Date().toDateString()
+                ? 'bg-green-700'
+                : 'bg-gray-700 hover:bg-gray-600'
+            }`}
+            title="Marquer comme pratiqué aujourd'hui (pour la révision espacée)"
+          >
+            ✓ Pratiqué
+          </button>
+
           <button
             onClick={() => setPerformance(true)}
             className="px-3 py-2 bg-amber-600 hover:bg-amber-500 rounded transition text-sm font-semibold flex items-center gap-1"
@@ -4871,6 +5094,16 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
 
       {activeVideoId && (
         <YoutubeMiniPlayer videoId={activeVideoId} onClose={() => setActiveVideoId(null)} />
+      )}
+
+      {historyOpen && (
+        <PracticeHistoryModal
+          song={song}
+          practiceSessions={practiceSessions}
+          weeklyGoalMinutes={weeklyGoalMinutes}
+          onUpdateWeeklyGoal={onUpdateWeeklyGoal}
+          onClose={() => setHistoryOpen(false)}
+        />
       )}
 
 
@@ -4959,6 +5192,101 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
 }
 
 // ============= Mode prestation : plein écran, uniquement les photos qui défilent =============
+// Journal de pratique : historique des sessions, objectif hebdo, petit graphe de progression
+function PracticeHistoryModal({ song, practiceSessions, weeklyGoalMinutes, onUpdateWeeklyGoal, onClose }) {
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+
+  const songSessions = practiceSessions
+    .filter(s => s.songId === song.id)
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+  const songTotalSec = songSessions.reduce((sum, s) => sum + s.durationSec, 0);
+
+  // Total de la semaine en cours (toutes chansons), et minutes par jour sur les 7 derniers jours
+  const last7Days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(now - (6 - i) * DAY);
+    return { date: d, key: d.toDateString(), label: d.toLocaleDateString('fr-FR', { weekday: 'short' }) };
+  });
+  const minutesByDay = last7Days.map(day => {
+    const totalSec = practiceSessions
+      .filter(s => new Date(s.date).toDateString() === day.key)
+      .reduce((sum, s) => sum + s.durationSec, 0);
+    return { ...day, minutes: Math.round(totalSec / 60) };
+  });
+  const weekTotalMinutes = minutesByDay.reduce((sum, d) => sum + d.minutes, 0);
+  const maxMinutes = Math.max(...minutesByDay.map(d => d.minutes), 1);
+  const goalPct = Math.min(100, Math.round((weekTotalMinutes / Math.max(1, weeklyGoalMinutes)) * 100));
+
+  return (
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+      <div className="bg-gray-800 border border-gray-600 rounded-lg p-4 max-w-md w-full max-h-[85vh] overflow-y-auto flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-amber-400 text-sm">📊 Journal de pratique</h3>
+          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded transition">
+            <X className="w-4 h-4 text-gray-400" />
+          </button>
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs text-gray-400">Objectif hebdomadaire</span>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min={1}
+                max={2000}
+                value={weeklyGoalMinutes}
+                onChange={(e) => onUpdateWeeklyGoal(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                className="w-16 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs text-right focus:outline-none focus:border-amber-500"
+              />
+              <span className="text-xs text-gray-400">min</span>
+            </div>
+          </div>
+          <div className="w-full bg-gray-700 rounded-full h-2">
+            <div className="bg-amber-500 h-full rounded-full transition-all" style={{ width: `${goalPct}%` }} />
+          </div>
+          <p className="text-[11px] text-gray-400 mt-1">{weekTotalMinutes} / {weeklyGoalMinutes} min cette semaine (toutes chansons)</p>
+        </div>
+
+        <div>
+          <p className="text-xs text-gray-400 mb-2">Minutes par jour (7 derniers jours)</p>
+          <div className="flex items-end gap-1.5 h-20">
+            {minutesByDay.map((d, i) => (
+              <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1">
+                <div
+                  className="w-full bg-amber-600 rounded-t"
+                  style={{ height: `${Math.max(2, (d.minutes / maxMinutes) * 100)}%` }}
+                  title={`${d.minutes} min`}
+                />
+                <span className="text-[9px] text-gray-500">{d.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <p className="text-xs text-gray-400 mb-2">
+            « {song.title} » — {Math.round(songTotalSec / 60)} min au total, {songSessions.length} session{songSessions.length > 1 ? 's' : ''}
+          </p>
+          {songSessions.length === 0 ? (
+            <p className="text-xs text-gray-500 italic">Aucune session chronométrée pour ce morceau pour l'instant.</p>
+          ) : (
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {songSessions.slice(0, 20).map(s => (
+                <div key={s.id} className="flex items-center justify-between text-xs bg-gray-700/50 rounded px-2 py-1">
+                  <span className="text-gray-300">{new Date(s.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })} à {new Date(s.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
+                  <span className="font-mono text-amber-400">{Math.floor(s.durationSec / 60)}:{(s.durationSec % 60).toString().padStart(2, '0')}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function PerformanceMode({ song, version, onClose }) {
   const images = version?.images || [];
   const scrollRef = useRef(null);
