@@ -4821,6 +4821,54 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
     .map(l => ({ ...l, videoId: extractYoutubeId(l.url) }))
     .filter(l => l.videoId);
 
+  // Largeurs des bandeaux latéraux, réglables par glisser, mémorisées d'une session à l'autre
+  const [leftPanelWidth, setLeftPanelWidth] = useState(224);
+  const [rightPanelWidth, setRightPanelWidth] = useState(320);
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await window.storage.get('guitar-lab:panel-widths', false);
+        if (result?.value) {
+          const p = JSON.parse(result.value);
+          if (p.left) setLeftPanelWidth(p.left);
+          if (p.right) setRightPanelWidth(p.right);
+        }
+      } catch (err) { /* pas de préférence enregistrée */ }
+    })();
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      window.storage.set('guitar-lab:panel-widths', JSON.stringify({ left: leftPanelWidth, right: rightPanelWidth }), false).catch(() => {});
+    }, 500);
+    return () => clearTimeout(t);
+  }, [leftPanelWidth, rightPanelWidth]);
+
+  const startResize = (side) => (e) => {
+    e.preventDefault();
+    const pointer = e.touches ? e.touches[0] : e;
+    const startX = pointer.clientX;
+    const startWidth = side === 'left' ? leftPanelWidth : rightPanelWidth;
+    const min = side === 'left' ? 180 : 260;
+    const max = side === 'left' ? 460 : 560;
+
+    const onMove = (ev) => {
+      const p = ev.touches ? ev.touches[0] : ev;
+      const delta = side === 'left' ? (p.clientX - startX) : (startX - p.clientX);
+      const next = Math.max(min, Math.min(max, startWidth + delta));
+      if (side === 'left') setLeftPanelWidth(next); else setRightPanelWidth(next);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onUp);
+  };
+
 
   // Mode compact (téléphone) : tous les panneaux en volets superposés
   // Mode étroit (tablette verticale) : la structure reste affichée à gauche des photos, seul le panneau droit passe en volet
@@ -4983,20 +5031,31 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
           className={
             isCompact
               ? `fixed inset-y-0 left-0 z-40 w-72 max-w-[85vw] bg-gray-800 border-r border-gray-700 flex flex-col overflow-hidden transition-transform duration-200 shadow-2xl ${leftCollapsed ? '-translate-x-full' : 'translate-x-0'}`
-              : `bg-gray-800 border border-gray-700 rounded flex flex-col overflow-hidden transition-all duration-200 flex-shrink-0 ${leftCollapsed ? 'w-0 border-0' : (isNarrow ? 'w-48' : 'w-56')}`
+              : `bg-gray-800 border border-gray-700 rounded flex flex-col overflow-hidden flex-shrink-0 ${leftCollapsed ? 'w-0 border-0' : ''}`
           }
+          style={!isCompact && !leftCollapsed ? { width: leftPanelWidth } : undefined}
         >
           <LeftPanel version={version} updateVersion={updateVersion} />
         </div>
 
         {!isCompact && (
-          <button
-            onClick={() => setLeftCollapsed(!leftCollapsed)}
-            className="flex-shrink-0 w-4 self-stretch bg-gray-800 border border-gray-700 rounded hover:bg-gray-700 transition flex items-center justify-center group"
-            title={leftCollapsed ? 'Afficher le panneau Structure' : 'Masquer le panneau Structure'}
-          >
-            {leftCollapsed ? <ChevronRight className="w-3 h-3 text-gray-500 group-hover:text-amber-400" /> : <ChevronLeft className="w-3 h-3 text-gray-500 group-hover:text-amber-400" />}
-          </button>
+          <div className="flex-shrink-0 flex items-stretch">
+            {!leftCollapsed && (
+              <div
+                onMouseDown={startResize('left')}
+                onTouchStart={startResize('left')}
+                className="w-2 cursor-col-resize hover:bg-amber-600/50 transition-colors flex-shrink-0"
+                title="Glisser pour ajuster la largeur"
+              />
+            )}
+            <button
+              onClick={() => setLeftCollapsed(!leftCollapsed)}
+              className="flex-shrink-0 w-4 self-stretch bg-gray-800 border border-gray-700 rounded hover:bg-gray-700 transition flex items-center justify-center group"
+              title={leftCollapsed ? 'Afficher le panneau Structure' : 'Masquer le panneau Structure'}
+            >
+              {leftCollapsed ? <ChevronRight className="w-3 h-3 text-gray-500 group-hover:text-amber-400" /> : <ChevronLeft className="w-3 h-3 text-gray-500 group-hover:text-amber-400" />}
+            </button>
+          </div>
         )}
 
         <div className="flex-1 bg-gray-800 border border-gray-700 rounded flex flex-col overflow-hidden min-w-0">
@@ -5004,21 +5063,32 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
         </div>
 
         {!isNarrow && (
-          <button
-            onClick={() => setRightCollapsed(!rightCollapsed)}
-            className="flex-shrink-0 w-4 self-stretch bg-gray-800 border border-gray-700 rounded hover:bg-gray-700 transition flex items-center justify-center group"
-            title={rightCollapsed ? 'Afficher le panneau Notes/Galerie' : 'Masquer le panneau Notes/Galerie'}
-          >
-            {rightCollapsed ? <ChevronLeft className="w-3 h-3 text-gray-500 group-hover:text-amber-400" /> : <ChevronRight className="w-3 h-3 text-gray-500 group-hover:text-amber-400" />}
-          </button>
+          <div className="flex-shrink-0 flex items-stretch">
+            <button
+              onClick={() => setRightCollapsed(!rightCollapsed)}
+              className="flex-shrink-0 w-4 self-stretch bg-gray-800 border border-gray-700 rounded hover:bg-gray-700 transition flex items-center justify-center group"
+              title={rightCollapsed ? 'Afficher le panneau Notes/Galerie' : 'Masquer le panneau Notes/Galerie'}
+            >
+              {rightCollapsed ? <ChevronLeft className="w-3 h-3 text-gray-500 group-hover:text-amber-400" /> : <ChevronRight className="w-3 h-3 text-gray-500 group-hover:text-amber-400" />}
+            </button>
+            {!rightCollapsed && (
+              <div
+                onMouseDown={startResize('right')}
+                onTouchStart={startResize('right')}
+                className="w-2 cursor-col-resize hover:bg-amber-600/50 transition-colors flex-shrink-0"
+                title="Glisser pour ajuster la largeur"
+              />
+            )}
+          </div>
         )}
 
         <div
           className={
             isNarrow
               ? `fixed inset-y-0 right-0 z-40 w-80 max-w-[85vw] bg-gray-800 border-l border-gray-700 flex flex-col overflow-hidden transition-transform duration-200 shadow-2xl ${rightCollapsed ? 'translate-x-full' : 'translate-x-0'}`
-              : `bg-gray-800 border border-gray-700 rounded flex flex-col overflow-hidden transition-all duration-200 flex-shrink-0 ${rightCollapsed ? 'w-0 border-0' : 'w-80'}`
+              : `bg-gray-800 border border-gray-700 rounded flex flex-col overflow-hidden flex-shrink-0 ${rightCollapsed ? 'w-0 border-0' : ''}`
           }
+          style={!isNarrow && !rightCollapsed ? { width: rightPanelWidth } : undefined}
         >
           <RightPanel
             song={song}
@@ -5922,18 +5992,18 @@ function ChordThumbnailsPanel({ version, updateVersion }) {
       <h3 className="font-semibold text-amber-400 mb-2 text-sm">🎼 Accords ({thumbnails.length}/5)</h3>
       <div className="flex flex-wrap gap-2">
         {thumbnails.map(t => (
-          <div key={t.id} className="relative h-16 bg-gray-900 rounded border border-gray-600 overflow-hidden group flex-shrink-0 flex items-center justify-center" style={{ minWidth: 40, maxWidth: 112 }}>
+          <div key={t.id} className="relative h-32 bg-gray-900 rounded border border-gray-600 overflow-hidden group flex-shrink-0 flex items-center justify-center" style={{ minWidth: 80, maxWidth: 220 }}>
             <img src={t.src} alt="Accord" className="max-w-full max-h-full object-contain" />
             <button
               onClick={() => setEditingId(t.id)}
-              className="absolute bottom-0 left-0 bg-black/70 hover:bg-amber-600 text-white w-5 h-4 flex items-center justify-center text-[9px] leading-none rounded-tr"
+              className="absolute bottom-0 left-0 bg-black/70 hover:bg-amber-600 text-white w-7 h-6 flex items-center justify-center text-xs leading-none rounded-tr"
               title="Éditer cette image"
             >
               ✏️
             </button>
             <button
               onClick={() => removeThumbnail(t.id)}
-              className="absolute top-0 right-0 bg-black/70 hover:bg-red-600 text-white w-4 h-4 flex items-center justify-center text-[10px] leading-none rounded-bl"
+              className="absolute top-0 right-0 bg-black/70 hover:bg-red-600 text-white w-6 h-6 flex items-center justify-center text-sm leading-none rounded-bl"
               title="Retirer cette image"
             >
               ×
@@ -5944,7 +6014,7 @@ function ChordThumbnailsPanel({ version, updateVersion }) {
           <label
             onPaste={handlePaste}
             tabIndex={0}
-            className="w-16 h-16 rounded border border-dashed border-gray-500 hover:border-amber-500 flex-shrink-0 flex flex-col items-center justify-center text-gray-400 hover:text-amber-400 cursor-pointer text-[9px] text-center leading-tight transition"
+            className="w-32 h-32 rounded border border-dashed border-gray-500 hover:border-amber-500 flex-shrink-0 flex flex-col items-center justify-center text-gray-400 hover:text-amber-400 cursor-pointer text-xs text-center leading-tight transition"
             title="Cliquer pour importer (plusieurs possibles), ou coller (Ctrl+V) une image d'accord"
           >
             + / Coller
