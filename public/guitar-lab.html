@@ -7,6 +7,17 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Guitar Lab — Mes fiches de formation guitare</title>
     <meta name="description" content="Bibliothèque et fiches de travail pour mes morceaux de guitare, avec sauvegarde locale et synchronisation par fichier iCloud." />
+    <script>
+      // Avertissements attendus et sans impact ici (pas d'étape de build possible dans ce contexte) : filtrés silencieusement.
+      (function () {
+        const originalWarn = console.warn;
+        const silenced = ['in-browser Babel transformer', 'cdn.tailwindcss.com should not be used in production'];
+        console.warn = function (...args) {
+          if (typeof args[0] === 'string' && silenced.some(s => args[0].includes(s))) return;
+          originalWarn.apply(console, args);
+        };
+      })();
+    </script>
     <script src="https://cdn.tailwindcss.com/3.4.17"></script>
     <script>
       tailwind.config = {
