@@ -5626,13 +5626,236 @@ function ChordCell({ cell, onUpdate, onToggleSplit }) {
   );
 }
 
+const METRONOME_PREFS_KEY = 'guitar-lab:metronome-prefs';
+const TIME_SIGNATURES = [
+  { label: '4/4', beats: 4 },
+  { label: '3/4', beats: 3 },
+  { label: '2/4', beats: 2 },
+  { label: '6/8', beats: 2, defaultSubdivision: 3 },
+];
+
+// Métronome enrichi : accent sur le 1, mesures, subdivisions, tap-tempo, pré-compte visuel
+function Metronome({ bpm, onBpmChange }) {
+  const [isActive, setIsActive] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [timeSigIndex, setTimeSigIndex] = useState(0);
+  const [subdivision, setSubdivision] = useState(1);
+  const [accentFirstBeat, setAccentFirstBeat] = useState(true);
+  const [preCountEnabled, setPreCountEnabled] = useState(true);
+  const [uiBeat, setUiBeat] = useState({ beat: 0, isFirst: false, isMainBeat: false });
+  const [showCountIn, setShowCountIn] = useState(false);
+
+  const audioCtxRef = useRef(null);
+  const nextNoteTimeRef = useRef(0);
+  const stepRef = useRef(0);
+  const stepsSinceStartRef = useRef(0);
+  const timerRef = useRef(null);
+  const tapTimesRef = useRef([]);
+
+  const timeSig = TIME_SIGNATURES[timeSigIndex];
+  const beatsPerMeasure = timeSig.beats;
+
+  // Chargement / sauvegarde des préférences (mesure, subdivision, accent, pré-compte)
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await window.storage.get(METRONOME_PREFS_KEY, false);
+        if (result?.value) {
+          const p = JSON.parse(result.value);
+          if (typeof p.timeSigIndex === 'number') setTimeSigIndex(p.timeSigIndex);
+          if (typeof p.subdivision === 'number') setSubdivision(p.subdivision);
+          if (typeof p.accentFirstBeat === 'boolean') setAccentFirstBeat(p.accentFirstBeat);
+          if (typeof p.preCountEnabled === 'boolean') setPreCountEnabled(p.preCountEnabled);
+        }
+      } catch (err) { /* préférences par défaut */ }
+    })();
+  }, []);
+  useEffect(() => {
+    window.storage.set(METRONOME_PREFS_KEY, JSON.stringify({ timeSigIndex, subdivision, accentFirstBeat, preCountEnabled }), false).catch(() => {});
+  }, [timeSigIndex, subdivision, accentFirstBeat, preCountEnabled]);
+
+  const scheduleClick = (time, isAccent, isSub) => {
+    const ctx = audioCtxRef.current;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = isAccent ? 1300 : (isSub ? 650 : 950);
+    const vol = isAccent ? 0.22 : (isSub ? 0.05 : 0.13);
+    gain.gain.setValueAtTime(vol, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.06);
+    osc.start(time);
+    osc.stop(time + 0.07);
+  };
+
+  useEffect(() => {
+    if (!isActive) {
+      setShowCountIn(false);
+      return;
+    }
+    audioCtxRef.current = audioCtxRef.current || new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = audioCtxRef.current;
+    if (ctx.state === 'suspended') ctx.resume();
+
+    stepRef.current = 0;
+    stepsSinceStartRef.current = 0;
+    nextNoteTimeRef.current = ctx.currentTime + 0.05;
+    setShowCountIn(preCountEnabled);
+
+    const totalSteps = beatsPerMeasure * subdivision;
+    const secPerStep = 60 / bpm / subdivision;
+    const SCHEDULE_AHEAD = 0.12;
+
+    timerRef.current = setInterval(() => {
+      while (nextNoteTimeRef.current < ctx.currentTime + SCHEDULE_AHEAD) {
+        const step = stepRef.current;
+        const beatIdx = Math.floor(step / subdivision);
+        const subIdx = step % subdivision;
+        const isMainBeat = subIdx === 0;
+        const isFirst = beatIdx === 0 && isMainBeat;
+        const isAccent = isFirst && accentFirstBeat;
+        scheduleClick(nextNoteTimeRef.current, isAccent, !isMainBeat);
+
+        const delayMs = Math.max(0, (nextNoteTimeRef.current - ctx.currentTime) * 1000);
+        const stepsElapsed = stepsSinceStartRef.current;
+        setTimeout(() => {
+          setUiBeat({ beat: beatIdx + 1, isFirst, isMainBeat });
+          if (stepsElapsed >= totalSteps - 1) setShowCountIn(false);
+        }, delayMs);
+
+        nextNoteTimeRef.current += secPerStep;
+        stepRef.current = (step + 1) % totalSteps;
+        stepsSinceStartRef.current += 1;
+      }
+    }, 25);
+
+    return () => clearInterval(timerRef.current);
+  }, [isActive, bpm, beatsPerMeasure, subdivision, accentFirstBeat]);
+
+  const handleTap = () => {
+    const now = Date.now();
+    const taps = tapTimesRef.current.filter(t => now - t < 2000);
+    taps.push(now);
+    tapTimesRef.current = taps;
+    if (taps.length >= 2) {
+      const intervals = taps.slice(1).map((t, i) => t - taps[i]);
+      const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+      const newBpm = Math.round(Math.min(240, Math.max(20, 60000 / avg)));
+      onBpmChange(newBpm);
+    }
+  };
+
+  return (
+    <div className="relative flex items-center gap-1">
+      <button
+        onClick={() => setIsActive(!isActive)}
+        className={`px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 ${isActive ? 'bg-red-600' : 'bg-gray-700'}`}
+      >
+        {isActive ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
+      </button>
+
+      <input
+        type="number"
+        value={bpm}
+        onChange={(e) => {
+          const val = parseInt(e.target.value, 10);
+          onBpmChange(Number.isNaN(val) ? 0 : val);
+        }}
+        onBlur={(e) => onBpmChange(Math.min(240, Math.max(20, parseInt(e.target.value, 10) || 20)))}
+        min="20" max="240" className="w-12 px-1 py-1 bg-gray-700 border border-gray-600 rounded text-xs text-center focus:outline-none text-amber-400 font-bold"
+      />
+      <span className="text-xs text-gray-400">BPM</span>
+
+      <button
+        onClick={handleTap}
+        className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold"
+        title="Tapote au tempo souhaité (2 fois ou plus)"
+      >
+        TAP
+      </button>
+
+      {isActive && (
+        <span className="flex items-center gap-0.5 ml-0.5">
+          {Array.from({ length: beatsPerMeasure }, (_, i) => (
+            <span
+              key={i}
+              className={`w-2 h-2 rounded-full transition-colors ${
+                uiBeat.beat === i + 1 ? (i === 0 ? 'bg-amber-400' : 'bg-amber-600') : 'bg-gray-600'
+              }`}
+            />
+          ))}
+        </span>
+      )}
+
+      <button
+        onClick={() => setSettingsOpen(!settingsOpen)}
+        className="p-1 hover:bg-gray-700 rounded transition"
+        title="Réglages du métronome"
+      >
+        ⚙️
+      </button>
+
+      {settingsOpen && (
+        <div className="absolute top-full mt-1 left-0 z-30 bg-gray-800 border border-gray-600 rounded-lg shadow-xl p-3 w-56 space-y-3">
+          <div>
+            <label className="text-[11px] text-gray-400 block mb-1">Mesure</label>
+            <div className="flex gap-1">
+              {TIME_SIGNATURES.map((ts, i) => (
+                <button
+                  key={ts.label}
+                  onClick={() => {
+                    setTimeSigIndex(i);
+                    if (ts.defaultSubdivision) setSubdivision(ts.defaultSubdivision);
+                  }}
+                  className={`flex-1 px-2 py-1 rounded text-xs font-semibold ${timeSigIndex === i ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+                >
+                  {ts.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-[11px] text-gray-400 block mb-1">Subdivision</label>
+            <div className="flex gap-1">
+              {[1, 2, 3, 4].map(n => (
+                <button
+                  key={n}
+                  onClick={() => setSubdivision(n)}
+                  className={`flex-1 px-2 py-1 rounded text-xs font-semibold ${subdivision === n ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+                  title={n === 1 ? 'Noires' : n === 2 ? 'Croches' : n === 3 ? 'Triolets' : 'Doubles-croches'}
+                >
+                  ×{n}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+            <input type="checkbox" checked={accentFirstBeat} onChange={(e) => setAccentFirstBeat(e.target.checked)} className="accent-amber-500" />
+            Accent sur le temps 1
+          </label>
+          <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+            <input type="checkbox" checked={preCountEnabled} onChange={(e) => setPreCountEnabled(e.target.checked)} className="accent-amber-500" />
+            Pré-compte visuel au démarrage
+          </label>
+        </div>
+      )}
+
+      {showCountIn && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center pointer-events-none">
+          <span className={`font-bold ${uiBeat.isFirst ? 'text-amber-400 text-9xl' : 'text-white text-8xl'}`}>
+            {uiBeat.beat || beatsPerMeasure}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CenterPanel({ version, updateVersion }) {
   const [scrollSpeed, setScrollSpeed] = useState(2);
   const [isAutoScrolling, setIsAutoScrolling] = useState(false);
-  const [metronomeActive, setMetronomeActive] = useState(false);
   const [bpm, setBpm] = useState(version.bpm || 120);
   const galleryRef = useRef(null);
-  const audioContextRef = useRef(null);
   const images = version?.images || [];
 
   useEffect(() => {
@@ -5646,29 +5869,6 @@ function CenterPanel({ version, updateVersion }) {
     }, 100);
     return () => clearInterval(interval);
   }, [isAutoScrolling, scrollSpeed]);
-
-  const playMetronomeClick = () => {
-    if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    const ctx = audioContextRef.current;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.frequency.value = 800;
-    gain.gain.setValueAtTime(0.1, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.1);
-  };
-
-  useEffect(() => {
-    if (!metronomeActive) return;
-    const interval = (60 / bpm) * 1000;
-    const timer = setInterval(playMetronomeClick, interval);
-    return () => clearInterval(timer);
-  }, [metronomeActive, bpm]);
 
   // Hauteur d'affichage des photos empilées : compact / moyen / entier
   const [imgHeight, setImgHeight] = useState('md');
@@ -5800,27 +6000,7 @@ function CenterPanel({ version, updateVersion }) {
           <input type="range" min="0.5" max="10" step="0.5" value={scrollSpeed} onChange={(e) => setScrollSpeed(parseFloat(e.target.value))} className="w-12 accent-amber-500" />
         </div>
 
-        <button
-          onClick={() => setMetronomeActive(!metronomeActive)}
-          className={`px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 ${metronomeActive ? 'bg-red-600' : 'bg-gray-700'}`}
-        >
-          {metronomeActive ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
-        </button>
-
-        <input
-          type="number"
-          value={bpm}
-          onChange={(e) => {
-            const val = parseInt(e.target.value, 10);
-            setBpm(Number.isNaN(val) ? 0 : val);
-          }}
-          onBlur={() => {
-            const clamped = Math.min(240, Math.max(20, bpm || 20));
-            setBpm(clamped);
-            updateVersion({ bpm: clamped });
-          }}
-          min="20" max="240" className="w-12 px-1 py-1 bg-gray-700 border border-gray-600 rounded text-xs text-center focus:outline-none text-amber-400 font-bold" />
-        <span className="text-xs text-gray-400">BPM</span>
+        <Metronome bpm={bpm} onBpmChange={(v) => { setBpm(v); updateVersion({ bpm: v }); }} />
       </div>
 
       <div ref={galleryRef} className="flex-1 overflow-y-auto bg-gray-900 p-4 space-y-4" style={{ touchAction: 'pan-y' }} onPaste={handlePaste}>
