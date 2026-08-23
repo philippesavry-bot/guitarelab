@@ -32,90 +32,107 @@
       html, body, #root { height: 100%; }
       body { margin: 0; background: #111827; color: #fff; -webkit-text-size-adjust: 100%; }
       #boot { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; font: 500 14px/1.4 system-ui, sans-serif; color: #fbbf24; background: #111827; z-index: 50; }
-      #sync-bar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; display: flex; gap: 8px; align-items: center; padding: 6px 10px; padding-bottom: calc(6px + env(safe-area-inset-bottom)); background: rgba(17,24,39,.95); border-top: 1px solid #374151; font: 500 11px/1.2 system-ui, sans-serif; }
-      #sync-bar button { background: #1f2937; border: 1px solid #4b5563; color: #e5e7eb; border-radius: 6px; padding: 6px 10px; font: inherit; cursor: pointer; }
-      #sync-bar button.primary { background: #b45309; border-color: #d97706; color: #fff; }
-      #sync-bar span { color: #9ca3af; }
-      #sync-bar.hidden { display: none; }
-      #root { padding-bottom: 44px; }
     </style>
   </head>
   <body>
     <div id="boot">Chargement de Guitar Lab…</div>
     <div id="root"></div>
 
-    <div id="sync-bar">
-      <button class="primary" id="sync-export">☁️ Sauvegarder vers iCloud</button>
-      <button id="sync-import">📂 Charger depuis iCloud</button>
-      <span id="sync-status"></span>
-      <button id="sync-hide" style="margin-left:auto">✕</button>
-      <input type="file" id="sync-file" accept="application/json,.json" style="display:none" />
-    </div>
-
     <script>
-      // --- Stockage persistant local (remplace window.storage du prototype) ---
+      // --- Stockage persistant local (IndexedDB — quota bien plus généreux que localStorage,
+      //     essentiel car les fiches contiennent des photos encodées en base64) ---
       var LS_PREFIX = 'guitar-lab-html:';
+      var DB_NAME = 'guitar-lab-db';
+      var STORE_NAME = 'kv';
+      var _dbPromise = null;
+
+      function openDb() {
+        if (_dbPromise) return _dbPromise;
+        _dbPromise = new Promise(function (resolve, reject) {
+          var req = indexedDB.open(DB_NAME, 1);
+          req.onupgradeneeded = function () { req.result.createObjectStore(STORE_NAME); };
+          req.onsuccess = function () { resolve(req.result); };
+          req.onerror = function () { reject(req.error); };
+        });
+        return _dbPromise;
+      }
+      function idbGet(db, key) {
+        return new Promise(function (resolve) {
+          var req = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).get(key);
+          req.onsuccess = function () { resolve(req.result); };
+          req.onerror = function () { resolve(undefined); };
+        });
+      }
+      function idbSet(db, key, value) {
+        return new Promise(function (resolve) {
+          var tx = db.transaction(STORE_NAME, 'readwrite');
+          tx.objectStore(STORE_NAME).put(value, key);
+          tx.oncomplete = function () { resolve(true); };
+          tx.onerror = function () { resolve(false); };
+        });
+      }
+      function idbGetAllPrefixed(db, prefix) {
+        return new Promise(function (resolve) {
+          var out = {};
+          var req = db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).openCursor();
+          req.onsuccess = function (e) {
+            var cursor = e.target.result;
+            if (cursor) {
+              if (typeof cursor.key === 'string' && cursor.key.indexOf(prefix) === 0) out[cursor.key] = cursor.value;
+              cursor.continue();
+            } else resolve(out);
+          };
+          req.onerror = function () { resolve(out); };
+        });
+      }
+
       window.storage = {
-        get: function (key) {
+        get: async function (key) {
           try {
-            var v = localStorage.getItem(LS_PREFIX + key);
-            return Promise.resolve(v === null ? null : { value: v });
-          } catch (e) { return Promise.resolve(null); }
+            var db = await openDb();
+            var fullKey = LS_PREFIX + key;
+            var v = await idbGet(db, fullKey);
+            if (v !== undefined) return { value: v };
+            // Migration transparente et silencieuse depuis l'ancien stockage localStorage, si des données y sont encore présentes
+            var legacy = null;
+            try { legacy = localStorage.getItem(fullKey); } catch (e) {}
+            if (legacy !== null) {
+              idbSet(db, fullKey, legacy).catch(function () {});
+              return { value: legacy };
+            }
+            return null;
+          } catch (e) { return null; }
         },
-        set: function (key, value) {
-          try { localStorage.setItem(LS_PREFIX + key, value); return Promise.resolve(true); }
-          catch (e) { return Promise.resolve(false); }
+        set: async function (key, value) {
+          try {
+            var db = await openDb();
+            return await idbSet(db, LS_PREFIX + key, value);
+          } catch (e) { return false; }
+        },
+        // Estimation du stockage utilisé / disponible pour cette appli (affiché dans l'écran d'accueil)
+        estimate: async function () {
+          try {
+            if (navigator.storage && navigator.storage.estimate) return await navigator.storage.estimate();
+          } catch (e) {}
+          return null;
+        },
+        // Sauvegarde complète : reprend toutes les clés de l'appli (morceaux, préférences, réglages...)
+        exportBackup: async function () {
+          var db = await openDb();
+          var entries = await idbGetAllPrefixed(db, LS_PREFIX);
+          return { app: 'guitar-lab', version: 2, exportedAt: new Date().toISOString(), data: entries };
+        },
+        importBackup: async function (payload) {
+          if (!payload || typeof payload.data !== 'object') throw new Error('format de fichier invalide');
+          var db = await openDb();
+          var keys = Object.keys(payload.data);
+          for (var i = 0; i < keys.length; i++) {
+            var v = payload.data[keys[i]];
+            if (typeof v === 'string') await idbSet(db, keys[i], v);
+          }
+          return true;
         },
       };
-
-      // --- Synchronisation par fichier (iCloud Drive via l'app Fichiers) ---
-      var SYNC_KEYS = ['guitar-lab:songs:v2', 'guitar-lab:songs', 'guitar-lab:classifications'];
-      var statusEl = document.getElementById('sync-status');
-      function setStatus(msg) { statusEl.textContent = msg; }
-      var lastExport = localStorage.getItem(LS_PREFIX + 'lastExport');
-      if (lastExport) setStatus('Dernière sauvegarde iCloud : ' + lastExport);
-
-      document.getElementById('sync-export').addEventListener('click', function () {
-        var payload = { app: 'guitar-lab', version: 1, exportedAt: new Date().toISOString(), data: {} };
-        SYNC_KEYS.forEach(function (k) { payload.data[k] = localStorage.getItem(LS_PREFIX + k); });
-        var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-        var a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'guitar-lab-' + new Date().toISOString().slice(0, 10) + '.json';
-        document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
-        var stamp = new Date().toLocaleString('fr-FR');
-        localStorage.setItem(LS_PREFIX + 'lastExport', stamp);
-        setStatus('Exporté — choisis « Enregistrer dans Fichiers » → iCloud Drive');
-      });
-
-      var fileInput = document.getElementById('sync-file');
-      document.getElementById('sync-import').addEventListener('click', function () { fileInput.click(); });
-      fileInput.addEventListener('change', function () {
-        var file = fileInput.files && fileInput.files[0];
-        if (!file) return;
-        var reader = new FileReader();
-        reader.onload = function (ev) {
-          try {
-            var payload = JSON.parse(ev.target.result);
-            if (!payload || !payload.data) throw new Error('format');
-            SYNC_KEYS.forEach(function (k) {
-              if (typeof payload.data[k] === 'string') localStorage.setItem(LS_PREFIX + k, payload.data[k]);
-            });
-            setStatus('Données importées, rechargement…');
-            setTimeout(function () { location.reload(); }, 400);
-          } catch (e) {
-            setStatus('Fichier illisible : ' + (e.message || e));
-          }
-        };
-        reader.readAsText(file);
-        fileInput.value = '';
-      });
-
-      document.getElementById('sync-hide').addEventListener('click', function () {
-        document.getElementById('sync-bar').classList.add('hidden');
-        document.getElementById('root').style.paddingBottom = '0';
-      });
 
       // --- Icônes lucide exposées comme composants React ---
       (function () {

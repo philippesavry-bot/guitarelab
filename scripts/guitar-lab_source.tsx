@@ -4041,6 +4041,7 @@ function GuitarApp() {
                   onAdd={addClassificationOption}
                   onRemove={removeClassificationOption}
                 />
+                <StorageManager />
               </>
             )}
           </div>
@@ -4319,6 +4320,121 @@ function SessionSetupModal({ songs, onStart, onCancel }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Indicateur du niveau de stockage utilisé (IndexedDB) + export/import complet en JSON, dans l'écran d'accueil
+function StorageManager() {
+  const [estimate, setEstimate] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState(null); // { type: 'ok' | 'error', text }
+
+  const refreshEstimate = async () => {
+    setLoading(true);
+    try {
+      const est = await window.storage.estimate?.();
+      setEstimate(est);
+    } catch (e) {
+      setEstimate(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { refreshEstimate(); }, []);
+
+  const formatSize = (bytes) => {
+    if (bytes == null) return '?';
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} Ko`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+  };
+
+  const pct = estimate?.quota ? Math.min(100, Math.round((estimate.usage / estimate.quota) * 100)) : null;
+  const barColor = pct === null ? 'bg-gray-500' : pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-green-500';
+
+  const handleExport = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const payload = await window.storage.exportBackup();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `guitar-lab-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      setMessage({ type: 'ok', text: 'Exporté — choisis « Enregistrer dans Fichiers » → iCloud Drive' });
+    } catch (e) {
+      setMessage({ type: 'error', text: "Échec de l'export : " + (e.message || e) });
+    } finally {
+      setBusy(false);
+      refreshEstimate();
+    }
+  };
+
+  const handleImportFile = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!window.confirm("Importer ce fichier remplacera tes données actuelles (morceaux, préférences...) par celles du fichier. Continuer ?")) return;
+    setBusy(true);
+    setMessage(null);
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const payload = JSON.parse(ev.target.result);
+        await window.storage.importBackup(payload);
+        setMessage({ type: 'ok', text: 'Données importées, rechargement…' });
+        setTimeout(() => location.reload(), 600);
+      } catch (err) {
+        setMessage({ type: 'error', text: 'Fichier illisible : ' + (err.message || err) });
+        setBusy(false);
+      }
+    };
+    reader.onerror = () => {
+      setMessage({ type: 'error', text: 'Impossible de lire ce fichier.' });
+      setBusy(false);
+    };
+    reader.readAsText(file);
+  };
+
+  return (
+    <div className="p-4 border-t border-gray-700">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs text-gray-500">💾 Stockage</span>
+        <button onClick={refreshEstimate} className="text-[10px] text-gray-500 hover:text-gray-300 px-1" title="Actualiser">↻</button>
+      </div>
+
+      {loading ? (
+        <p className="text-[11px] text-gray-500 mb-2">Calcul en cours…</p>
+      ) : estimate?.quota ? (
+        <>
+          <div className="w-full bg-gray-700 rounded-full h-1.5 mb-1">
+            <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${pct}%` }} />
+          </div>
+          <p className="text-[10px] text-gray-500 mb-2">{formatSize(estimate.usage)} / {formatSize(estimate.quota)} ({pct}%)</p>
+        </>
+      ) : (
+        <p className="text-[11px] text-gray-500 mb-2">Estimation indisponible sur ce navigateur.</p>
+      )}
+
+      <div className="flex gap-1">
+        <button onClick={handleExport} disabled={busy} className="flex-1 px-2 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded text-xs font-semibold transition">
+          ☁️ Exporter
+        </button>
+        <label className={`flex-1 px-2 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold transition text-center cursor-pointer ${busy ? 'opacity-50 pointer-events-none' : ''}`}>
+          📂 Importer
+          <input type="file" accept="application/json,.json" onChange={handleImportFile} className="hidden" />
+        </label>
+      </div>
+
+      {message && (
+        <p className={`text-[10px] mt-2 ${message.type === 'error' ? 'text-red-400' : 'text-green-400'}`}>{message.text}</p>
+      )}
     </div>
   );
 }
