@@ -1,10 +1,3 @@
-import React, { useState, useRef, useEffect } from 'react';
-import {
-  ChevronDown, ChevronRight, ChevronLeft, Plus, Music, X, Star, Menu, Edit2,
-  Trash2, Play, Pause, BookOpen, Maximize2, Minimize2, ArrowDown, ArrowUp, Volume2, VolumeX,
-  TrendingUp, Calendar, Zap, Search
-} from 'lucide-react';
-
 // Suggestions de noms de section (structure du morceau)
 const SECTION_NAME_SUGGESTIONS = ['Intro', 'Couplet', 'Refrain', 'Pont', 'Outro'];
 
@@ -93,14 +86,92 @@ function extractYoutubeId(url) {
   return null;
 }
 
-// Petite fenêtre flottante de visionnage YouTube, superposée à l'écran de travail
-function YoutubeMiniPlayer({ videoId, onClose }) {
+// Charge une seule fois l'API YouTube IFrame (nécessaire pour lire/contrôler la position de lecture)
+let _ytApiPromise = null;
+function loadYoutubeIframeApi() {
+  if (window.YT && window.YT.Player) return Promise.resolve(window.YT);
+  if (_ytApiPromise) return _ytApiPromise;
+  _ytApiPromise = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('YouTube API timeout')), 6000);
+    window.onYouTubeIframeAPIReady = () => { clearTimeout(timeout); resolve(window.YT); };
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    tag.onerror = () => { clearTimeout(timeout); reject(new Error('YouTube API load error')); };
+    document.head.appendChild(tag);
+  });
+  return _ytApiPromise;
+}
+
+function formatBookmarkTime(sec) {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+// Petite fenêtre flottante de visionnage YouTube, superposée à l'écran de travail.
+// Si un repère existe pour ce lien, propose de reprendre à cet instant ou de repartir du début.
+function YoutubeMiniPlayer({ link, onClose, onSaveBookmark }) {
+  const videoId = link?.videoId;
+  const existingBookmark = link?.bookmarkSeconds > 0 ? link.bookmarkSeconds : 0;
+  const [resumeChoice, setResumeChoice] = useState(existingBookmark > 0 ? null : 'start'); // null = pas encore choisi
+  const [apiReady, setApiReady] = useState(false);
+  const [apiFailed, setApiFailed] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
+  const containerRef = useRef(null);
+  const playerRef = useRef(null);
+
+  useEffect(() => {
+    setResumeChoice(existingBookmark > 0 ? null : 'start');
+    setApiReady(false);
+    setApiFailed(false);
+  }, [videoId]);
+
+  useEffect(() => {
+    if (resumeChoice === null || !videoId) return;
+    let cancelled = false;
+    loadYoutubeIframeApi()
+      .then((YT) => {
+        if (cancelled || !containerRef.current) return;
+        playerRef.current = new YT.Player(containerRef.current, {
+          videoId,
+          host: 'https://www.youtube-nocookie.com',
+          playerVars: { rel: 0, playsinline: 1, modestbranding: 1, start: resumeChoice === 'resume' ? existingBookmark : 0 },
+          events: { onReady: () => !cancelled && setApiReady(true) },
+        });
+      })
+      .catch(() => !cancelled && setApiFailed(true));
+    return () => {
+      cancelled = true;
+      try { playerRef.current?.destroy(); } catch (_) {}
+      playerRef.current = null;
+    };
+  }, [videoId, resumeChoice]);
+
   if (!videoId) return null;
+
+  const markPosition = () => {
+    const t = playerRef.current?.getCurrentTime?.();
+    if (typeof t === 'number' && t > 0) {
+      onSaveBookmark?.(link.id, Math.floor(t));
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 1500);
+    }
+  };
+
   return (
     <div className="fixed bottom-4 right-4 z-50 w-80 sm:w-[420px] bg-gray-800 border border-gray-600 rounded-lg shadow-2xl overflow-hidden">
       <div className="flex items-center justify-between px-2 py-1.5 bg-gray-900 border-b border-gray-700">
         <span className="text-xs font-semibold text-gray-300 flex items-center gap-1">▶️ Vidéo</span>
         <div className="flex items-center gap-1">
+          {apiReady && (
+            <button
+              onClick={markPosition}
+              className={`text-[10px] px-1.5 py-0.5 rounded transition ${savedFlash ? 'bg-green-700 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
+              title="Mémoriser où tu en es dans la vidéo"
+            >
+              {savedFlash ? '✓ Enregistré' : '📍 Marquer ma position'}
+            </button>
+          )}
           <a
             href={`https://www.youtube.com/watch?v=${videoId}`}
             target="_blank"
@@ -115,18 +186,39 @@ function YoutubeMiniPlayer({ videoId, onClose }) {
           </button>
         </div>
       </div>
-      <div className="relative w-full bg-black" style={{ paddingTop: '56.25%' }}>
-        <iframe
-          key={videoId}
-          src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0&playsinline=1&modestbranding=1`}
-          title="YouTube video player"
-          className="absolute inset-0 w-full h-full"
-          style={{ border: 0 }}
-          referrerPolicy="strict-origin-when-cross-origin"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-          allowFullScreen
-        />
-      </div>
+
+      {resumeChoice === null ? (
+        <div className="p-4 flex flex-col items-center gap-2 text-center bg-gray-900">
+          <p className="text-xs text-gray-300">
+            📍 Tu t'étais arrêté à <span className="text-amber-400 font-semibold">{formatBookmarkTime(existingBookmark)}</span>
+          </p>
+          <div className="flex gap-2 w-full">
+            <button onClick={() => setResumeChoice('resume')} className="flex-1 px-2 py-1.5 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold transition">
+              Reprendre là
+            </button>
+            <button onClick={() => setResumeChoice('start')} className="flex-1 px-2 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold transition">
+              Depuis le début
+            </button>
+          </div>
+        </div>
+      ) : apiFailed ? (
+        <div className="relative w-full bg-black" style={{ paddingTop: '56.25%' }}>
+          <iframe
+            key={videoId}
+            src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0&playsinline=1&modestbranding=1&start=${resumeChoice === 'resume' ? existingBookmark : 0}`}
+            title="YouTube video player"
+            className="absolute inset-0 w-full h-full"
+            style={{ border: 0 }}
+            referrerPolicy="strict-origin-when-cross-origin"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+          />
+        </div>
+      ) : (
+        <div className="relative w-full bg-black" style={{ paddingTop: '56.25%' }}>
+          <div ref={containerRef} className="absolute inset-0 w-full h-full" />
+        </div>
+      )}
     </div>
   );
 }
@@ -3351,7 +3443,7 @@ function newId() {
   return Date.now().toString() + Math.random().toString(36).slice(2);
 }
 
-function SaveStatusBadge({ status }) {
+function SaveStatusBadge({ status, onForceSave }) {
   if (status === 'idle') return null;
   const config = {
     saving: { label: 'Enregistrement...', className: 'text-gray-400' },
@@ -3360,18 +3452,41 @@ function SaveStatusBadge({ status }) {
   }[status];
   if (!config) return null;
   return (
-    <span className={`ml-auto text-[10px] font-normal ${config.className}`} title={status === 'error' ? "La sauvegarde a échoué, tes changements restent visibles ici mais ne seront pas conservés après rechargement." : undefined}>
-      {config.label}
+    <span className="ml-auto flex items-center gap-1">
+      <span className={`text-[10px] font-normal ${config.className}`} title={status === 'error' ? "La sauvegarde a échoué, tes changements restent visibles ici mais ne seront pas conservés après rechargement." : undefined}>
+        {config.label}
+      </span>
+      <button
+        onClick={onForceSave}
+        className="text-[10px] px-1 py-0.5 bg-gray-700 hover:bg-gray-600 rounded transition text-gray-300"
+        title="Forcer l'enregistrement maintenant"
+      >
+        💾
+      </button>
     </span>
   );
 }
 
-export default function GuitarApp() {
+function GuitarApp() {
   const [appMode, setAppMode] = useState('library');
   const [songs, setSongs] = useState(DEFAULT_SONGS);
   const [isLoaded, setIsLoaded] = useState(false);
   const [saveStatus, setSaveStatus] = useState('idle'); // idle | saving | saved | error
   const saveTimerRef = useRef(null);
+  const songsRef = useRef(songs);
+  useEffect(() => { songsRef.current = songs; }, [songs]);
+
+  // Enregistrement immédiat (annule le minuteur en cours), utilisable manuellement ou en filet de sécurité
+  const flushSongsSave = async () => {
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+    setSaveStatus('saving');
+    try {
+      const result = await window.storage.set(SONGS_STORAGE_KEY, JSON.stringify(songsRef.current), false);
+      setSaveStatus(result ? 'saved' : 'error');
+    } catch (err) {
+      setSaveStatus('error');
+    }
+  };
 
   // Chargement depuis le stockage persistant au montage
   useEffect(() => {
@@ -3397,16 +3512,22 @@ export default function GuitarApp() {
     if (!isLoaded) return;
     setSaveStatus('saving');
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(async () => {
-      try {
-        const result = await window.storage.set(SONGS_STORAGE_KEY, JSON.stringify(songs), false);
-        setSaveStatus(result ? 'saved' : 'error');
-      } catch (err) {
-        setSaveStatus('error');
-      }
-    }, 600);
+    saveTimerRef.current = setTimeout(flushSongsSave, 600);
     return () => clearTimeout(saveTimerRef.current);
   }, [songs, isLoaded]);
+
+  // Filet de sécurité : si l'app passe en arrière-plan (changement d'appli, verrouillage...) ou se ferme
+  // pendant qu'un enregistrement est en attente, on le force immédiatement plutôt que d'attendre le minuteur.
+  useEffect(() => {
+    const forceIfPending = () => { if (saveTimerRef.current) flushSongsSave(); };
+    const onVisibility = () => { if (document.visibilityState === 'hidden') forceIfPending(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', forceIfPending);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', forceIfPending);
+    };
+  }, []);
 
   // Liste maîtresse des étiquettes de classement, modifiable et partagée entre la bibliothèque et l'écran de travail
   const [classificationOptions, setClassificationOptions] = useState(DEFAULT_CLASSIFICATIONS);
@@ -3641,6 +3762,38 @@ export default function GuitarApp() {
   };
 
   const reviewQueue = useMemo(() => computeReviewQueue(songs, 3, reviewIntervals), [songs, reviewIntervals]);
+  const fullReviewQueue = useMemo(() => computeReviewQueue(songs, songs.length, reviewIntervals), [songs, reviewIntervals]);
+
+  // Session du jour : enchaîne automatiquement les morceaux à revoir, avec chrono auto-démarré
+  const [sessionSetupOpen, setSessionSetupOpen] = useState(false);
+  const [sessionQueue, setSessionQueue] = useState(null); // tableau d'ids, ou null si aucune session en cours
+  const [sessionIndex, setSessionIndex] = useState(0);
+
+  const startSession = (orderedIds) => {
+    if (!orderedIds.length) return;
+    setSessionQueue(orderedIds);
+    setSessionIndex(0);
+    setSelectedSongId(orderedIds[0]);
+    const firstSong = songs.find(s => s.id === orderedIds[0]);
+    setSelectedVersionId(firstSong?.versions[0]?.id);
+    setAppMode('editor');
+    setSessionSetupOpen(false);
+  };
+
+  const goToNextSessionSong = () => {
+    const nextIndex = sessionIndex + 1;
+    if (!sessionQueue || nextIndex >= sessionQueue.length) {
+      setSessionQueue(null);
+      setAppMode('library');
+      return;
+    }
+    setSessionIndex(nextIndex);
+    setSelectedSongId(sessionQueue[nextIndex]);
+    const nextSong = songs.find(s => s.id === sessionQueue[nextIndex]);
+    setSelectedVersionId(nextSong?.versions[0]?.id);
+  };
+
+  const endSession = () => setSessionQueue(null);
 
   // Journal de pratique : sessions chronométrées (toutes chansons confondues) + objectif hebdomadaire
   const [practiceSessions, setPracticeSessions] = useState([]);
@@ -3718,7 +3871,7 @@ export default function GuitarApp() {
                   <div className="flex items-center gap-2 mb-4">
                     <Music className="w-5 h-5 text-amber-500" />
                     <h1 className="text-lg font-bold">Guitar Lab</h1>
-                    <SaveStatusBadge status={saveStatus} />
+                    <SaveStatusBadge status={saveStatus} onForceSave={flushSongsSave} />
                   </div>
                   <input
                     type="text"
@@ -3915,13 +4068,24 @@ export default function GuitarApp() {
                   <h3 className="text-sm font-semibold text-amber-400 flex items-center gap-1.5">
                     📅 {reviewQueue.length > 0 ? "À revoir aujourd'hui" : 'Révision espacée : tout est à jour ✅'}
                   </h3>
-                  <button
-                    onClick={() => setReviewSettingsOpen(!reviewSettingsOpen)}
-                    className="p-1 hover:bg-gray-700 rounded transition"
-                    title="Régler les intervalles de révision"
-                  >
-                    ⚙️
-                  </button>
+                  <div className="flex items-center gap-1">
+                    {fullReviewQueue.length > 0 && (
+                      <button
+                        onClick={() => setSessionSetupOpen(true)}
+                        className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-semibold transition flex items-center gap-1"
+                        title="Enchaîner les morceaux à revoir, avec chrono automatique"
+                      >
+                        🎯 Démarrer ma session
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setReviewSettingsOpen(!reviewSettingsOpen)}
+                      className="p-1 hover:bg-gray-700 rounded transition"
+                      title="Régler les intervalles de révision"
+                    >
+                      ⚙️
+                    </button>
+                  </div>
                 </div>
 
                 {reviewSettingsOpen && (
@@ -4068,6 +4232,9 @@ export default function GuitarApp() {
             onLogPracticeSession={logPracticeSession}
             weeklyGoalMinutes={weeklyGoalMinutes}
             onUpdateWeeklyGoal={updateWeeklyGoal}
+            sessionInfo={sessionQueue ? { position: sessionIndex + 1, total: sessionQueue.length } : null}
+            onSessionNext={goToNextSessionSong}
+            onSessionEnd={endSession}
           />
         )
       )}
@@ -4082,6 +4249,68 @@ export default function GuitarApp() {
           title="➕ Nouveau morceau"
         />
       )}
+      {sessionSetupOpen && (
+        <SessionSetupModal
+          songs={fullReviewQueue}
+          onStart={startSession}
+          onCancel={() => setSessionSetupOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Modal de préparation de la session du jour : reprend la file de révision, réordonnable avant de lancer
+function SessionSetupModal({ songs, onStart, onCancel }) {
+  const [order, setOrder] = useState(() => songs.map(s => s.id));
+  const orderedSongs = order.map(id => songs.find(s => s.id === id)).filter(Boolean);
+
+  const move = (index, dir) => {
+    const target = index + dir;
+    if (target < 0 || target >= order.length) return;
+    const next = [...order];
+    [next[index], next[target]] = [next[target], next[index]];
+    setOrder(next);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-800 rounded-lg max-w-sm w-full max-h-[80vh] overflow-y-auto border border-gray-700 shadow-2xl">
+        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-center">
+          <h3 className="font-bold text-amber-400 text-sm">🎯 Session du jour</h3>
+          <button onClick={onCancel} className="p-1 hover:bg-gray-700 rounded">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="p-4">
+          <p className="text-xs text-gray-400 mb-3">Réordonne si besoin, puis lance : chaque morceau démarre son chrono automatiquement.</p>
+          <div className="space-y-1.5">
+            {orderedSongs.map((s, i) => (
+              <div key={s.id} className="flex items-center gap-2 bg-gray-750 border border-gray-600 rounded px-2 py-1.5">
+                <span className="text-xs text-gray-500 w-4 text-center flex-shrink-0">{i + 1}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold truncate">{s.title}</div>
+                  <div className="text-[10px] text-gray-400 truncate">{s.artist}</div>
+                </div>
+                <button onClick={() => move(i, -1)} disabled={i === 0} className="p-1 hover:bg-gray-600 rounded disabled:opacity-30 flex-shrink-0" title="Monter">
+                  <ArrowUp className="w-3 h-3" />
+                </button>
+                <button onClick={() => move(i, 1)} disabled={i === order.length - 1} className="p-1 hover:bg-gray-600 rounded disabled:opacity-30 flex-shrink-0" title="Descendre">
+                  <ArrowDown className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="p-4 border-t border-gray-700 flex gap-2 sticky bottom-0 bg-gray-800">
+          <button onClick={() => onStart(order)} className="flex-1 px-3 py-2 bg-indigo-600 hover:bg-indigo-500 rounded font-semibold transition text-sm">
+            ▶️ Commencer
+          </button>
+          <button onClick={onCancel} className="flex-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded font-semibold transition text-sm">
+            ✕ Annuler
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -4814,15 +5043,20 @@ function ClassificationPicker({ song, options, onAddOption, onRemoveOption, onUp
   );
 }
 
-function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVersion, onUpdateSong, classificationOptions = [], onAddClassificationOption, onRemoveClassificationOption, practiceSessions = [], onLogPracticeSession, weeklyGoalMinutes = 120, onUpdateWeeklyGoal }) {
+function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVersion, onUpdateSong, classificationOptions = [], onAddClassificationOption, onRemoveClassificationOption, practiceSessions = [], onLogPracticeSession, weeklyGoalMinutes = 120, onUpdateWeeklyGoal, sessionInfo = null, onSessionNext, onSessionEnd }) {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [performance, setPerformance] = useState(false);
   const [videoMenuOpen, setVideoMenuOpen] = useState(false);
-  const [activeVideoId, setActiveVideoId] = useState(null);
+  const [activeLink, setActiveLink] = useState(null);
   const validYoutubeLinks = (song.youtubeUrls || [])
     .map(l => ({ ...l, videoId: extractYoutubeId(l.url) }))
     .filter(l => l.videoId);
+  const isSessionActive = !!sessionInfo;
+
+  const saveBookmark = (linkId, seconds) => {
+    onUpdateSong({ ...song, youtubeUrls: (song.youtubeUrls || []).map(u => u.id === linkId ? { ...u, bookmarkSeconds: seconds } : u) });
+  };
 
   // Minuteur de pratique : chronomètre la session en cours sur ce morceau
   const [timerRunning, setTimerRunning] = useState(false);
@@ -4833,11 +5067,11 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
     const interval = setInterval(() => setTimerSeconds(s => s + 1), 1000);
     return () => clearInterval(interval);
   }, [timerRunning]);
-  // Arrête et remet à zéro le chrono si on change de morceau
+  // Arrête et remet à zéro le chrono si on change de morceau (démarre automatiquement en mode session)
   useEffect(() => {
-    setTimerRunning(false);
+    setTimerRunning(isSessionActive);
     setTimerSeconds(0);
-  }, [song.id]);
+  }, [song.id, isSessionActive]);
   const formatTimer = (sec) => {
     const m = Math.floor(sec / 60).toString().padStart(2, '0');
     const s = (sec % 60).toString().padStart(2, '0');
@@ -4847,6 +5081,16 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
     setTimerRunning(false);
     if (timerSeconds > 0) onLogPracticeSession?.(song.id, song.title, timerSeconds);
     setTimerSeconds(0);
+  };
+
+  const goToNextInSession = () => {
+    stopAndLogTimer();
+    onSessionNext?.();
+  };
+
+  const endSession = () => {
+    stopAndLogTimer();
+    onSessionEnd?.();
   };
 
   // Largeurs des bandeaux latéraux, réglables par glisser, mémorisées d'une session à l'autre
@@ -4927,7 +5171,7 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
 
   // Ferme la vidéo active si on change de morceau
   useEffect(() => {
-    setActiveVideoId(null);
+    setActiveLink(null);
     setVideoMenuOpen(false);
   }, [song.id]);
 
@@ -4945,12 +5189,17 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <button
-              onClick={onBack}
+              onClick={() => { if (isSessionActive) endSession(); onBack(); }}
               className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded transition flex items-center gap-2 text-sm font-medium"
             >
               <ChevronLeft className="w-4 h-4" />
               Biblio
             </button>
+            {isSessionActive && (
+              <span className="px-2 py-1 bg-indigo-600/30 border border-indigo-500/40 text-indigo-200 rounded text-xs font-semibold whitespace-nowrap">
+                🎯 Session {sessionInfo.position}/{sessionInfo.total}
+              </span>
+            )}
             {isCompact && (
               <>
                 <button
@@ -4992,7 +5241,7 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
               <button
                 onClick={() => {
                   if (validYoutubeLinks.length === 1) {
-                    setActiveVideoId(activeVideoId ? null : validYoutubeLinks[0].videoId);
+                    setActiveLink(activeLink ? null : validYoutubeLinks[0]);
                   } else {
                     setVideoMenuOpen(!videoMenuOpen);
                   }
@@ -5007,7 +5256,7 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
                   {validYoutubeLinks.map((l, i) => (
                     <button
                       key={l.id}
-                      onClick={() => { setActiveVideoId(l.videoId); setVideoMenuOpen(false); }}
+                      onClick={() => { setActiveLink(l); setVideoMenuOpen(false); }}
                       className="w-full text-left px-3 py-2 text-xs hover:bg-gray-700 transition flex items-center gap-2 border-b border-gray-700 last:border-0"
                       title={l.url}
                     >
@@ -5085,6 +5334,16 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
             onUpdateSong={onUpdateSong}
           />
 
+          {isSessionActive && (
+            <button
+              onClick={goToNextInSession}
+              className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 rounded transition text-sm font-semibold flex items-center gap-1"
+              title={sessionInfo.position < sessionInfo.total ? 'Enregistrer et passer au morceau suivant' : 'Terminer la session'}
+            >
+              {sessionInfo.position < sessionInfo.total ? 'Suivant ▶' : '🏁 Terminer'}
+            </button>
+          )}
+
         </div>
       </div>
 
@@ -5092,8 +5351,8 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
         <PerformanceMode song={song} version={version} onClose={() => setPerformance(false)} />
       )}
 
-      {activeVideoId && (
-        <YoutubeMiniPlayer videoId={activeVideoId} onClose={() => setActiveVideoId(null)} />
+      {activeLink && (
+        <YoutubeMiniPlayer link={activeLink} onSaveBookmark={saveBookmark} onClose={() => setActiveLink(null)} />
       )}
 
       {historyOpen && (
@@ -5183,7 +5442,7 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
             version={version}
             updateVersion={updateVersion}
             onUpdateSong={onUpdateSong}
-            onPlayVideo={(videoId) => setActiveVideoId(videoId)}
+            onPlayVideo={(link) => setActiveLink(link)}
           />
         </div>
       </div>
@@ -6424,7 +6683,7 @@ function RightPanel({ song, version, updateVersion, onUpdateSong, onPlayVideo })
                 />
                 {videoId && (
                   <button
-                    onClick={() => onPlayVideo?.(videoId)}
+                    onClick={() => onPlayVideo?.({ id: url.id, url: url.url, videoId, bookmarkSeconds: url.bookmarkSeconds })}
                     className="flex-shrink-0 px-2 py-1 bg-red-700 hover:bg-red-600 rounded text-xs transition"
                     title="Voir la vidéo"
                   >
