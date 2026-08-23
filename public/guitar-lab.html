@@ -3607,6 +3607,7 @@ function newId() {
 }
 
 function SaveStatusBadge({ status, onForceSave }) {
+  const [flashing, setFlashing] = useState(false);
   if (status === 'idle') return null;
   const config = {
     saving: { label: 'Enregistrement...', className: 'text-gray-400' },
@@ -3614,14 +3615,21 @@ function SaveStatusBadge({ status, onForceSave }) {
     error: { label: 'Non enregistré', className: 'text-red-400' },
   }[status];
   if (!config) return null;
+
+  const handleForce = async () => {
+    setFlashing(true);
+    await onForceSave?.();
+    setTimeout(() => setFlashing(false), 1400);
+  };
+
   return (
-    <span className="ml-auto flex items-center gap-1">
-      <span className={`text-[10px] font-normal ${config.className}`} title={status === 'error' ? "La sauvegarde a échoué, tes changements restent visibles ici mais ne seront pas conservés après rechargement." : undefined}>
-        {config.label}
+    <span className="ml-auto flex items-center gap-1.5">
+      <span className={`text-[10px] font-normal transition-colors ${flashing ? 'text-green-400' : config.className}`} title={status === 'error' ? "La sauvegarde a échoué, tes changements restent visibles ici mais ne seront pas conservés après rechargement." : undefined}>
+        {flashing ? '✓ Enregistré !' : config.label}
       </span>
       <button
-        onClick={onForceSave}
-        className="text-[10px] px-1 py-0.5 bg-gray-700 hover:bg-gray-600 rounded transition text-gray-300"
+        onClick={handleForce}
+        className={`min-w-[28px] min-h-[28px] flex items-center justify-center text-sm rounded transition ${flashing ? 'bg-green-700' : 'bg-gray-700 hover:bg-gray-600 active:bg-amber-600'}`}
         title="Forcer l'enregistrement maintenant"
       >
         💾
@@ -5206,6 +5214,49 @@ function ClassificationPicker({ song, options, onAddOption, onRemoveOption, onUp
   );
 }
 
+// Sélecteur visuel du capodastre : grille de 0 (sans capo) à 12, en popover pour rester utilisable directement dans l'écran de travail
+function CapoPicker({ capo, onChange }) {
+  const [open, setOpen] = useState(false);
+  const value = capo || 0;
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 hover:text-amber-400 transition"
+        title="Régler le capodastre"
+      >
+        <span>Capo:</span>
+        <span className="font-bold text-amber-400">{value === 0 ? 'Aucun' : value}</span>
+        <ChevronDown className="w-3 h-3 text-gray-500" />
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-2xl p-2">
+            <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-1.5 text-center">Position du capo</p>
+            <div className="grid grid-cols-4 gap-1.5" style={{ width: 176 }}>
+              {Array.from({ length: 13 }, (_, i) => i).map(n => (
+                <button
+                  key={n}
+                  onClick={() => { onChange(n); setOpen(false); }}
+                  className={`w-9 h-9 rounded-lg text-sm font-bold flex items-center justify-center transition ${
+                    value === n ? 'bg-amber-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                  }`}
+                  title={n === 0 ? 'Sans capo' : `Capo case ${n}`}
+                >
+                  {n === 0 ? '—' : n}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVersion, onUpdateSong, classificationOptions = [], onAddClassificationOption, onRemoveClassificationOption, practiceSessions = [], onLogPracticeSession, weeklyGoalMinutes = 120, onUpdateWeeklyGoal, sessionInfo = null, onSessionNext, onSessionEnd }) {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
@@ -5394,7 +5445,7 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
           <div className="flex items-center gap-2 bg-gray-900 rounded p-2 border border-gray-700 text-xs">
             <span>♪ {version.bpm} BPM</span>
             <span className="text-gray-500">•</span>
-            <span>Capo: {version.capo}</span>
+            <CapoPicker capo={version.capo} onChange={(n) => updateVersion({ capo: n })} />
             <span className="text-gray-500">•</span>
             <span>{version.key}</span>
           </div>
@@ -5554,9 +5605,16 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
               <div
                 onMouseDown={startResize('left')}
                 onTouchStart={startResize('left')}
-                className="w-2 cursor-col-resize hover:bg-amber-600/50 transition-colors flex-shrink-0"
+                className="relative w-3 cursor-col-resize hover:bg-amber-600/40 active:bg-amber-600/60 transition-colors flex-shrink-0 flex items-center justify-center"
+                style={{ touchAction: 'none' }}
                 title="Glisser pour ajuster la largeur"
-              />
+              >
+                <span className="flex flex-col gap-1 pointer-events-none">
+                  <span className="w-1 h-1 rounded-full bg-gray-400" />
+                  <span className="w-1 h-1 rounded-full bg-gray-400" />
+                  <span className="w-1 h-1 rounded-full bg-gray-400" />
+                </span>
+              </div>
             )}
             <button
               onClick={() => setLeftCollapsed(!leftCollapsed)}
@@ -5585,9 +5643,16 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
               <div
                 onMouseDown={startResize('right')}
                 onTouchStart={startResize('right')}
-                className="w-2 cursor-col-resize hover:bg-amber-600/50 transition-colors flex-shrink-0"
+                className="relative w-3 cursor-col-resize hover:bg-amber-600/40 active:bg-amber-600/60 transition-colors flex-shrink-0 flex items-center justify-center"
+                style={{ touchAction: 'none' }}
                 title="Glisser pour ajuster la largeur"
-              />
+              >
+                <span className="flex flex-col gap-1 pointer-events-none">
+                  <span className="w-1 h-1 rounded-full bg-gray-400" />
+                  <span className="w-1 h-1 rounded-full bg-gray-400" />
+                  <span className="w-1 h-1 rounded-full bg-gray-400" />
+                </span>
+              </div>
             )}
           </div>
         )}
