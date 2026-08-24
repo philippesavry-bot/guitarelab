@@ -292,18 +292,22 @@ function formatBookmarkTime(sec) {
 // Si un repère existe pour ce lien, propose de reprendre à cet instant ou de repartir du début.
 function YoutubeMiniPlayer({ link, onClose, onSaveBookmark }) {
   const videoId = link?.videoId;
-  const existingBookmark = link?.bookmarkSeconds > 0 ? link.bookmarkSeconds : 0;
-  const [resumeChoice, setResumeChoice] = useState(existingBookmark > 0 ? null : 'start'); // null = pas encore choisi
+  const bookmarks = link?.bookmarks || []; // Liste de { id, seconds, name }
+  const firstBookmark = bookmarks.length > 0 ? bookmarks[0].seconds : 0;
+  const [resumeChoice, setResumeChoice] = useState(bookmarks.length > 0 ? null : 'start');
   const [apiReady, setApiReady] = useState(false);
   const [apiFailed, setApiFailed] = useState(false);
-  const [savedFlash, setSavedFlash] = useState(false);
+  const [newBookmarkMode, setNewBookmarkMode] = useState(false); // true = en train de créer un nouveau
+  const [bookmarkName, setBookmarkName] = useState('');
+  const [savedFlash, setSavedFlash] = useState(null); // null | 'save' | 'delete'
   const containerRef = useRef(null);
   const playerRef = useRef(null);
 
   useEffect(() => {
-    setResumeChoice(existingBookmark > 0 ? null : 'start');
+    setResumeChoice(bookmarks.length > 0 ? null : 'start');
     setApiReady(false);
     setApiFailed(false);
+    setNewBookmarkMode(false);
   }, [videoId]);
 
   useEffect(() => {
@@ -315,7 +319,7 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark }) {
         playerRef.current = new YT.Player(containerRef.current, {
           videoId,
           host: 'https://www.youtube-nocookie.com',
-          playerVars: { rel: 0, playsinline: 1, modestbranding: 1, start: resumeChoice === 'resume' ? existingBookmark : 0 },
+          playerVars: { rel: 0, playsinline: 1, modestbranding: 1, start: resumeChoice === 'resume' ? firstBookmark : 0 },
           events: { onReady: () => !cancelled && setApiReady(true) },
         });
       })
@@ -329,27 +333,41 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark }) {
 
   if (!videoId) return null;
 
-  const markPosition = () => {
+  const markPositionNamed = () => {
     const t = playerRef.current?.getCurrentTime?.();
     if (typeof t === 'number' && t > 0) {
-      onSaveBookmark?.(link.id, Math.floor(t));
-      setSavedFlash(true);
-      setTimeout(() => setSavedFlash(false), 1500);
+      const seconds = Math.floor(t);
+      const name = bookmarkName.trim() || `Point ${bookmarks.length + 1}`;
+      onSaveBookmark?.(link.id, { seconds, name });
+      setBookmarkName('');
+      setNewBookmarkMode(false);
+      setSavedFlash('save');
+      setTimeout(() => setSavedFlash(null), 1500);
     }
   };
 
+  const deleteBookmark = (bookmarkId) => {
+    onSaveBookmark?.(link.id, { delete: bookmarkId });
+    setSavedFlash('delete');
+    setTimeout(() => setSavedFlash(null), 1500);
+  };
+
+  const jumpToBookmark = (seconds) => {
+    if (playerRef.current?.seekTo) playerRef.current.seekTo(seconds);
+  };
+
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-80 sm:w-[420px] bg-gray-800 border border-gray-600 rounded-lg shadow-2xl overflow-hidden">
-      <div className="flex items-center justify-between px-2 py-1.5 bg-gray-900 border-b border-gray-700">
+    <div className="fixed bottom-4 right-4 z-50 w-80 sm:w-[420px] bg-gray-800 border border-gray-600 rounded-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="flex items-center justify-between px-2 py-1.5 bg-gray-900 border-b border-gray-700 flex-shrink-0">
         <span className="text-xs font-semibold text-gray-300 flex items-center gap-1">▶️ Vidéo</span>
         <div className="flex items-center gap-1">
           {apiReady && (
             <button
-              onClick={markPosition}
-              className={`text-[10px] px-1.5 py-0.5 rounded transition ${savedFlash ? 'bg-green-700 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
-              title="Mémoriser où tu en es dans la vidéo"
+              onClick={() => setNewBookmarkMode(!newBookmarkMode)}
+              className={`text-[10px] px-1.5 py-0.5 rounded transition ${newBookmarkMode ? 'bg-amber-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
+              title="Créer un point de repère nommé"
             >
-              {savedFlash ? '✓ Enregistré' : '📍 Marquer ma position'}
+              📌 Point
             </button>
           )}
           <a
@@ -367,38 +385,93 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark }) {
         </div>
       </div>
 
-      {resumeChoice === null ? (
-        <div className="p-4 flex flex-col items-center gap-2 text-center bg-gray-900">
-          <p className="text-xs text-gray-300">
-            📍 Tu t'étais arrêté à <span className="text-amber-400 font-semibold">{formatBookmarkTime(existingBookmark)}</span>
-          </p>
-          <div className="flex gap-2 w-full">
-            <button onClick={() => setResumeChoice('resume')} className="flex-1 px-2 py-1.5 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold transition">
-              Reprendre là
-            </button>
-            <button onClick={() => setResumeChoice('start')} className="flex-1 px-2 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold transition">
-              Depuis le début
-            </button>
+      <div className="flex-1 overflow-y-auto">
+        {resumeChoice === null && bookmarks.length > 0 ? (
+          <div className="p-4 flex flex-col items-center gap-2 text-center bg-gray-900 border-b border-gray-700">
+            <p className="text-xs text-gray-300">
+              📍 Tu t'étais arrêté à <span className="text-amber-400 font-semibold">{formatBookmarkTime(firstBookmark)}</span>
+            </p>
+            <div className="flex gap-2 w-full">
+              <button onClick={() => setResumeChoice('resume')} className="flex-1 px-2 py-1.5 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold transition">
+                Reprendre là
+              </button>
+              <button onClick={() => setResumeChoice('start')} className="flex-1 px-2 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold transition">
+                Depuis le début
+              </button>
+            </div>
           </div>
-        </div>
-      ) : apiFailed ? (
-        <div className="relative w-full bg-black" style={{ paddingTop: '56.25%' }}>
-          <iframe
-            key={videoId}
-            src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0&playsinline=1&modestbranding=1&start=${resumeChoice === 'resume' ? existingBookmark : 0}`}
-            title="YouTube video player"
-            className="absolute inset-0 w-full h-full"
-            style={{ border: 0 }}
-            referrerPolicy="strict-origin-when-cross-origin"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowFullScreen
-          />
-        </div>
-      ) : (
-        <div className="relative w-full bg-black" style={{ paddingTop: '56.25%' }}>
-          <div ref={containerRef} className="absolute inset-0 w-full h-full" />
-        </div>
-      )}
+        ) : null}
+
+        {newBookmarkMode && apiReady && (
+          <div className="p-3 bg-gray-750 border-b border-gray-700">
+            <p className="text-[10px] text-gray-400 mb-1.5">Nom du point :</p>
+            <div className="flex gap-1">
+              <input
+                autoFocus
+                type="text"
+                value={bookmarkName}
+                onChange={(e) => setBookmarkName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') markPositionNamed(); }}
+                placeholder="ex: Intro, Couplet 1..."
+                className="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-[10px] text-white focus:outline-none focus:border-amber-500"
+              />
+              <button onClick={markPositionNamed} className="px-2 py-1 bg-green-700 hover:bg-green-600 rounded text-[10px] font-semibold transition">Créer</button>
+              <button onClick={() => { setNewBookmarkMode(false); setBookmarkName(''); }} className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[10px] font-semibold transition">✕</button>
+            </div>
+          </div>
+        )}
+
+        {bookmarks.length > 0 && (
+          <div className="p-2 space-y-1 bg-gray-750">
+            {bookmarks.map((bm, i) => (
+              <div key={bm.id} className="flex items-center gap-1 bg-gray-700 rounded p-1.5">
+                <button
+                  onClick={() => jumpToBookmark(bm.seconds)}
+                  className="flex-1 text-left px-1.5 py-0.5 hover:bg-gray-600 rounded transition text-[10px]"
+                  title="Cliquer pour aller à cette position"
+                >
+                  <span className="text-amber-400 font-semibold">{formatBookmarkTime(bm.seconds)}</span>
+                  <span className="text-gray-300 ml-1">{bm.name}</span>
+                </button>
+                <button
+                  onClick={() => deleteBookmark(bm.id)}
+                  className="p-0.5 hover:bg-red-700/50 rounded transition text-gray-400 hover:text-red-400"
+                  title="Supprimer ce point"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {savedFlash && (
+          <div className={`p-2 text-center text-[10px] font-semibold ${savedFlash === 'save' ? 'bg-green-700 text-white' : 'bg-red-700 text-white'}`}>
+            {savedFlash === 'save' ? '✓ Point créé' : '✓ Point supprimé'}
+          </div>
+        )}
+      </div>
+
+      <div className="flex-shrink-0">
+        {apiFailed ? (
+          <div className="relative w-full bg-black" style={{ paddingTop: '56.25%' }}>
+            <iframe
+              key={videoId}
+              src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0&playsinline=1&modestbranding=1&start=${resumeChoice === 'resume' ? firstBookmark : 0}`}
+              title="YouTube video player"
+              className="absolute inset-0 w-full h-full"
+              style={{ border: 0 }}
+              referrerPolicy="strict-origin-when-cross-origin"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+            />
+          </div>
+        ) : (
+          <div className="relative w-full bg-black" style={{ paddingTop: '56.25%' }}>
+            <div ref={containerRef} className="absolute inset-0 w-full h-full" />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -4221,6 +4294,7 @@ function GuitarApp() {
                   onAdd={addClassificationOption}
                   onRemove={removeClassificationOption}
                 />
+                <Roadmap songs={songs} onSelectSong={setSelectedSongId} />
                 <StorageManager />
               </>
             )}
@@ -4504,7 +4578,111 @@ function SessionSetupModal({ songs, onStart, onCancel }) {
   );
 }
 
-// Indicateur du niveau de stockage utilisé (IndexedDB) + export/import complet en JSON, dans l'écran d'accueil
+// Feuille de route visible : montre où tu en es et où tu vas (en cours / maîtrisés / prochains défis)
+function Roadmap({ songs, onSelectSong }) {
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  // Morceaux en cours : pratiqués récemment, pas encore maîtrisés
+  const inProgress = songs.filter(s => {
+    if (!s.lastPracticedAt) return false;
+    const lastDate = new Date(s.lastPracticedAt);
+    const isRecent = lastDate >= sevenDaysAgo;
+    const notMastered = getDifficulty(s) !== 'hard'; // Simplifié : hard = maîtrisé
+    return isRecent && notMastered;
+  }).slice(0, 3);
+
+  // Morceaux maîtrisés : difficulty hard OU beaucoup de sessions
+  const mastered = songs.filter(s => {
+    if (!s.lastPracticedAt) return false;
+    const diff = getDifficulty(s);
+    const sessionCount = (s.practiceSessions || []).length;
+    return diff === 'hard' || sessionCount >= 5;
+  }).slice(0, 3);
+
+  // Prochains défis : non-maîtrisés, non-en-cours, triés par difficulté croissante
+  const inProgressIds = new Set(inProgress.map(s => s.id));
+  const masteredIds = new Set(mastered.map(s => s.id));
+  const nextChallenges = songs
+    .filter(s => !inProgressIds.has(s.id) && !masteredIds.has(s.id))
+    .sort((a, b) => {
+      const diffOrder = { easy: 0, medium: 1, hard: 2 };
+      const da = diffOrder[getDifficulty(a)] || 0;
+      const db = diffOrder[getDifficulty(b)] || 0;
+      return da - db;
+    })
+    .slice(0, 5);
+
+  const diffColor = (diff) => {
+    const colors = { easy: 'text-green-400', medium: 'text-amber-400', hard: 'text-red-400' };
+    return colors[diff] || 'text-gray-400';
+  };
+
+  return (
+    <div className="p-4 border-t border-gray-700">
+      <p className="text-xs text-gray-500 uppercase tracking-wide mb-3">🗺️ Feuille de route</p>
+
+      {inProgress.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[10px] text-gray-400 mb-1">En cours</p>
+          <div className="space-y-0.5">
+            {inProgress.map(s => (
+              <button
+                key={s.id}
+                onClick={() => onSelectSong?.(s.id)}
+                className="w-full text-left px-2 py-1 bg-amber-900/30 hover:bg-amber-900/50 rounded text-xs truncate transition"
+              >
+                {s.title}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {mastered.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[10px] text-gray-400 mb-1">Maîtrisés ✓</p>
+          <div className="space-y-0.5">
+            {mastered.map(s => (
+              <button
+                key={s.id}
+                onClick={() => onSelectSong?.(s.id)}
+                className="w-full text-left px-2 py-1 bg-green-900/30 hover:bg-green-900/50 rounded text-xs truncate transition text-green-300"
+              >
+                {s.title}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {nextChallenges.length > 0 && (
+        <div>
+          <p className="text-[10px] text-gray-400 mb-1">Prochains défis</p>
+          <div className="space-y-0.5">
+            {nextChallenges.map(s => (
+              <button
+                key={s.id}
+                onClick={() => onSelectSong?.(s.id)}
+                className="w-full text-left px-2 py-1 bg-gray-750 hover:bg-gray-700 rounded text-xs truncate transition flex items-center justify-between"
+              >
+                <span>{s.title}</span>
+                <span className={`text-[9px] font-semibold ml-1 flex-shrink-0 ${diffColor(getDifficulty(s))}`}>
+                  {getDifficulty(s)[0].toUpperCase()}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {inProgress.length === 0 && mastered.length === 0 && nextChallenges.length === 0 && (
+        <p className="text-[10px] text-gray-500 italic">Ajoute des morceaux pour voir ta feuille de route</p>
+      )}
+    </div>
+  );
+}
+
 function StorageManager() {
   const [estimate, setEstimate] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -5393,6 +5571,7 @@ function CapoPicker({ capo, onChange }) {
 function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVersion, onUpdateSong, classificationOptions = [], onAddClassificationOption, onRemoveClassificationOption, practiceSessions = [], onLogPracticeSession, weeklyGoalMinutes = 120, onUpdateWeeklyGoal, sessionInfo = null, onSessionNext, onSessionEnd }) {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [focusMode, setFocusMode] = useState(false); // Masque les panneaux pour une concentration maximale
   const [performance, setPerformance] = useState(false);
   const [videoMenuOpen, setVideoMenuOpen] = useState(false);
   const [activeLink, setActiveLink] = useState(null);
@@ -5401,8 +5580,24 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
     .filter(l => l.videoId);
   const isSessionActive = !!sessionInfo;
 
-  const saveBookmark = (linkId, seconds) => {
-    onUpdateSong({ ...song, youtubeUrls: (song.youtubeUrls || []).map(u => u.id === linkId ? { ...u, bookmarkSeconds: seconds } : u) });
+  const saveBookmark = (linkId, bookmarkData) => {
+    // bookmarkData peut être :
+    // - { seconds, name } : ajouter/créer un nouveau bookmark
+    // - { delete: bookmarkId } : supprimer un bookmark
+    onUpdateSong({
+      ...song,
+      youtubeUrls: (song.youtubeUrls || []).map(u => {
+        if (u.id !== linkId) return u;
+        const bookmarks = u.bookmarks || [];
+        if (bookmarkData.delete) {
+          return { ...u, bookmarks: bookmarks.filter(bm => bm.id !== bookmarkData.delete) };
+        } else {
+          // Ajouter ou remplacer un bookmark
+          const newBookmark = { id: newId(), seconds: bookmarkData.seconds, name: bookmarkData.name };
+          return { ...u, bookmarks: [newBookmark, ...bookmarks] };
+        }
+      }),
+    });
   };
 
   // Minuteur de pratique : chronomètre la session en cours sur ce morceau
@@ -5522,6 +5717,27 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
     setVideoMenuOpen(false);
   }, [song.id]);
 
+  // Quitter le mode Focus avec ESC
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && focusMode) {
+        setFocusMode(false);
+      }
+    };
+    if (focusMode) {
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [focusMode]);
+
+  // En mode Focus, forcer le collapse des panneaux
+  useEffect(() => {
+    if (focusMode) {
+      setLeftCollapsed(true);
+      setRightCollapsed(true);
+    }
+  }, [focusMode]);
+
   const updateVersion = (updates) => {
     const updatedSong = {
       ...song,
@@ -5547,7 +5763,14 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
                 🎯 Session {sessionInfo.position}/{sessionInfo.total}
               </span>
             )}
-            {isCompact && (
+            <button
+              onClick={() => setFocusMode(!focusMode)}
+              className={`px-3 py-2 rounded transition flex items-center gap-1 text-sm font-medium ${focusMode ? 'bg-purple-600 pulse' : 'bg-gray-700 hover:bg-gray-600'}`}
+              title={focusMode ? 'Quitter le mode Focus (ESC)' : 'Mode Focus : masquer tout pour la concentration'}
+            >
+              {focusMode ? '🎯 Focus' : '◯ Focus'}
+            </button>
+            {isCompact && !focusMode && (
               <>
                 <button
                   onClick={() => setLeftCollapsed(!leftCollapsed)}
@@ -5575,12 +5798,20 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
             <p className="text-xs text-gray-400 truncate">{song.artist}</p>
           </div>
 
-          <div className="flex items-center gap-2 bg-gray-900 rounded p-2 border border-gray-700 text-xs">
-            <span>♪ {version.bpm} BPM</span>
-            <span className="text-gray-500">•</span>
+          <div className={`flex items-center gap-2 ${focusMode ? 'bg-transparent border-0 p-0' : 'bg-gray-900 rounded p-2 border border-gray-700'} text-xs`}>
+            {!focusMode && (
+              <>
+                <span>♪ {version.bpm} BPM</span>
+                <span className="text-gray-500">•</span>
+              </>
+            )}
             <CapoPicker capo={version.capo} onChange={(n) => updateVersion({ capo: n })} />
-            <span className="text-gray-500">•</span>
-            <span>{version.key}</span>
+            {!focusMode && (
+              <>
+                <span className="text-gray-500">•</span>
+                <span>{version.key}</span>
+              </>
+            )}
           </div>
 
           {validYoutubeLinks.length > 0 && (
@@ -5645,50 +5876,60 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
             )}
           </div>
 
-          <button
-            onClick={() => setHistoryOpen(true)}
-            className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded transition text-sm font-semibold flex items-center gap-1"
-            title="Journal de pratique et progression"
-          >
-            📊 Journal
-          </button>
+          {!focusMode && (
+            <>
+              <button
+                onClick={() => setHistoryOpen(true)}
+                className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded transition text-sm font-semibold flex items-center gap-1"
+                title="Journal de pratique et progression"
+              >
+                📊 Journal
+              </button>
 
-          <button
-            onClick={() => onUpdateSong({ ...song, lastPracticedAt: new Date().toISOString() })}
-            className={`px-3 py-2 rounded transition text-sm font-semibold flex items-center gap-1 ${
-              song.lastPracticedAt && new Date(song.lastPracticedAt).toDateString() === new Date().toDateString()
-                ? 'bg-green-700'
-                : 'bg-gray-700 hover:bg-gray-600'
-            }`}
-            title="Marquer comme pratiqué aujourd'hui (pour la révision espacée)"
-          >
-            ✓ Pratiqué
-          </button>
+              <button
+                onClick={() => onUpdateSong({ ...song, lastPracticedAt: new Date().toISOString() })}
+                className={`px-3 py-2 rounded transition text-sm font-semibold flex items-center gap-1 ${
+                  song.lastPracticedAt && new Date(song.lastPracticedAt).toDateString() === new Date().toDateString()
+                    ? 'bg-green-700'
+                    : 'bg-gray-700 hover:bg-gray-600'
+                }`}
+                title="Marquer comme pratiqué aujourd'hui (pour la révision espacée)"
+              >
+                ✓ Pratiqué
+              </button>
 
-          <button
-            onClick={() => setPerformance(true)}
-            className="px-3 py-2 bg-amber-600 hover:bg-amber-500 rounded transition text-sm font-semibold flex items-center gap-1"
-            title="Mode prestation : plein écran, photos qui défilent"
-          >
-            🎤 Prestation
-          </button>
+              <button
+                onClick={() => setPerformance(true)}
+                className="px-3 py-2 bg-amber-600 hover:bg-amber-500 rounded transition text-sm font-semibold flex items-center gap-1"
+                title="Mode prestation : plein écran, photos qui défilent"
+              >
+                🎤 Prestation
+              </button>
 
-          <ClassificationPicker
-            song={song}
-            options={classificationOptions}
-            onAddOption={onAddClassificationOption}
-            onRemoveOption={onRemoveClassificationOption}
-            onUpdateSong={onUpdateSong}
-          />
+              <ClassificationPicker
+                song={song}
+                options={classificationOptions}
+                onAddOption={onAddClassificationOption}
+                onRemoveOption={onRemoveClassificationOption}
+                onUpdateSong={onUpdateSong}
+              />
 
-          {isSessionActive && (
-            <button
-              onClick={goToNextInSession}
-              className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 rounded transition text-sm font-semibold flex items-center gap-1"
-              title={sessionInfo.position < sessionInfo.total ? 'Enregistrer et passer au morceau suivant' : 'Terminer la session'}
-            >
-              {sessionInfo.position < sessionInfo.total ? 'Suivant ▶' : '🏁 Terminer'}
-            </button>
+              {isSessionActive && (
+                <button
+                  onClick={goToNextInSession}
+                  className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 rounded transition text-sm font-semibold flex items-center gap-1"
+                  title={sessionInfo.position < sessionInfo.total ? 'Enregistrer et passer au morceau suivant' : 'Terminer la session'}
+                >
+                  {sessionInfo.position < sessionInfo.total ? 'Suivant ▶' : '🏁 Terminer'}
+                </button>
+              )}
+            </>
+          )}
+
+          {focusMode && (
+            <div className="text-center text-xs text-gray-500 px-2 py-1">
+              Appuyez sur <kbd className="bg-gray-700 px-1.5 py-0.5 rounded">ESC</kbd> pour quitter le mode Focus
+            </div>
           )}
 
         </div>
@@ -6690,6 +6931,41 @@ function ImageEditorModal({ src, onSave, onClose }) {
   const cropStartRef = useRef(null);
   const [cropRect, setCropRect] = useState(null);
   const [textInput, setTextInput] = useState(null); // { x, y, value }
+  const [currentSize, setCurrentSize] = useState(null); // Taille actuelle en octets
+  const [showCompressionMenu, setShowCompressionMenu] = useState(false);
+
+  const updateSize = (dataUrl) => {
+    const sizeBytes = Math.round((dataUrl.length - dataUrl.indexOf(',') - 1) * 0.75);
+    setCurrentSize(sizeBytes);
+  };
+
+  const formatSize = (bytes) => {
+    if (bytes < 1024) return bytes + ' o';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' Ko';
+    return (bytes / (1024 * 1024)).toFixed(2) + ' Mo';
+  };
+
+  const compressImage = (quality) => {
+    // quality: 0.3 à 0.9 (30% à 90%)
+    if (!canvasRef.current) return;
+    const jpegDataUrl = canvasRef.current.toDataURL('image/jpeg', quality);
+    updateSize(jpegDataUrl);
+    // Remplace le contenu du canvas avec l'image JPEG comprimée pour la prévisualisation
+    const img = new Image();
+    img.onload = () => {
+      const ctx = canvasRef.current.getContext('2d');
+      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      ctx.drawImage(img, 0, 0);
+    };
+    img.src = jpegDataUrl;
+  };
+
+  const compressionLevels = [
+    { label: '🐢 Très comprimée (30%)', quality: 0.3, hint: 'Pour économiser au max' },
+    { label: '⭐ Économe (50%)', quality: 0.5, hint: 'Bon compromis' },
+    { label: '✓ Normale (70%)', quality: 0.7, hint: 'Défaut recommandé' },
+    { label: '📷 Haute (85%)', quality: 0.85, hint: 'Meilleure qualité' },
+  ];
 
   const fitToCanvas = (img) => {
     const maxDim = 460;
@@ -6712,6 +6988,9 @@ function ImageEditorModal({ src, onSave, onClose }) {
     img.onload = () => {
       originalImgRef.current = img;
       fitToCanvas(img);
+      // Calculer la taille initiale (PNG par défaut)
+      const pngUrl = canvasRef.current.toDataURL('image/png');
+      updateSize(pngUrl);
       setReady(true);
     };
     img.src = src;
@@ -6893,6 +7172,22 @@ function ImageEditorModal({ src, onSave, onClose }) {
               <input type="range" min="1" max="12" value={brushSize} onChange={(e) => setBrushSize(parseInt(e.target.value))} className="w-16 accent-amber-500" />
             </div>
           )}
+          <div className="relative">
+            <button onClick={() => setShowCompressionMenu(!showCompressionMenu)} className="px-2 py-1 rounded font-semibold bg-purple-700 hover:bg-purple-600" title="Compresser l'image">📦 {currentSize ? formatSize(currentSize) : '?'}</button>
+            {showCompressionMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowCompressionMenu(false)} />
+                <div className="absolute top-full left-0 z-50 bg-gray-800 border border-gray-600 rounded mt-1 shadow-lg p-2 flex flex-col gap-1 min-w-[200px]">
+                  {compressionLevels.map((level, i) => (
+                    <button key={i} onClick={() => { compressImage(level.quality); setShowCompressionMenu(false); }} className="text-left px-2 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs transition">
+                      <div className="font-semibold">{level.label}</div>
+                      <div className="text-[10px] text-gray-400">{level.hint}</div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           <button onClick={resetImage} className="px-2 py-1 rounded font-semibold bg-gray-700 hover:bg-gray-600 ml-auto">↺ Recommencer</button>
         </div>
 
@@ -6920,7 +7215,7 @@ function ImageEditorModal({ src, onSave, onClose }) {
 
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold">Annuler</button>
-          <button onClick={() => onSave(canvasRef.current.toDataURL('image/png'))} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold">Enregistrer</button>
+          <button onClick={() => onSave(canvasRef.current.toDataURL('image/jpeg', 0.7))} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold">💾 Enregistrer (JPEG 70%)</button>
         </div>
       </div>
     </div>
@@ -7044,7 +7339,7 @@ function RightPanel({ song, version, updateVersion, onUpdateSong, onPlayVideo })
                 />
                 {videoId && (
                   <button
-                    onClick={() => onPlayVideo?.({ id: url.id, url: url.url, videoId, bookmarkSeconds: url.bookmarkSeconds })}
+                    onClick={() => onPlayVideo?.({ id: url.id, url: url.url, videoId, bookmarks: url.bookmarks })}
                     className="flex-shrink-0 px-2 py-1 bg-red-700 hover:bg-red-600 rounded text-xs transition"
                     title="Voir la vidéo"
                   >
