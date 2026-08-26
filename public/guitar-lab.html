@@ -4027,6 +4027,7 @@ function GuitarApp() {
 
   // Session du jour : enchaîne automatiquement les morceaux à revoir, avec chrono auto-démarré
   const [sessionSetupOpen, setSessionSetupOpen] = useState(false);
+  const [roadmapOpen, setRoadmapOpen] = useState(false);
   const [sessionQueue, setSessionQueue] = useState(null); // tableau d'ids, ou null si aucune session en cours
   const [sessionIndex, setSessionIndex] = useState(0);
 
@@ -4294,7 +4295,14 @@ function GuitarApp() {
                   onAdd={addClassificationOption}
                   onRemove={removeClassificationOption}
                 />
-                <Roadmap songs={songs} onSelectSong={setSelectedSongId} />
+                <button
+                  onClick={() => setRoadmapOpen(true)}
+                  className="w-full text-left p-4 border-t border-gray-700 hover:bg-gray-750 transition"
+                  title="Ouvrir la feuille de route en grand"
+                >
+                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">🗺️ Feuille de route</p>
+                  <p className="text-xs text-gray-400">Cliquer pour voir la feuille de route complète</p>
+                </button>
                 <StorageManager />
               </>
             )}
@@ -4519,6 +4527,116 @@ function GuitarApp() {
           onCancel={() => setSessionSetupOpen(false)}
         />
       )}
+      {roadmapOpen && (
+        <RoadmapModal
+          songs={songs}
+          onSelectSong={setSelectedSongId}
+          onClose={() => setRoadmapOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Version modale/plein-écran de la roadmap, pour une meilleure visibilité sur petit écran
+function RoadmapModal({ songs, onSelectSong, onClose }) {
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  const inProgress = songs.filter(s => {
+    if (!s.lastPracticedAt) return false;
+    const lastDate = new Date(s.lastPracticedAt);
+    const isRecent = lastDate >= sevenDaysAgo;
+    const notMastered = getDifficulty(s) !== 'hard';
+    return isRecent && notMastered;
+  });
+
+  const mastered = songs.filter(s => {
+    if (!s.lastPracticedAt) return false;
+    const diff = getDifficulty(s);
+    const sessionCount = (s.practiceSessions || []).length;
+    return diff === 'hard' || sessionCount >= 5;
+  });
+
+  const inProgressIds = new Set(inProgress.map(s => s.id));
+  const masteredIds = new Set(mastered.map(s => s.id));
+  const nextChallenges = songs
+    .filter(s => !inProgressIds.has(s.id) && !masteredIds.has(s.id))
+    .sort((a, b) => {
+      const diffOrder = { easy: 0, medium: 1, hard: 2 };
+      const da = diffOrder[getDifficulty(a)] || 0;
+      const db = diffOrder[getDifficulty(b)] || 0;
+      return da - db;
+    });
+
+  const diffColor = (diff) => {
+    const colors = { easy: 'text-green-400', medium: 'text-amber-400', hard: 'text-red-400' };
+    return colors[diff] || 'text-gray-400';
+  };
+
+  const SongRow = ({ song, section }) => (
+    <button
+      onClick={() => { onSelectSong?.(song.id); onClose?.(); }}
+      className="w-full text-left p-3 bg-gray-750 hover:bg-gray-700 rounded transition border-l-4 flex items-center justify-between"
+      style={{
+        borderColor: section === 'progress' ? '#b45309' : section === 'mastered' ? '#22c55e' : '#9ca3af'
+      }}
+    >
+      <div>
+        <p className="font-semibold text-sm">{song.title}</p>
+        <p className="text-xs text-gray-400">{song.artist}</p>
+      </div>
+      {section === 'challenges' && (
+        <span className={`text-xs font-bold ${diffColor(getDifficulty(song))}`}>
+          {getDifficulty(song)[0].toUpperCase()}
+        </span>
+      )}
+    </button>
+  );
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-gray-700 shadow-2xl">
+        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-center">
+          <h2 className="font-bold text-amber-400 text-lg">🗺️ Feuille de route</h2>
+          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-4">
+          {inProgress.length > 0 && (
+            <section>
+              <h3 className="font-semibold text-amber-400 mb-2">📌 En cours</h3>
+              <div className="space-y-2">
+                {inProgress.map(s => <SongRow key={s.id} song={s} section="progress" />)}
+              </div>
+            </section>
+          )}
+
+          {mastered.length > 0 && (
+            <section>
+              <h3 className="font-semibold text-green-400 mb-2">✓ Maîtrisés</h3>
+              <div className="space-y-2">
+                {mastered.map(s => <SongRow key={s.id} song={s} section="mastered" />)}
+              </div>
+            </section>
+          )}
+
+          {nextChallenges.length > 0 && (
+            <section>
+              <h3 className="font-semibold text-gray-400 mb-2">🎯 Prochains défis</h3>
+              <div className="space-y-2">
+                {nextChallenges.map(s => <SongRow key={s.id} song={s} section="challenges" />)}
+              </div>
+            </section>
+          )}
+
+          {inProgress.length === 0 && mastered.length === 0 && nextChallenges.length === 0 && (
+            <p className="text-center text-gray-500 py-8">Ajoute des morceaux pour voir ta feuille de route</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -6387,6 +6505,16 @@ function SectionBuilder({ section, index, version, updateVersion }) {
         </select>
         <div className="flex items-center gap-0.5">
           <span className="text-gray-400 text-[9px] font-semibold">L</span>
+          <button
+            onClick={() => {
+              const rows = Math.max(1, rowCount - 1);
+              resizeGrid(section.cols || 4, rows);
+            }}
+            className="w-5 h-5 bg-gray-700 hover:bg-gray-600 rounded text-[9px] font-bold transition flex items-center justify-center"
+            title="Réduire les lignes"
+          >
+            −
+          </button>
           <input
             type="number"
             min={1}
@@ -6395,8 +6523,20 @@ function SectionBuilder({ section, index, version, updateVersion }) {
               const rows = parseInt(e.target.value, 10) || 1;
               resizeGrid(section.cols || 4, rows);
             }}
-            className="w-6 bg-gray-800 border border-gray-600 rounded px-0.5 py-0.5 text-center text-[10px] focus:outline-none focus:border-amber-500"
+            onDoubleClick={(e) => e.target.select()}
+            className="w-6 bg-gray-800 border border-gray-600 rounded px-0.5 py-0.5 text-center text-[10px] focus:outline-none focus:border-amber-500 cursor-pointer"
+            title="Double-cliquer pour éditer, ou utiliser les boutons +/−"
           />
+          <button
+            onClick={() => {
+              const rows = rowCount + 1;
+              resizeGrid(section.cols || 4, rows);
+            }}
+            className="w-5 h-5 bg-gray-700 hover:bg-gray-600 rounded text-[9px] font-bold transition flex items-center justify-center"
+            title="Augmenter les lignes"
+          >
+            +
+          </button>
         </div>
         <div className="flex items-center gap-0.5">
           <span className="text-gray-400 text-[9px] font-semibold">C</span>
@@ -6411,6 +6551,34 @@ function SectionBuilder({ section, index, version, updateVersion }) {
             className="w-6 bg-gray-800 border border-gray-600 rounded px-0.5 py-0.5 text-center text-[10px] focus:outline-none focus:border-amber-500"
           />
         </div>
+        <div className="flex items-center gap-0.5">
+          <span className="text-gray-400 text-[9px] font-semibold">×</span>
+          <button
+            onClick={() => updateSection({ repeat: Math.max(1, (section.repeat || 1) - 1) })}
+            className="w-5 h-5 bg-gray-700 hover:bg-gray-600 rounded text-[9px] font-bold transition flex items-center justify-center"
+            title="Réduire les répétitions"
+          >
+            −
+          </button>
+          <input
+            type="number"
+            min={1}
+            value={section.repeat || 1}
+            onChange={(e) => {
+              const val = parseInt(e.target.value, 10) || 1;
+              updateSection({ repeat: Math.max(1, val) });
+            }}
+            onDoubleClick={(e) => e.target.select()}
+            className="w-6 bg-gray-800 border border-gray-600 rounded px-0.5 py-0.5 text-center text-[10px] font-semibold focus:outline-none focus:border-amber-500 cursor-pointer"
+            title="Double-cliquer pour éditer, ou utiliser les boutons +/−"
+          />
+          <button
+            onClick={() => updateSection({ repeat: (section.repeat || 1) + 1 })}
+            className="w-5 h-5 bg-gray-700 hover:bg-gray-600 rounded text-[9px] font-bold transition flex items-center justify-center"
+            title="Augmenter les répétitions"
+          >
+            +
+          </button>
         {collapsed && (
           <span className="flex-shrink-0 text-gray-400 text-[10px] whitespace-nowrap">
             {section.cols}×{rowCount}
