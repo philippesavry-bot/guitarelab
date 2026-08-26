@@ -6399,6 +6399,7 @@ function SectionBuilder({ section, index, version, updateVersion }) {
           >
             +
           </button>
+        </div>
         {collapsed && (
           <span className="flex-shrink-0 text-gray-400 text-[10px] whitespace-nowrap">
             {section.cols}×{rowCount}
