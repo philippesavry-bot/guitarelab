@@ -6618,10 +6618,57 @@ function SectionBuilder({ section, index, version, updateVersion }) {
           )}
 
           <div className="overflow-x-auto">
-            <div className="grid w-max gap-0.5" style={{ gridTemplateColumns: `repeat(${section.cols}, 2.5rem)` }}>
-              {section.cells.map(cell => (
-                <ChordCell key={cell.id} cell={cell} onUpdate={(c) => updateCell(cell.id, c)} onToggleSplit={() => toggleSplit(cell.id)} />
-              ))}
+            <div className="flex gap-2">
+              {/* Colonne des numéros de ligne */}
+              <div className="flex flex-col gap-0.5 justify-start pt-0.5">
+                {Array.from({ length: Math.ceil(section.cells.length / section.cols) }).map((_, rowIdx) => (
+                  <div key={`row-${rowIdx}`} className="h-10 flex items-center gap-1">
+                    <button
+                      onClick={() => {
+                        const newRepeats = [...(section.rowRepeats || Array(Math.ceil(section.cells.length / section.cols)).fill(1))];
+                        newRepeats[rowIdx] = Math.max(1, (newRepeats[rowIdx] || 1) - 1);
+                        updateSection({ rowRepeats: newRepeats });
+                      }}
+                      className="w-5 h-5 bg-gray-700 hover:bg-gray-600 rounded text-[9px] font-bold transition flex items-center justify-center"
+                      title="Réduire les répétitions"
+                    >
+                      −
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      value={section.rowRepeats?.[rowIdx] || 1}
+                      onChange={(e) => {
+                        const val = Math.max(1, parseInt(e.target.value) || 1);
+                        const newRepeats = [...(section.rowRepeats || Array(Math.ceil(section.cells.length / section.cols)).fill(1))];
+                        newRepeats[rowIdx] = val;
+                        updateSection({ rowRepeats: newRepeats });
+                      }}
+                      onDoubleClick={(e) => e.target.select()}
+                      className="w-6 text-center bg-gray-800 border border-gray-600 rounded px-0.5 py-0.5 text-[10px] font-bold focus:outline-none focus:border-amber-500 cursor-pointer"
+                      title={`Répétitions ligne ${rowIdx + 1}`}
+                    />
+                    <button
+                      onClick={() => {
+                        const newRepeats = [...(section.rowRepeats || Array(Math.ceil(section.cells.length / section.cols)).fill(1))];
+                        newRepeats[rowIdx] = (newRepeats[rowIdx] || 1) + 1;
+                        updateSection({ rowRepeats: newRepeats });
+                      }}
+                      className="w-5 h-5 bg-gray-700 hover:bg-gray-600 rounded text-[9px] font-bold transition flex items-center justify-center"
+                      title="Augmenter les répétitions"
+                    >
+                      +
+                    </button>
+                  </div>
+                ))}
+              </div>
+              
+              {/* Grille d'accords */}
+              <div className="grid w-max gap-0.5" style={{ gridTemplateColumns: `repeat(${section.cols}, 2.5rem)` }}>
+                {section.cells.map(cell => (
+                  <ChordCell key={cell.id} cell={cell} onUpdate={(c) => updateCell(cell.id, c)} onToggleSplit={() => toggleSplit(cell.id)} />
+                ))}
+              </div>
             </div>
           </div>
         </div>
