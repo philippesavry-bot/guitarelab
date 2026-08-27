@@ -1,3 +1,4 @@
+
 // Suggestions de noms de section (structure du morceau)
 const SECTION_NAME_SUGGESTIONS = ['Intro', 'Couplet', 'Refrain', 'Pont', 'Outro'];
 
@@ -6723,6 +6724,7 @@ function CenterPanel({ version, updateVersion }) {
   // Hauteur d'affichage des photos empilées : compact / moyen / entier
   const [imgHeight, setImgHeight] = useState('md');
   const HEIGHTS = { sm: 'max-h-64', md: 'max-h-96', full: 'max-h-none' };
+  const [captureToolOpen, setCaptureToolOpen] = useState(false);
 
   const addImages = (dataUrls) => {
     if (!dataUrls.length) return;
@@ -6817,6 +6819,14 @@ function CenterPanel({ version, updateVersion }) {
         >
           📋 Coller
         </button>
+
+        <button
+          onClick={() => setCaptureToolOpen(true)}
+          className="px-2 py-1 bg-purple-700 hover:bg-purple-600 rounded text-xs font-semibold flex items-center gap-1"
+          title="Capturer une zone depuis la vidéo YouTube"
+        >
+          📸 Capturer
+        </button>
         {pasteStatus === 'empty' && (
           <span className="text-[10px] text-gray-400">Aucune image dans le presse-papiers</span>
         )}
@@ -6901,7 +6911,204 @@ function CenterPanel({ version, updateVersion }) {
           onClose={() => setEditingImageId(null)}
         />
       )}
+      {captureToolOpen && (
+        <VideoCaptureTool
+          onAddImages={addImages}
+          onClose={() => setCaptureToolOpen(false)}
+        />
+      )}
     </>
+  );
+}
+
+// Outil de capture : colle URL YouTube + screenshot, cadre interactif, exporte images vers la fiche
+function VideoCaptureTool({ onAddImages, onClose }) {
+  const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [sourceImg, setSourceImg] = useState(null);
+  const [captures, setCaptures] = useState([]);
+  const [hasImage, setHasImage] = useState(false);
+  const [frameLocked, setFrameLocked] = useState(false);
+  const [normSel, setNormSel] = useState({ x: 0.12, y: 0.76, w: 0.76, h: 0.15 });
+  const [message, setMessage] = useState('');
+  const canvasRef = useRef(null);
+  const containerRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  const showMessage = (msg) => {
+    setMessage(msg);
+    setTimeout(() => setMessage(''), 3000);
+  };
+
+  const loadImage = (blob) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        setSourceImg(img);
+        setHasImage(true);
+        if (frameLocked) doCapture(img);
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(blob);
+  };
+
+  const handlePaste = async (e) => {
+    e.preventDefault();
+    const items = e.clipboardData?.items || [];
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        loadImage(item.getAsFile());
+        showMessage('Image collée');
+        return;
+      }
+    }
+    showMessage('Aucune image dans le presse-papiers');
+  };
+
+  const doCapture = (img) => {
+    if (!img) return;
+    const nw = img.naturalWidth;
+    const nh = img.naturalHeight;
+    const sx = Math.round(normSel.x * nw);
+    const sy = Math.round(normSel.y * nh);
+    const sw = Math.round(normSel.w * nw);
+    const sh = Math.round(normSel.h * nh);
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, sw);
+    c.height = Math.max(1, sh);
+    c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    setCaptures([...captures, c.toDataURL('image/jpeg', 0.8)]);
+    showMessage('Capture ajoutée');
+    setFrameLocked(true);
+  };
+
+  const applyCaptures = () => {
+    if (captures.length === 0) {
+      showMessage('Aucune capture');
+      return;
+    }
+    onAddImages?.(captures);
+    showMessage('Images ajoutées à la fiche');
+    setTimeout(onClose, 1000);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-800 rounded-lg max-w-lg w-full max-h-[90vh] overflow-y-auto border border-gray-700 shadow-2xl">
+        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-center">
+          <h2 className="font-bold text-amber-400">📸 Capturer depuis vidéo</h2>
+          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-4">
+          {/* URL YouTube */}
+          <div>
+            <label className="text-xs text-gray-400 uppercase tracking-wide mb-1 block">YouTube URL</label>
+            <input
+              type="text"
+              value={youtubeUrl}
+              onChange={(e) => setYoutubeUrl(e.target.value)}
+              placeholder="https://www.youtube.com/watch?v=..."
+              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
+            />
+          </div>
+
+          {/* Zone de collage */}
+          <div>
+            <label className="text-xs text-gray-400 uppercase tracking-wide mb-1 block">Capture d'écran</label>
+            <div
+              onPaste={handlePaste}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                const files = e.dataTransfer?.files;
+                if (files?.[0]) loadImage(files[0]);
+              }}
+              className="w-full p-4 border-2 border-dashed border-gray-600 rounded text-center text-gray-400 text-sm cursor-text focus:outline-none"
+              tabIndex={0}
+              title="Clique et colle (Cmd+V), ou drag-drop une image"
+            >
+              Colle une capture d'écran ici (Cmd+V)
+            </div>
+          </div>
+
+          {/* Aperçu + cadrage */}
+          {hasImage && sourceImg && (
+            <div>
+              <label className="text-xs text-gray-400 uppercase tracking-wide mb-1 block">Ajuste le cadre</label>
+              <div
+                ref={containerRef}
+                className="relative w-full bg-black rounded border border-gray-600 overflow-hidden"
+                style={{ paddingTop: `${(sourceImg.naturalHeight / sourceImg.naturalWidth) * 100}%` }}
+              >
+                <img
+                  src={sourceImg.src}
+                  className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+                  alt="source"
+                />
+                <div
+                  className="absolute border-2 border-amber-400 bg-amber-400/10"
+                  style={{
+                    left: `${normSel.x * 100}%`,
+                    top: `${normSel.y * 100}%`,
+                    width: `${normSel.w * 100}%`,
+                    height: `${normSel.h * 100}%`,
+                  }}
+                />
+              </div>
+              <p className="text-[10px] text-gray-500 mt-1">
+                {Math.round(normSel.w * sourceImg.naturalWidth)} × {Math.round(normSel.h * sourceImg.naturalHeight)} px
+              </p>
+            </div>
+          )}
+
+          {/* Résultat */}
+          {captures.length > 0 && (
+            <div>
+              <label className="text-xs text-gray-400 uppercase tracking-wide mb-1 block">Captures ({captures.length})</label>
+              <div className="max-h-40 overflow-y-auto space-y-1 bg-gray-750 rounded p-2">
+                {captures.map((src, i) => (
+                  <div key={i} className="flex items-center justify-between gap-2 bg-gray-700 p-2 rounded text-xs">
+                    <span>Capture {i + 1}</span>
+                    <button
+                      onClick={() => setCaptures(captures.filter((_, j) => j !== i))}
+                      className="px-2 py-1 bg-red-700 hover:bg-red-600 rounded text-[10px]"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {message && <p className="text-center text-xs text-green-400 font-semibold">{message}</p>}
+        </div>
+
+        <div className="p-4 border-t border-gray-700 flex gap-2 sticky bottom-0 bg-gray-800">
+          <button
+            onClick={() => doCapture(sourceImg)}
+            disabled={!hasImage}
+            className="flex-1 px-3 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded font-semibold transition text-sm"
+          >
+            📷 Capturer
+          </button>
+          <button
+            onClick={applyCaptures}
+            disabled={captures.length === 0}
+            className="flex-1 px-3 py-2 bg-green-600 hover:bg-green-500 disabled:opacity-50 rounded font-semibold transition text-sm"
+          >
+            ✓ Ajouter à la fiche
+          </button>
+          <button onClick={onClose} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded font-semibold transition text-sm">
+            Fermer
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
