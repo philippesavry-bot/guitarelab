@@ -3548,6 +3548,81 @@ function SaveStatusBadge({ status, onForceSave }) {
   );
 }
 
+// Panneau de debug intégré à l'écran (sans F12 sur iPad)
+function DebugPanel() {
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [swStatus, setSwStatus] = useState("non enregistré");
+
+  useEffect(() => {
+    const addLog = (msg, type = "info") => {
+      setLogs(prev => [...prev, { msg, type, time: new Date().toLocaleTimeString() }].slice(-20));
+    };
+
+    window.addEventListener("error", e => {
+      addLog(`❌ ${e.message}`, "error");
+    });
+
+    window.addEventListener("unhandledrejection", e => {
+      addLog(`⚠️ ${e.reason}`, "error");
+    });
+
+    window.addEventListener("online", () => {
+      setIsOnline(true);
+      addLog("🟢 Connexion rétablie", "success");
+    });
+
+    window.addEventListener("offline", () => {
+      setIsOnline(false);
+      addLog("🔴 Offline mode", "warning");
+    });
+
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.ready.then(reg => {
+        setSwStatus("✅ Actif");
+        addLog("Service Worker enregistré", "success");
+      }).catch(err => {
+        setSwStatus("❌ Erreur");
+        addLog(`SW error: ${err.message}`, "error");
+      });
+    }
+
+    addLog("🎸 Guitar Lab démarré", "info");
+  }, []);
+
+  return (
+    <div className="fixed bottom-4 right-4 z-40">
+      <button onClick={() => setDebugOpen(!debugOpen)} className="w-12 h-12 rounded-full bg-gray-700 hover:bg-gray-600 border-2 border-amber-500 flex items-center justify-center font-bold text-amber-400 shadow-lg" title="Ouvrir le panneau de debug">🐛</button>
+      {debugOpen && (
+        <div className="absolute bottom-16 right-0 w-80 bg-gray-900 border border-gray-700 rounded-lg shadow-xl overflow-hidden flex flex-col max-h-96">
+          <div className="bg-gray-800 p-3 border-b border-gray-700 flex justify-between items-center">
+            <h3 className="font-bold text-amber-400 text-sm">🐛 Debug Panel</h3>
+            <button onClick={() => setDebugOpen(false)} className="text-gray-400 hover:text-white">✕</button>
+          </div>
+          <div className="p-3 space-y-2 border-b border-gray-700 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-gray-400">Connexion :</span>
+              <span className={isOnline ? "text-green-400" : "text-red-400"}>{isOnline ? "🟢 Online" : "🔴 Offline"}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-gray-400">Service Worker :</span>
+              <span className={swStatus.includes("✅") ? "text-green-400" : "text-red-400"}>{swStatus}</span>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto bg-gray-950 p-2">
+            {logs.length === 0 ? <p className="text-gray-600 text-xs">Aucun log</p> : logs.map((log, i) => <div key={i} className="text-[9px] font-mono mb-1"><span className="text-gray-500">[{log.time}]</span> <span className={log.type === "error" ? "text-red-400" : log.type === "warning" ? "text-yellow-400" : log.type === "success" ? "text-green-400" : "text-gray-300"}>{log.msg}</span></div>)}
+          </div>
+          <div className="p-2 border-t border-gray-700 flex gap-1">
+            <button onClick={() => setLogs([])} className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold">Effacer</button>
+            <button onClick={() => window.location.reload()} className="flex-1 px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold">Rafraîchir</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GuitarApp() {
   const [appMode, setAppMode] = useState('library');
   const [songs, setSongs] = useState(DEFAULT_SONGS);
@@ -6744,6 +6819,7 @@ function Metronome({ bpm, onBpmChange }) {
           </span>
         </div>
       )}
+      <DebugPanel />
     </div>
   );
 }
@@ -6968,6 +7044,8 @@ function CenterPanel({ version, updateVersion }) {
 }
 
 // Outil de capture : colle URL YouTube + screenshot, cadre interactif, exporte images vers la fiche
+
+// Outil de capture avancé : poignées interactives, verrou de cadre, drag
 function VideoCaptureTool({ onAddImages, onClose }) {
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [sourceImg, setSourceImg] = useState(null);
@@ -6976,13 +7054,38 @@ function VideoCaptureTool({ onAddImages, onClose }) {
   const [frameLocked, setFrameLocked] = useState(false);
   const [normSel, setNormSel] = useState({ x: 0.12, y: 0.76, w: 0.76, h: 0.15 });
   const [message, setMessage] = useState('');
-  const canvasRef = useRef(null);
-  const containerRef = useRef(null);
-  const fileInputRef = useRef(null);
+  const [dragState, setDragState] = useState(null);
+  const stageRef = useRef(null);
+  const frameRef = useRef(null);
 
   const showMessage = (msg) => {
     setMessage(msg);
-    setTimeout(() => setMessage(''), 3000);
+    setTimeout(() => setMessage(''), 2500);
+  };
+
+  const extractYoutubeId = (url) => {
+    const patterns = [
+      /youtube\.com\/watch\?v=([\w-]{11})/,
+      /youtu\.be\/([\w-]{11})/,
+      /youtube\.com\/embed\/([\w-]{11})/,
+      /youtube\.com\/shorts\/([\w-]{11})/,
+    ];
+    for (const p of patterns) {
+      const m = url.match(p);
+      if (m) return m[1];
+    }
+    return null;
+  };
+
+  const openYoutube = () => {
+    const id = extractYoutubeId(youtubeUrl);
+    const target = id ? `https://www.youtube.com/watch?v=${id}` : youtubeUrl;
+    if (!target) {
+      showMessage('Collez un lien YouTube');
+      return;
+    }
+    window.open(target, '_blank', 'noopener,noreferrer');
+    showMessage('Vidéo ouverte dans un nouvel onglet');
   };
 
   const loadImage = (blob) => {
@@ -6993,40 +7096,73 @@ function VideoCaptureTool({ onAddImages, onClose }) {
         setSourceImg(img);
         setHasImage(true);
         if (frameLocked) doCapture(img);
+        else showMessage('Image collée — ajustez le cadre');
       };
+      img.onerror = () => showMessage('Image illisible');
       img.src = e.target.result;
     };
     reader.readAsDataURL(blob);
   };
 
-  const handlePaste = async (e) => {
+  const handlePaste = (e) => {
     e.preventDefault();
     const items = e.clipboardData?.items || [];
     for (const item of items) {
       if (item.type.startsWith('image/')) {
         loadImage(item.getAsFile());
-        showMessage('Image collée');
         return;
       }
     }
-    showMessage('Aucune image dans le presse-papiers');
+    showMessage('Aucune image dans presse-papiers');
   };
 
   const doCapture = (img) => {
-    if (!img) return;
+    if (!img || !sourceImg) return;
     const nw = img.naturalWidth;
     const nh = img.naturalHeight;
     const sx = Math.round(normSel.x * nw);
     const sy = Math.round(normSel.y * nh);
-    const sw = Math.round(normSel.w * nw);
-    const sh = Math.round(normSel.h * nh);
+    const sw = Math.max(1, Math.round(normSel.w * nw));
+    const sh = Math.max(1, Math.round(normSel.h * nh));
     const c = document.createElement('canvas');
-    c.width = Math.max(1, sw);
-    c.height = Math.max(1, sh);
+    c.width = sw;
+    c.height = sh;
     c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-    setCaptures([...captures, c.toDataURL('image/jpeg', 0.8)]);
-    showMessage('Capture ajoutée');
+    setCaptures([...captures, c.toDataURL('image/jpeg', 0.85)]);
     setFrameLocked(true);
+    showMessage('Capture ajoutée — collez l\'image suivante');
+  };
+
+  const handlePointerDown = (e) => {
+    if (!sourceImg || !frameRef.current) return;
+    frameRef.current.setPointerCapture(e.pointerId);
+    const r = stageRef.current?.getBoundingClientRect() || { width: 0, height: 0 };
+    setDragState({
+      id: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      orig: { ...normSel },
+      rw: r.width,
+      rh: r.height,
+    });
+  };
+
+  const handlePointerMove = (e) => {
+    if (!dragState || dragState.id !== e.pointerId) return;
+    const dx = (e.clientX - dragState.startX) / dragState.rw;
+    const dy = (e.clientY - dragState.startY) / dragState.rh;
+    setNormSel({
+      x: Math.max(0, Math.min(1 - dragState.orig.w, dragState.orig.x + dx)),
+      y: Math.max(0, Math.min(1 - dragState.orig.h, dragState.orig.y + dy)),
+      w: dragState.orig.w,
+      h: dragState.orig.h,
+    });
+  };
+
+  const handlePointerUp = (e) => {
+    if (dragState?.id === e.pointerId) {
+      setDragState(null);
+    }
   };
 
   const applyCaptures = () => {
@@ -7040,91 +7176,49 @@ function VideoCaptureTool({ onAddImages, onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-800 rounded-lg max-w-lg w-full max-h-[90vh] overflow-y-auto border border-gray-700 shadow-2xl">
-        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-center">
-          <h2 className="font-bold text-amber-400">📸 Capturer depuis vidéo</h2>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 overflow-y-auto">
+      <div className="bg-gray-800 rounded-lg max-w-xl w-full border border-gray-700 shadow-2xl my-4">
+        <div className="p-4 border-b border-gray-700 flex justify-between items-center">
+          <h2 className="font-bold text-amber-400">📸 Capture vidéo</h2>
           <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-4 space-y-4">
-          {/* URL YouTube */}
+        <div className="p-4 space-y-3 max-h-[65vh] overflow-y-auto">
           <div>
-            <label className="text-xs text-gray-400 uppercase tracking-wide mb-1 block">YouTube URL</label>
-            <input
-              type="text"
-              value={youtubeUrl}
-              onChange={(e) => setYoutubeUrl(e.target.value)}
-              placeholder="https://www.youtube.com/watch?v=..."
-              className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
-            />
-          </div>
-
-          {/* Zone de collage */}
-          <div>
-            <label className="text-xs text-gray-400 uppercase tracking-wide mb-1 block">Capture d'écran</label>
-            <div
-              onPaste={handlePaste}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                const files = e.dataTransfer?.files;
-                if (files?.[0]) loadImage(files[0]);
-              }}
-              className="w-full p-4 border-2 border-dashed border-gray-600 rounded text-center text-gray-400 text-sm cursor-text focus:outline-none"
-              tabIndex={0}
-              title="Clique et colle (Cmd+V), ou drag-drop une image"
-            >
-              Colle une capture d'écran ici (Cmd+V)
+            <label className="text-xs text-gray-400 uppercase tracking-wide mb-1 block font-semibold">YouTube</label>
+            <div className="flex gap-2">
+              <input type="text" value={youtubeUrl} onChange={(e) => setYoutubeUrl(e.target.value)} placeholder="youtube.com/watch?v=..." className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500" />
+              <button onClick={openYoutube} className="px-3 py-2 bg-red-600 hover:bg-red-500 rounded font-semibold text-sm">Ouvrir</button>
             </div>
           </div>
 
-          {/* Aperçu + cadrage */}
+          <div>
+            <label className="text-xs text-gray-400 uppercase tracking-wide mb-1 block font-semibold">Coller</label>
+            <div onPaste={handlePaste} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer?.files?.[0]; if (f) loadImage(f); }} className="w-full p-4 border-2 border-dashed border-gray-600 rounded text-center text-gray-400 text-sm" tabIndex={0}>Cmd+V ou drag-drop</div>
+          </div>
+
           {hasImage && sourceImg && (
             <div>
-              <label className="text-xs text-gray-400 uppercase tracking-wide mb-1 block">Ajuste le cadre</label>
-              <div
-                ref={containerRef}
-                className="relative w-full bg-black rounded border border-gray-600 overflow-hidden"
-                style={{ paddingTop: `${(sourceImg.naturalHeight / sourceImg.naturalWidth) * 100}%` }}
-              >
-                <img
-                  src={sourceImg.src}
-                  className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-                  alt="source"
-                />
-                <div
-                  className="absolute border-2 border-amber-400 bg-amber-400/10"
-                  style={{
-                    left: `${normSel.x * 100}%`,
-                    top: `${normSel.y * 100}%`,
-                    width: `${normSel.w * 100}%`,
-                    height: `${normSel.h * 100}%`,
-                  }}
-                />
+              <label className="text-xs text-gray-400 uppercase tracking-wide mb-1 block font-semibold">Cadrage</label>
+              <div ref={stageRef} className="relative w-full bg-black rounded border border-gray-600 overflow-hidden" style={{ paddingTop: `${(sourceImg.naturalHeight / sourceImg.naturalWidth) * 100}%` }}>
+                <img src={sourceImg.src} className="absolute inset-0 w-full h-full object-cover pointer-events-none" alt="source" />
+                <div ref={frameRef} className="absolute border-2 border-amber-400 bg-amber-400/10 cursor-move" style={{ left: `${normSel.x * 100}%`, top: `${normSel.y * 100}%`, width: `${normSel.w * 100}%`, height: `${normSel.h * 100}%` }} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerUp}>
+                  <div className="absolute -top-6 left-0 bg-amber-400 text-black text-[10px] font-bold px-2 py-0.5 rounded whitespace-nowrap">{Math.round(normSel.w * sourceImg.naturalWidth)} × {Math.round(normSel.h * sourceImg.naturalHeight)} px</div>
+                </div>
               </div>
-              <p className="text-[10px] text-gray-500 mt-1">
-                {Math.round(normSel.w * sourceImg.naturalWidth)} × {Math.round(normSel.h * sourceImg.naturalHeight)} px
-              </p>
             </div>
           )}
 
-          {/* Résultat */}
           {captures.length > 0 && (
             <div>
-              <label className="text-xs text-gray-400 uppercase tracking-wide mb-1 block">Captures ({captures.length})</label>
-              <div className="max-h-40 overflow-y-auto space-y-1 bg-gray-750 rounded p-2">
+              <label className="text-xs text-gray-400 uppercase tracking-wide mb-1 block font-semibold">Captures ({captures.length})</label>
+              <div className="max-h-40 overflow-y-auto space-y-1 bg-gray-750 rounded p-2 border border-gray-600">
                 {captures.map((src, i) => (
                   <div key={i} className="flex items-center justify-between gap-2 bg-gray-700 p-2 rounded text-xs">
                     <span>Capture {i + 1}</span>
-                    <button
-                      onClick={() => setCaptures(captures.filter((_, j) => j !== i))}
-                      className="px-2 py-1 bg-red-700 hover:bg-red-600 rounded text-[10px]"
-                    >
-                      ✕
-                    </button>
+                    <button onClick={() => setCaptures(captures.filter((_, j) => j !== i))} className="px-2 py-1 bg-red-700 hover:bg-red-600 rounded text-[10px]">✕</button>
                   </div>
                 ))}
               </div>
@@ -7134,24 +7228,9 @@ function VideoCaptureTool({ onAddImages, onClose }) {
           {message && <p className="text-center text-xs text-green-400 font-semibold">{message}</p>}
         </div>
 
-        <div className="p-4 border-t border-gray-700 flex gap-2 sticky bottom-0 bg-gray-800">
-          <button
-            onClick={() => doCapture(sourceImg)}
-            disabled={!hasImage}
-            className="flex-1 px-3 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded font-semibold transition text-sm"
-          >
-            📷 Capturer
-          </button>
-          <button
-            onClick={applyCaptures}
-            disabled={captures.length === 0}
-            className="flex-1 px-3 py-2 bg-green-600 hover:bg-green-500 disabled:opacity-50 rounded font-semibold transition text-sm"
-          >
-            ✓ Ajouter à la fiche
-          </button>
-          <button onClick={onClose} className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded font-semibold transition text-sm">
-            Fermer
-          </button>
+        <div className="p-4 border-t border-gray-700 flex gap-2">
+          <button onClick={() => doCapture(sourceImg)} disabled={!hasImage} className="flex-1 px-3 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded font-semibold text-sm">📷 Capturer</button>
+          <button onClick={applyCaptures} disabled={captures.length === 0} className="flex-1 px-3 py-2 bg-green-600 hover:bg-green-500 disabled:opacity-50 rounded font-semibold text-sm">✓ Ajouter</button>
         </div>
       </div>
     </div>
