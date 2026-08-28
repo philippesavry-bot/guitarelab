@@ -7633,6 +7633,315 @@ function ChordThumbnailsPanel({ version, updateVersion }) {
   );
 }
 
+// ============================================================================
+// MODULE BACKING TRACK
+// ============================================================================
+
+// ---------- Partie A : parsing d'accords (Am, F, C7, Gmaj7, Dsus4...) ----------
+const CHORD_NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const FLAT_TO_SHARP = { Db: 'C#', Eb: 'D#', Gb: 'F#', Ab: 'G#', Bb: 'A#' };
+
+// Convertit un symbole d'accord texte en { root, intervals, isMinor }
+// root = index 0-11 (C=0), intervals = liste de demi-tons depuis la fondamentale
+function parseChordSymbol(symbol) {
+  if (!symbol) return null;
+  const clean = symbol.trim().split('/')[0]; // ignore la basse alternative type "C/E" pour l'instant
+  const m = clean.match(/^([A-Ga-g])([#b]?)(.*)$/);
+  if (!m) return null;
+  let root = m[1].toUpperCase() + (m[2] || '');
+  if (FLAT_TO_SHARP[root]) root = FLAT_TO_SHARP[root];
+  const rootIdx = CHORD_NOTE_NAMES.indexOf(root);
+  if (rootIdx === -1) return null;
+
+  const rest = (m[3] || '').toLowerCase();
+  let intervals = [0, 4, 7]; // majeur par défaut
+  let isMinor = false;
+
+  if (rest.includes('dim')) intervals = [0, 3, 6];
+  else if (rest.includes('aug')) intervals = [0, 4, 8];
+  else if (rest.includes('maj7')) intervals = [0, 4, 7, 11];
+  else if (rest.includes('m7') || rest.includes('min7')) { intervals = [0, 3, 7, 10]; isMinor = true; }
+  else if (rest.includes('sus4')) intervals = [0, 5, 7];
+  else if (rest.includes('sus2')) intervals = [0, 2, 7];
+  else if (rest.includes('7')) intervals = [0, 4, 7, 10];
+  else if (rest.startsWith('m') && !rest.startsWith('maj')) { intervals = [0, 3, 7]; isMinor = true; }
+
+  return { root: rootIdx, intervals, isMinor, label: symbol.trim() };
+}
+
+// Aplati la structure du morceau (sections + cellules) en une liste d'accords,
+// un accord = une mesure. Respecte les répétitions de section (`section.repeat`).
+function flattenChordProgression(structure) {
+  const out = [];
+  (structure || []).forEach((section) => {
+    const repeat = section.repeat || 1;
+    for (let r = 0; r < repeat; r++) {
+      (section.cells || []).forEach((cell) => {
+        const symbol = cell.split ? (cell.top || cell.bottom) : cell.chord;
+        if (symbol && symbol.trim()) out.push(symbol.trim());
+      });
+    }
+  });
+  return out;
+}
+
+// ---------- Partie B : moteur audio (Tone.js) ----------
+const BACKING_STYLES = [
+  { id: 'pop', label: '🎵 Pop / Variété', hatDensity: 2, useKick: true },
+  { id: 'ballad', label: '🎹 Ballade', hatDensity: 0, useKick: false },
+  { id: 'rock', label: '🎸 Rock', hatDensity: 4, useKick: true },
+  { id: 'blues', label: '🎷 Blues shuffle', hatDensity: 2, useKick: true },
+];
+
+function BackingTrackGenerator({ version, bpm }) {
+  const [playing, setPlaying] = useState(false);
+  const [style, setStyle] = useState('pop');
+  const [volume, setVolume] = useState(-10);
+  const [currentBar, setCurrentBar] = useState(-1);
+  const [ready, setReady] = useState(false);
+  const [audioError, setAudioError] = useState(null);
+
+  const synthsRef = useRef(null);
+  const loopRef = useRef(null);
+  const barIndexRef = useRef(0);
+  const styleRef = useRef(style);
+  useEffect(() => { styleRef.current = style; }, [style]);
+
+  const chords = useMemo(
+    () => flattenChordProgression(version.structure).map(parseChordSymbol).filter(Boolean),
+    [version.structure]
+  );
+
+  // Initialise les synthés une seule fois (si Tone.js a bien pu se charger)
+  useEffect(() => {
+    if (typeof Tone === 'undefined') {
+      setAudioError("Moteur audio indisponible (Tone.js n'a pas pu se charger — vérifie ta connexion).");
+      return;
+    }
+    synthsRef.current = {
+      pad: new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: 'triangle' },
+        envelope: { attack: 0.05, decay: 0.2, sustain: 0.6, release: 0.9 },
+      }).toDestination(),
+      bass: new Tone.Synth({
+        oscillator: { type: 'sine' },
+        envelope: { attack: 0.01, decay: 0.2, sustain: 0.4, release: 0.3 },
+      }).toDestination(),
+      kick: new Tone.MembraneSynth({ octaves: 4, pitchDecay: 0.02 }).toDestination(),
+      hat: new Tone.NoiseSynth({ envelope: { attack: 0.001, decay: 0.04, sustain: 0 } }).toDestination(),
+    };
+    setReady(true);
+    return () => {
+      Object.values(synthsRef.current || {}).forEach((s) => s.dispose());
+      if (loopRef.current) loopRef.current.dispose();
+    };
+  }, []);
+
+  // Volume global (dB)
+  useEffect(() => {
+    if (!ready) return;
+    Object.values(synthsRef.current).forEach((s) => { if (s.volume) s.volume.value = volume; });
+  }, [volume, ready]);
+
+  // Tempo synchronisé sur le BPM de la version
+  useEffect(() => {
+    if (!ready) return;
+    Tone.Transport.bpm.value = bpm || 120;
+  }, [bpm, ready]);
+
+  const stop = () => {
+    if (typeof Tone === 'undefined') return;
+    Tone.Transport.stop();
+    Tone.Transport.cancel();
+    if (loopRef.current) { loopRef.current.dispose(); loopRef.current = null; }
+    setPlaying(false);
+    setCurrentBar(-1);
+  };
+
+  // Coupe tout si on change de version ou si le composant se démonte
+  useEffect(() => () => stop(), [version.id]);
+
+  const start = async () => {
+    if (!chords.length || !ready) return;
+    await Tone.start(); // débloque l'audio (obligatoire suite à un geste utilisateur)
+    barIndexRef.current = 0;
+    let beatInBar = 0;
+    const s = synthsRef.current;
+
+    loopRef.current = new Tone.Loop((time) => {
+      const chord = chords[barIndexRef.current % chords.length];
+      const cfg = BACKING_STYLES.find((b) => b.id === styleRef.current) || BACKING_STYLES[0];
+      const root = CHORD_NOTE_NAMES[chord.root];
+      const fifthIdx = (chord.root + (chord.intervals[2] || 7)) % 12;
+      const fifth = CHORD_NOTE_NAMES[fifthIdx];
+
+      if (beatInBar === 0) {
+        setCurrentBar(barIndexRef.current % chords.length);
+        const padNotes = chord.intervals.map((iv) => `${CHORD_NOTE_NAMES[(chord.root + iv) % 12]}3`);
+        s.pad.triggerAttackRelease(padNotes, '2n', time);
+        s.bass.triggerAttackRelease(`${root}2`, '4n', time);
+        if (cfg.useKick) s.kick.triggerAttackRelease('C1', '8n', time);
+      } else if (beatInBar === 2) {
+        s.bass.triggerAttackRelease(`${fifth}2`, '4n', time);
+        if (cfg.useKick) s.kick.triggerAttackRelease('C1', '8n', time);
+      }
+      // Charleston : densité variable selon le style (0 = ballade silencieuse, 4 = rock appuyé)
+      if (cfg.hatDensity >= 2 && (beatInBar === 1 || beatInBar === 3)) {
+        s.hat.triggerAttackRelease('16n', time);
+      }
+      if (cfg.hatDensity >= 4) {
+        s.hat.triggerAttackRelease('16n', time + Tone.Time('8n').toSeconds() / 2);
+      }
+
+      beatInBar++;
+      if (beatInBar >= 4) { beatInBar = 0; barIndexRef.current++; }
+    }, '4n').start(0);
+
+    Tone.Transport.start();
+    setPlaying(true);
+  };
+
+  const toggle = () => (playing ? stop() : start());
+
+  if (audioError) {
+    return <p className="text-xs text-red-400">{audioError}</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {chords.length === 0 ? (
+        <p className="text-xs text-gray-500 italic">
+          Ajoute des accords dans la grille (panneau Structure) pour générer un accompagnement.
+        </p>
+      ) : (
+        <>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={toggle}
+              disabled={!ready}
+              className={`px-3 py-1.5 rounded text-xs font-semibold flex items-center gap-1 disabled:opacity-50 ${
+                playing ? 'bg-red-600 hover:bg-red-500' : 'bg-amber-600 hover:bg-amber-500'
+              }`}
+            >
+              {playing ? '⏹ Stop' : '▶ Jouer'}
+            </button>
+            <select
+              value={style}
+              onChange={(e) => setStyle(e.target.value)}
+              className="px-2 py-1.5 bg-gray-700 border border-gray-600 rounded text-xs focus:outline-none focus:border-amber-500"
+            >
+              {BACKING_STYLES.map((b) => (
+                <option key={b.id} value={b.id}>{b.label}</option>
+              ))}
+            </select>
+            <div className="flex items-center gap-1 text-xs">
+              <VolumeX className="w-3 h-3 text-gray-500" />
+              <input
+                type="range" min="-30" max="0" step="1" value={volume}
+                onChange={(e) => setVolume(Number(e.target.value))}
+                className="w-16 accent-amber-500"
+              />
+              <Volume2 className="w-3 h-3 text-gray-500" />
+            </div>
+          </div>
+
+          {/* Grille des accords, avec surbrillance de la mesure jouée */}
+          <div className="flex flex-wrap gap-1">
+            {chords.map((c, i) => (
+              <span
+                key={i}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold border ${
+                  currentBar === i
+                    ? 'bg-amber-600 border-amber-400 text-white'
+                    : 'bg-gray-800 border-gray-700 text-gray-400'
+                }`}
+              >
+                {c.label}
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---------- Partie C : recherche + lecture d'un backing track YouTube ----------
+function BackingTrackYoutube({ song, onUpdateSong, onPlayVideo }) {
+  const url = song.backingTrackUrl || '';
+  const videoId = extractYoutubeId(url);
+
+  const searchQuery = encodeURIComponent(`${song.artist} ${song.title} backing track`.trim());
+  const searchUrl = `https://www.youtube.com/results?search_query=${searchQuery}`;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-1">
+        <input
+          type="text"
+          placeholder="Colle ici l'URL YouTube du backing track..."
+          value={url}
+          onChange={(e) => onUpdateSong({ ...song, backingTrackUrl: e.target.value })}
+          className="flex-1 min-w-0 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs focus:outline-none focus:border-amber-500"
+        />
+        {videoId && (
+          <button
+            onClick={() => onPlayVideo?.({ id: 'backing-track', url, videoId, bookmarks: [] })}
+            className="flex-shrink-0 px-2 py-1 bg-red-700 hover:bg-red-600 rounded text-xs transition"
+            title="Lire le backing track"
+          >
+            ▶️
+          </button>
+        )}
+      </div>
+      <a
+        href={searchUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded text-xs transition"
+        title="Ouvre une recherche YouTube pré-remplie pour ce morceau"
+      >
+        <Search className="w-3 h-3" /> Chercher sur YouTube
+      </a>
+      <p className="text-[10px] text-gray-500">
+        Trouve une vidéo, copie son URL, colle-la ci-dessus. Elle se relit ensuite comme tes vidéos habituelles (repères inclus).
+      </p>
+    </div>
+  );
+}
+
+// ---------- Partie D : panneau conteneur avec les deux onglets ----------
+function BackingTrackPanel({ song, version, onUpdateSong, onPlayVideo }) {
+  const [tab, setTab] = useState('youtube'); // 'youtube' | 'generate'
+
+  return (
+    <div className="p-3 border-b border-gray-700">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="font-semibold text-amber-400 text-sm">🎧 Backing Track</h3>
+        <div className="flex bg-gray-900 rounded p-0.5 border border-gray-700">
+          <button
+            onClick={() => setTab('youtube')}
+            className={`px-2 py-1 rounded text-[10px] font-semibold transition ${tab === 'youtube' ? 'bg-amber-600' : 'hover:bg-gray-700'}`}
+          >
+            📺 Vidéo
+          </button>
+          <button
+            onClick={() => setTab('generate')}
+            className={`px-2 py-1 rounded text-[10px] font-semibold transition ${tab === 'generate' ? 'bg-amber-600' : 'hover:bg-gray-700'}`}
+          >
+            🎛️ Générer
+          </button>
+        </div>
+      </div>
+      {tab === 'youtube' ? (
+        <BackingTrackYoutube song={song} onUpdateSong={onUpdateSong} onPlayVideo={onPlayVideo} />
+      ) : (
+        <BackingTrackGenerator version={version} bpm={version.bpm || 120} />
+      )}
+    </div>
+  );
+}
+
 function RightPanel({ song, version, updateVersion, onUpdateSong, onPlayVideo }) {
   const [notesOpen, setNotesOpen] = useState(false);
 
@@ -7685,6 +7994,8 @@ function RightPanel({ song, version, updateVersion, onUpdateSong, onPlayVideo })
       </div>
 
       <ChordThumbnailsPanel version={version} updateVersion={updateVersion} />
+
+      <BackingTrackPanel song={song} version={version} onUpdateSong={onUpdateSong} onPlayVideo={onPlayVideo} />
 
       <div className={notesOpen ? 'flex-1 flex flex-col overflow-hidden p-3' : 'flex-shrink-0 p-3'}>
         <button
