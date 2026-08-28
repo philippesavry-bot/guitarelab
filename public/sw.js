@@ -1,4 +1,4 @@
-const CACHE_NAME = 'guitar-lab-v1';
+const CACHE_NAME = 'guitar-lab-v2';
 const URLS_TO_CACHE = [
   './',
   './guitar-lab.html',
@@ -6,7 +6,8 @@ const URLS_TO_CACHE = [
   'https://unpkg.com/react@18/umd/react.production.min.js',
   'https://unpkg.com/react-dom@18/umd/react-dom.production.min.js',
   'https://unpkg.com/@babel/standalone/babel.min.js',
-  'https://cdn.jsdelivr.net/npm/lucide@latest'
+  'https://cdn.jsdelivr.net/npm/lucide@latest',
+  'https://unpkg.com/tone@14.8.49/build/Tone.js'
 ];
 
 // Installation : mettre en cache les ressources statiques
