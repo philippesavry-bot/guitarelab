@@ -3804,6 +3804,25 @@ function DebugPanel() {
   );
 }
 
+// Bloc repliable de la barre latérale bibliothèque (Trier, Filtres, Affichage...)
+function SidebarSection({ title, icon, isOpen, onToggle, badge, children }) {
+  return (
+    <div className="border-b border-gray-700">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-semibold text-gray-300 hover:bg-gray-750 hover:text-amber-300 transition"
+      >
+        <span className="flex items-center gap-1.5">
+          {icon} {title}
+          {badge ? <span className="text-[10px] font-normal text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">{badge}</span> : null}
+        </span>
+        <ChevronDown className={`w-3.5 h-3.5 flex-shrink-0 transition ${isOpen ? '' : '-rotate-90'}`} />
+      </button>
+      {isOpen && <div className="px-4 pb-3 space-y-3">{children}</div>}
+    </div>
+  );
+}
+
 function GuitarApp() {
   const [appMode, setAppMode] = useState('library');
   const [songs, setSongs] = useState(DEFAULT_SONGS);
@@ -3920,8 +3939,14 @@ function GuitarApp() {
   const [tileSize, setTileSize] = useState('medium');
   const [sortBy, setSortBy] = useState('favorite');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const DEFAULT_SIDEBAR_SECTIONS = { sort: true, filters: false, display: false, roadmap: false, storage: false };
+  const [sidebarSections, setSidebarSections] = useState(DEFAULT_SIDEBAR_SECTIONS);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [prefsSaved, setPrefsSaved] = useState(false);
+
+  const toggleSidebarSection = (key) => {
+    setSidebarSections(prev => ({ ...prev, [key]: !prev[key] }));
+  };
 
   // Chargement des préférences d'affichage enregistrées
   useEffect(() => {
@@ -3937,6 +3962,9 @@ function GuitarApp() {
           if (p.groupBy) setGroupBy(p.groupBy);
           if (p.classificationFilter) setClassificationFilter(p.classificationFilter);
           if (typeof p.sidebarCollapsed === 'boolean') setSidebarCollapsed(p.sidebarCollapsed);
+          if (p.sidebarSections && typeof p.sidebarSections === 'object') {
+            setSidebarSections({ ...DEFAULT_SIDEBAR_SECTIONS, ...p.sidebarSections });
+          }
         }
       } catch (err) {
         // Aucune préférence enregistrée
@@ -3950,7 +3978,7 @@ function GuitarApp() {
   const saveDisplayPrefs = async () => {
     try {
       await window.storage.set(PREFS_STORAGE_KEY, JSON.stringify({
-        viewMode, tileSize, sortBy, groupBy, classificationFilter, sidebarCollapsed,
+        viewMode, tileSize, sortBy, groupBy, classificationFilter, sidebarCollapsed, sidebarSections,
       }), false);
       setPrefsSaved(true);
       setTimeout(() => setPrefsSaved(false), 2000);
@@ -3964,11 +3992,11 @@ function GuitarApp() {
     if (!prefsLoaded) return;
     const t = setTimeout(() => {
       window.storage.set(PREFS_STORAGE_KEY, JSON.stringify({
-        viewMode, tileSize, sortBy, groupBy, classificationFilter, sidebarCollapsed,
+        viewMode, tileSize, sortBy, groupBy, classificationFilter, sidebarCollapsed, sidebarSections,
       }), false).catch(() => {});
     }, 500);
     return () => clearTimeout(t);
-  }, [viewMode, tileSize, sortBy, groupBy, classificationFilter, sidebarCollapsed, prefsLoaded]);
+  }, [viewMode, tileSize, sortBy, groupBy, classificationFilter, sidebarCollapsed, sidebarSections, prefsLoaded]);
 
   const selectedSong = songs.find(s => s.id === selectedSongId);
   const selectedVersion = selectedSong?.versions.find(v => v.id === selectedVersionId) || selectedSong?.versions[0];
@@ -4199,13 +4227,14 @@ function GuitarApp() {
       {appMode === 'library' ? (
         <>
           {/* SIDEBAR */}
-          <div className={`${sidebarCollapsed ? 'w-8' : 'w-72'} bg-gray-800 border-r border-gray-700 flex flex-col flex-shrink-0 transition-all`}>
+          <div className={`${sidebarCollapsed ? 'w-8' : 'w-72'} bg-gray-800 border-r border-gray-700 flex flex-col flex-shrink-0 overflow-hidden transition-all`}>
             <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="p-2 hover:bg-gray-700 flex items-center justify-center border-b border-gray-700">
               {sidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
             </button>
             {!sidebarCollapsed && (
               <>
-                <div className="p-4 border-b border-gray-700">
+                {/* En-tête fixe : toujours visible, jamais dans le scroll */}
+                <div className="p-4 border-b border-gray-700 flex-shrink-0">
                   <div className="flex items-center gap-2 mb-4">
                     <Music className="w-5 h-5 text-amber-500" />
                     <h1 className="text-lg font-bold">Guitar Lab</h1>
@@ -4233,7 +4262,16 @@ function GuitarApp() {
                       <Plus className="w-4 h-4" />
                     </button>
                   </div>
-                  <div className="mt-3 space-y-2">
+                </div>
+
+                {/* Corps défilant : sections repliables (Trier ouvert par défaut) */}
+                <div className="flex-1 overflow-y-auto">
+                  <SidebarSection
+                    title="Trier"
+                    icon="🔃"
+                    isOpen={sidebarSections.sort}
+                    onToggle={() => toggleSidebarSection('sort')}
+                  >
                     <div>
                       <label className="text-xs text-gray-500 block mb-2">Regrouper :</label>
                       <select
@@ -4302,18 +4340,32 @@ function GuitarApp() {
                         </button>
                       </div>
                     </div>
+                  </SidebarSection>
+
+                  <SidebarSection
+                    title="Filtres"
+                    icon="🎯"
+                    isOpen={sidebarSections.filters}
+                    onToggle={() => toggleSidebarSection('filters')}
+                    badge={setlistOnly ? '🎉' : null}
+                  >
+                    <button
+                      onClick={() => setSetlistOnly(!setlistOnly)}
+                      className={`w-full px-2 py-2 rounded text-xs font-semibold transition text-left flex items-center gap-1.5 ${setlistOnly ? 'bg-amber-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-1px_0_rgba(0,0,0,0.3)]' : 'bg-gray-700 hover:bg-gray-600'}`}
+                      title="N'afficher que les titres sélectionnés pour une soirée"
+                    >
+                      🎉 Soirée uniquement
+                    </button>
+                  </SidebarSection>
+
+                  <SidebarSection
+                    title="Affichage"
+                    icon="🖼️"
+                    isOpen={sidebarSections.display}
+                    onToggle={() => toggleSidebarSection('display')}
+                  >
                     <div>
-                      <label className="text-xs text-gray-500 block mb-2">Filtres :</label>
-                      <button
-                        onClick={() => setSetlistOnly(!setlistOnly)}
-                        className={`w-full px-2 py-2 rounded text-xs font-semibold transition text-left flex items-center gap-1.5 ${setlistOnly ? 'bg-amber-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-1px_0_rgba(0,0,0,0.3)]' : 'bg-gray-700 hover:bg-gray-600'}`}
-                        title="N'afficher que les titres sélectionnés pour une soirée"
-                      >
-                        🎉 Soirée uniquement
-                      </button>
-                    </div>
-                    <div>
-                      <label className="text-xs text-gray-500 block mb-2">Affichage :</label>
+                      <label className="text-xs text-gray-500 block mb-2">Mode :</label>
                       <div className="flex gap-1">
                         <button
                           onClick={() => setViewMode('detailed')}
@@ -4364,22 +4416,39 @@ function GuitarApp() {
                         </div>
                       </div>
                     )}
-                  </div>
+                  </SidebarSection>
+
+                  <ClassificationManager
+                    options={classificationOptions}
+                    onAdd={addClassificationOption}
+                    onRemove={removeClassificationOption}
+                  />
+
+                  <SidebarSection
+                    title="Feuille de route"
+                    icon="🗺️"
+                    isOpen={sidebarSections.roadmap}
+                    onToggle={() => toggleSidebarSection('roadmap')}
+                  >
+                    <p className="text-xs text-gray-400">Objectifs en cours, morceaux maîtrisés et prochains défis.</p>
+                    <button
+                      onClick={() => setRoadmapOpen(true)}
+                      className="w-full px-2 py-2 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold transition"
+                      title="Ouvrir la feuille de route en grand"
+                    >
+                      Voir en grand →
+                    </button>
+                  </SidebarSection>
+
+                  <SidebarSection
+                    title="Stockage"
+                    icon="💾"
+                    isOpen={sidebarSections.storage}
+                    onToggle={() => toggleSidebarSection('storage')}
+                  >
+                    <StorageManager />
+                  </SidebarSection>
                 </div>
-                <ClassificationManager
-                  options={classificationOptions}
-                  onAdd={addClassificationOption}
-                  onRemove={removeClassificationOption}
-                />
-                <button
-                  onClick={() => setRoadmapOpen(true)}
-                  className="w-full text-left p-4 border-t border-gray-700 hover:bg-gray-750 transition"
-                  title="Ouvrir la feuille de route en grand"
-                >
-                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">🗺️ Feuille de route</p>
-                  <p className="text-xs text-gray-400">Cliquer pour voir la feuille de route complète</p>
-                </button>
-                <StorageManager />
               </>
             )}
           </div>
@@ -4955,9 +5024,9 @@ function StorageManager() {
   };
 
   return (
-    <div className="p-4 border-t border-gray-700">
+    <div>
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs text-gray-500">💾 Stockage</span>
+        <span className="text-xs text-gray-500">Espace utilisé</span>
         <button onClick={refreshEstimate} className="text-[10px] text-gray-500 hover:text-gray-300 px-1" title="Actualiser">↻</button>
       </div>
 
