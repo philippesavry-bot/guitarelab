@@ -110,7 +110,7 @@ function formatBookmarkTime(sec) {
 
 // Petite fenêtre flottante de visionnage YouTube, superposée à l'écran de travail.
 // Si un repère existe pour ce lien, propose de reprendre à cet instant ou de repartir du début.
-function YoutubeMiniPlayer({ link, onClose, onSaveBookmark }) {
+function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
   const videoId = link?.videoId;
   const bookmarks = link?.bookmarks || []; // Liste de { id, seconds, name }
   const firstBookmark = bookmarks.length > 0 ? bookmarks[0].seconds : 0;
@@ -123,11 +123,139 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark }) {
   const containerRef = useRef(null);
   const playerRef = useRef(null);
 
+  // --- Fenêtre redimensionnable (glisser le coin haut-gauche) ---
+  const YT_SIZE_KEY = 'guitar-lab:yt-player-size';
+  const DEFAULT_PLAYER_SIZE = { width: 420, height: 560 };
+  const [playerSize, setPlayerSize] = useState(DEFAULT_PLAYER_SIZE);
+  const resizeStartRef = useRef(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await window.storage.get(YT_SIZE_KEY, false);
+        if (result?.value) {
+          const p = JSON.parse(result.value);
+          if (p?.width && p?.height) setPlayerSize(p);
+        }
+      } catch (err) { /* taille par défaut */ }
+    })();
+  }, []);
+
+  const startPlayerResize = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const pointer = e.touches ? e.touches[0] : e;
+    const startX = pointer.clientX, startY = pointer.clientY;
+    const orig = { ...playerSize };
+    const minW = 280, minH = 320;
+
+    const onMove = (ev) => {
+      const p = ev.touches ? ev.touches[0] : ev;
+      const dx = startX - p.clientX; // on tire vers la gauche → agrandit
+      const dy = startY - p.clientY; // on tire vers le haut → agrandit
+      const maxW = window.innerWidth - 32;
+      const maxH = window.innerHeight - 32;
+      const width = Math.max(minW, Math.min(maxW, orig.width + dx));
+      const height = Math.max(minH, Math.min(maxH, orig.height + dy));
+      setPlayerSize({ width, height });
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+      setPlayerSize(current => {
+        window.storage.set(YT_SIZE_KEY, JSON.stringify(current), false).catch(() => {});
+        return current;
+      });
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onUp);
+  };
+
+  const resetPlayerSize = () => {
+    setPlayerSize(DEFAULT_PLAYER_SIZE);
+    window.storage.set(YT_SIZE_KEY, JSON.stringify(DEFAULT_PLAYER_SIZE), false).catch(() => {});
+  };
+
+  // --- Mode plein écran "propre" : n'affiche QUE la vidéo, aucun bouton de l'app par-dessus (idéal pour capture d'écran) ---
+  // Priorité à l'API Fullscreen native du navigateur (rien d'autre à l'écran que la vidéo) ;
+  // repli sur un simple fond noir si l'API est indisponible (ex. certains contextes PWA installés).
+  const videoWrapperRef = useRef(null);
+  const [nativeFullscreen, setNativeFullscreen] = useState(false);
+  const [focusBackdrop, setFocusBackdrop] = useState(false);
+
+  const enterCleanFullscreen = async () => {
+    const el = videoWrapperRef.current;
+    const request = el && (el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen);
+    if (!request) {
+      setFocusBackdrop(true);
+      setPlayerSize({ width: Math.min(window.innerWidth - 32, 820), height: Math.min(window.innerHeight - 32, 760) });
+      glLog('📸 Plein écran natif indisponible — repli sur le mode fond noir', 'warning');
+      return;
+    }
+    try {
+      await request.call(el);
+    } catch (err) {
+      setFocusBackdrop(true);
+      glLog('📸 Échec du plein écran natif — repli sur le mode fond noir : ' + (err?.message || err), 'warning');
+    }
+  };
+
+  const exitCleanFullscreen = () => {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+    if (document.fullscreenElement || document.webkitFullscreenElement) exit?.call(document);
+    setFocusBackdrop(false);
+  };
+
+  useEffect(() => {
+    const onFsChange = () => {
+      const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+      setNativeFullscreen(!!fsEl && fsEl === videoWrapperRef.current);
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange);
+    };
+  }, []);
+
+  // --- Capture d'accords depuis une capture d'écran de la vidéo (cadre verrouillable) ---
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const [capImgSrc, setCapImgSrc] = useState(null);
+  const [capHasImage, setCapHasImage] = useState(false);
+  const [capFrameLocked, setCapFrameLocked] = useState(false);
+  const [capNormSel, setCapNormSel] = useState({ x: 0.12, y: 0.72, w: 0.76, h: 0.2 });
+  const [capCaptures, setCapCaptures] = useState([]); // [{ id, src }]
+  const [capMessage, setCapMessage] = useState('');
+  const capStageRef = useRef(null);
+  const capImgElRef = useRef(null);
+  const capFileInputRef = useRef(null);
+
+  const showCapMessage = (msg) => {
+    setCapMessage(msg);
+    setTimeout(() => setCapMessage(''), 4000);
+  };
+
+  const resetCapture = () => {
+    setCapImgSrc(null);
+    setCapHasImage(false);
+    setCapFrameLocked(false);
+    setCapCaptures([]);
+    setCapNormSel({ x: 0.12, y: 0.72, w: 0.76, h: 0.2 });
+    setCapMessage('');
+  };
+
   useEffect(() => {
     setResumeChoice(bookmarks.length > 0 ? null : 'start');
     setApiReady(false);
     setApiFailed(false);
     setNewBookmarkMode(false);
+    setCaptureOpen(false);
+    resetCapture();
   }, [videoId]);
 
   useEffect(() => {
@@ -176,11 +304,223 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark }) {
     if (playerRef.current?.seekTo) playerRef.current.seekTo(seconds);
   };
 
+  // Découpe l'image collée selon le cadre normalisé (0..1) et ajoute la capture à la liste
+  const doCapture = (imgEl, normSel) => {
+    if (!imgEl || !imgEl.naturalWidth) return;
+    const nw = imgEl.naturalWidth, nh = imgEl.naturalHeight;
+    const sx = Math.round(normSel.x * nw);
+    const sy = Math.round(normSel.y * nh);
+    const sw = Math.max(1, Math.round(normSel.w * nw));
+    const sh = Math.max(1, Math.round(normSel.h * nh));
+    const c = document.createElement('canvas');
+    c.width = sw;
+    c.height = sh;
+    c.getContext('2d').drawImage(imgEl, sx, sy, sw, sh, 0, 0, sw, sh);
+    const src = c.toDataURL('image/jpeg', 0.88);
+    setCapCaptures(prev => [...prev, { id: newId(), src }]);
+    setCapFrameLocked(true);
+    showCapMessage('Capture ajoutée — colle la suivante, ou ajuste le cadre');
+  };
+
+  const loadCaptureFile = (file, wasLocked) => {
+    if (!file || !file.type?.startsWith('image/')) {
+      showCapMessage('Fichier non reconnu comme image');
+      glLog('📸 Capture: fichier reçu non-image (' + (file?.type || 'type inconnu') + ')', 'warning');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setCapImgSrc(ev.target.result);
+      setCapHasImage(true);
+      if (!wasLocked) showCapMessage('Image chargée — ajuste le cadre puis tape « Capturer »');
+      glLog('📸 Capture: image chargée (' + file.type + ', ' + Math.round(file.size / 1024) + ' Ko)', 'success');
+    };
+    reader.onerror = () => {
+      showCapMessage('Image illisible — réessaie');
+      glLog('📸 Capture: FileReader erreur au chargement', 'error');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Une fois l'image (re)chargée dans le <img>, si le cadre est verrouillé on capture aussitôt
+  const handleCapImgLoad = (e) => {
+    if (capFrameLocked) doCapture(e.target, capNormSel);
+  };
+
+  // Extrait un fichier image d'un événement paste, quelle que soit sa provenance (items ou files)
+  const extractImageFromClipboardEvent = (e) => {
+    const items = Array.from(e.clipboardData?.items || []);
+    const files = Array.from(e.clipboardData?.files || []);
+    glLog(`📸 Capture: événement paste reçu — items: [${items.map(i => i.type).join(', ') || 'aucun'}], files: [${files.map(f => f.type).join(', ') || 'aucun'}]`, 'info');
+    const item = items.find(i => i.type?.startsWith('image/'));
+    if (item) return item.getAsFile();
+    return files.find(f => f.type?.startsWith('image/')) || null;
+  };
+
+  const handleCapturePasteEvent = (e) => {
+    const file = extractImageFromClipboardEvent(e);
+    if (!file) {
+      showCapMessage('Aucune image détectée dans le collage — essaie « 📁 Importer »');
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    loadCaptureFile(file, capFrameLocked);
+  };
+
+  // ⚠️ Important : tant que ce panneau de capture est ouvert, on intercepte le collage en PHASE DE CAPTURE
+  // au niveau du document, avant qu'il n'atteigne l'écouteur de la galerie principale (CenterPanel).
+  // Sans ça, coller une image ici l'envoyait directement dans la galerie du morceau au lieu d'apparaître
+  // dans l'aperçu de cadrage ci-dessous — c'est ce qui rendait le cadre de sélection invisible.
+  useEffect(() => {
+    if (!captureOpen) return;
+    const onGlobalCapturePaste = (e) => {
+      const file = extractImageFromClipboardEvent(e);
+      if (!file) return; // pas d'image : on laisse le collage suivre son cours normal ailleurs dans l'app
+      e.preventDefault();
+      e.stopPropagation();
+      loadCaptureFile(file, capFrameLocked);
+    };
+    document.addEventListener('paste', onGlobalCapturePaste, true);
+    return () => document.removeEventListener('paste', onGlobalCapturePaste, true);
+  }, [captureOpen, capFrameLocked]);
+
+  // Bouton "Coller" explicite : lit directement le presse-papiers.
+  // ⚠️ Sur iPad, en app installée depuis l'écran d'accueil, iOS bloque parfois cette lecture directe :
+  // dans ce cas utilise le geste natif juste en dessous, ou « 📁 Importer » (toujours fiable).
+  const captureFromClipboardButton = async () => {
+    if (!navigator.clipboard?.read) {
+      showCapMessage("Collage direct indisponible ici (app installée) — utilise « Importer »");
+      glLog('📸 Capture: navigator.clipboard.read absent', 'warning');
+      return;
+    }
+    try {
+      const items = await navigator.clipboard.read();
+      glLog(`📸 Capture: clipboard.read() → ${items.length} élément(s)`, 'info');
+      for (const item of items) {
+        const imgType = item.types.find(t => t.startsWith('image/'));
+        if (imgType) {
+          const blob = await item.getType(imgType);
+          loadCaptureFile(new File([blob], `collé.${imgType.split('/')[1] || 'png'}`, { type: imgType }), capFrameLocked);
+          return;
+        }
+      }
+      showCapMessage('Aucune image dans le presse-papiers — essaie « 📁 Importer »');
+    } catch (err) {
+      showCapMessage("Collage indisponible ici — utilise « Importer » (photo prise juste avant)");
+      glLog('📸 Capture: clipboard.read() a échoué — ' + (err?.name || '') + ': ' + (err?.message || err), 'error');
+    }
+  };
+
+  const handleCaptureFileInput = (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (f) loadCaptureFile(f, capFrameLocked);
+  };
+
+  // Glisser pour déplacer ou redimensionner (coins) le cadre de sélection, souris et tactile
+  const startCaptureDrag = (kind, corner) => (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = capStageRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const pointer = e.touches ? e.touches[0] : e;
+    const startX = pointer.clientX, startY = pointer.clientY;
+    const orig = { ...capNormSel };
+    const rw = rect.width, rh = rect.height;
+    const MIN = 0.04;
+
+    const onMove = (ev) => {
+      const p = ev.touches ? ev.touches[0] : ev;
+      const dx = (p.clientX - startX) / rw;
+      const dy = (p.clientY - startY) / rh;
+      let next = { ...orig };
+      if (kind === 'move') {
+        next.x = orig.x + dx;
+        next.y = orig.y + dy;
+      } else {
+        if (corner === 'br') { next.w = orig.w + dx; next.h = orig.h + dy; }
+        else if (corner === 'bl') { next.x = orig.x + dx; next.w = orig.w - dx; next.h = orig.h + dy; }
+        else if (corner === 'tr') { next.y = orig.y + dy; next.w = orig.w + dx; next.h = orig.h - dy; }
+        else if (corner === 'tl') { next.x = orig.x + dx; next.y = orig.y + dy; next.w = orig.w - dx; next.h = orig.h - dy; }
+      }
+      next.w = Math.max(MIN, Math.min(1, next.w));
+      next.h = Math.max(MIN, Math.min(1, next.h));
+      next.x = Math.max(0, Math.min(1 - next.w, next.x));
+      next.y = Math.max(0, Math.min(1 - next.h, next.y));
+      setCapNormSel(next);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onUp);
+  };
+
+  const unlockCaptureFrame = () => {
+    setCapFrameLocked(false);
+    showCapMessage('Ajuste le cadre puis tape « Capturer »');
+  };
+
+  const removeCapture = (id) => setCapCaptures(prev => prev.filter(c => c.id !== id));
+
+  const applyCaptures = () => {
+    if (capCaptures.length === 0) {
+      showCapMessage('Aucune capture à ajouter');
+      return;
+    }
+    onAddImages?.(capCaptures.map(c => c.src));
+    showCapMessage(`${capCaptures.length} image(s) ajoutée(s) à la fiche`);
+    resetCapture();
+    setCaptureOpen(false);
+  };
+
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-80 sm:w-[420px] bg-gray-800 border border-gray-600 rounded-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-      <div className="flex items-center justify-between px-2 py-1.5 bg-gray-900 border-b border-gray-700 flex-shrink-0">
+    <>
+      {focusBackdrop && (
+        <div className="fixed inset-0 bg-black z-40" onClick={() => setFocusBackdrop(false)} />
+      )}
+    <div
+      className="fixed bottom-4 right-4 z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-2xl overflow-hidden flex flex-col"
+      style={{ width: playerSize.width, height: playerSize.height, maxWidth: 'calc(100vw - 32px)', maxHeight: 'calc(100vh - 32px)' }}
+    >
+      <div
+        onMouseDown={startPlayerResize}
+        onTouchStart={startPlayerResize}
+        onDoubleClick={resetPlayerSize}
+        className="absolute top-0 left-0 w-6 h-6 z-10 flex items-center justify-center"
+        style={{ cursor: 'nwse-resize', touchAction: 'none' }}
+        title="Glisser pour redimensionner — double-tap pour réinitialiser"
+      >
+        <span className="block w-2.5 h-2.5 border-t-2 border-l-2 border-gray-500 rounded-tl-sm" />
+      </div>
+
+      <div className="flex items-center justify-between px-2 py-1.5 bg-gray-900 border-b border-gray-700 flex-shrink-0 flex-wrap gap-1 pl-6">
         <span className="text-xs font-semibold text-gray-300 flex items-center gap-1">▶️ Vidéo</span>
         <div className="flex items-center gap-1">
+          <button
+            onClick={enterCleanFullscreen}
+            className={`text-[10px] px-1.5 py-0.5 rounded transition ${(nativeFullscreen || focusBackdrop) ? 'bg-sky-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
+            title="Plein écran SANS aucun bouton par-dessus — pour une capture d'écran bien nette"
+          >
+            ⛶ Plein écran net
+          </button>
+          <button
+            onClick={() => {
+              const next = !captureOpen;
+              setCaptureOpen(next);
+              if (next) glLog(`📸 Capture: panneau ouvert (clipboard.read ${navigator.clipboard?.read ? 'disponible' : 'ABSENT'}, contexte sécurisé: ${window.isSecureContext})`, 'info');
+            }}
+            className={`text-[10px] px-1.5 py-0.5 rounded transition ${captureOpen ? 'bg-purple-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
+            title="Capturer un accord affiché à l'écran (via capture d'écran iPad)"
+          >
+            📸 Capture
+          </button>
           {apiReady && (
             <button
               onClick={() => setNewBookmarkMode(!newBookmarkMode)}
@@ -206,6 +546,137 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark }) {
       </div>
 
       <div className="flex-1 overflow-y-auto">
+        {captureOpen && (
+          <div className="p-3 bg-gray-850 border-b border-gray-700 space-y-2">
+            <p className="text-[10px] text-gray-400 leading-relaxed">
+              1. Tape « ⛶ Plein écran net » puis mets la vidéo en pause sur l'accord voulu &nbsp;•&nbsp;
+              2. Capture d'écran iPad &nbsp;•&nbsp; 3. Colle-la ci-dessous (n'importe où sur cet écran)
+            </p>
+
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <label className="px-2 py-1 bg-purple-700 hover:bg-purple-600 rounded text-[10px] font-semibold cursor-pointer flex items-center gap-1">
+                📁 Importer la capture
+                <input ref={capFileInputRef} type="file" accept="image/*" onChange={handleCaptureFileInput} className="hidden" />
+              </label>
+              <button
+                onClick={captureFromClipboardButton}
+                className="px-2 py-1 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded text-[10px] font-semibold"
+              >
+                📋 Coller depuis le presse-papiers
+              </button>
+              {capHasImage && (
+                <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded ${capFrameLocked ? 'bg-purple-500/20 text-purple-300' : 'bg-amber-500/20 text-amber-300'}`}>
+                  {capFrameLocked ? '🔒 verrouillé — coller/importer = capture auto' : '🔓 ajuste le cadre'}
+                </span>
+              )}
+            </div>
+
+            {/* Zone de collage tactile — contentEditable pour que le geste natif "Coller" d'iOS apparaisse.
+                Le collage fonctionne en réalité n'importe où sur cet écran tant que ce panneau est ouvert
+                (voir l'écouteur global plus haut) : cette zone sert surtout à faire apparaître le bouton
+                natif "Coller" d'iOS au appui long. */}
+            <div
+              contentEditable
+              suppressContentEditableWarning
+              inputMode="none"
+              onPaste={handleCapturePasteEvent}
+              onInput={(e) => { e.currentTarget.textContent = ''; }}
+              className="w-full px-2 py-3 bg-gray-900 border border-dashed border-gray-600 rounded text-center text-[10px] text-gray-500 focus:outline-none focus:border-purple-500"
+            >
+              Appuie ici puis « Coller », ou colle directement où tu veux sur cet écran
+            </div>
+
+            {capHasImage && (
+              <div ref={capStageRef} className="relative w-full bg-black rounded border border-gray-600 overflow-hidden">
+                <img
+                  ref={capImgElRef}
+                  src={capImgSrc}
+                  alt="Capture d'écran collée"
+                  onLoad={handleCapImgLoad}
+                  draggable={false}
+                  className="w-full h-auto select-none pointer-events-none"
+                />
+                <div
+                  onMouseDown={startCaptureDrag('move')}
+                  onTouchStart={startCaptureDrag('move')}
+                  className="absolute border-2 border-purple-400 bg-purple-400/10"
+                  style={{
+                    left: `${capNormSel.x * 100}%`,
+                    top: `${capNormSel.y * 100}%`,
+                    width: `${capNormSel.w * 100}%`,
+                    height: `${capNormSel.h * 100}%`,
+                    boxShadow: '0 0 0 2000px rgba(0,0,0,0.45)',
+                    cursor: 'move',
+                  }}
+                >
+                  <span className="absolute -top-5 left-0 bg-purple-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap">
+                    {capImgElRef.current ? `${Math.round(capNormSel.w * capImgElRef.current.naturalWidth)} × ${Math.round(capNormSel.h * capImgElRef.current.naturalHeight)} px` : '…'}
+                  </span>
+                  {['tl', 'tr', 'bl', 'br'].map(corner => (
+                    <div
+                      key={corner}
+                      onMouseDown={startCaptureDrag('resize', corner)}
+                      onTouchStart={startCaptureDrag('resize', corner)}
+                      className="absolute w-5 h-5 bg-purple-400 border border-white rounded-full"
+                      style={{
+                        top: corner.startsWith('t') ? -10 : undefined,
+                        bottom: corner.startsWith('b') ? -10 : undefined,
+                        left: corner.endsWith('l') ? -10 : undefined,
+                        right: corner.endsWith('r') ? -10 : undefined,
+                        cursor: (corner === 'tl' || corner === 'br') ? 'nwse-resize' : 'nesw-resize',
+                        touchAction: 'none',
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {capHasImage && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => doCapture(capImgElRef.current, capNormSel)}
+                  className="flex-1 px-2 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-[10px] font-semibold"
+                >
+                  📷 Capturer
+                </button>
+                {capFrameLocked && (
+                  <button onClick={unlockCaptureFrame} className="px-2 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-[10px] font-semibold">
+                    🔓 Réajuster
+                  </button>
+                )}
+              </div>
+            )}
+
+            {capCaptures.length > 0 && (
+              <div className="flex gap-1.5 overflow-x-auto pb-1">
+                {capCaptures.map((c, i) => (
+                  <div key={c.id} className="relative flex-shrink-0">
+                    <img src={c.src} alt="" className="h-14 rounded border border-gray-600 bg-black" />
+                    <button
+                      onClick={() => removeCapture(c.id)}
+                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-700 hover:bg-red-600 rounded-full flex items-center justify-center text-[9px] leading-none"
+                      title="Retirer"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {capMessage && <p className="text-center text-[10px] text-green-400 font-semibold">{capMessage}</p>}
+
+            <button
+              onClick={applyCaptures}
+              disabled={capCaptures.length === 0}
+              className="w-full px-2 py-1.5 bg-green-700 hover:bg-green-600 disabled:opacity-40 rounded text-[10px] font-semibold"
+            >
+              ✓ Ajouter {capCaptures.length > 0 ? `(${capCaptures.length})` : ''} à la fiche
+            </button>
+          </div>
+        )}
+
         {resumeChoice === null && bookmarks.length > 0 ? (
           <div className="p-4 flex flex-col items-center gap-2 text-center bg-gray-900 border-b border-gray-700">
             <p className="text-xs text-gray-300">
@@ -272,9 +743,12 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark }) {
         )}
       </div>
 
-      <div className="flex-shrink-0">
+      <div
+        ref={videoWrapperRef}
+        className={nativeFullscreen ? 'fixed inset-0 z-[9999] bg-black flex items-center justify-center' : 'flex-shrink-0'}
+      >
         {apiFailed ? (
-          <div className="relative w-full bg-black" style={{ paddingTop: '56.25%' }}>
+          <div className={nativeFullscreen ? 'relative w-full h-full' : 'relative w-full bg-black'} style={nativeFullscreen ? undefined : { paddingTop: '56.25%' }}>
             <iframe
               key={videoId}
               src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0&playsinline=1&modestbranding=1&start=${resumeChoice === 'resume' ? firstBookmark : 0}`}
@@ -287,12 +761,22 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark }) {
             />
           </div>
         ) : (
-          <div className="relative w-full bg-black" style={{ paddingTop: '56.25%' }}>
+          <div className={nativeFullscreen ? 'relative w-full h-full' : 'relative w-full bg-black'} style={nativeFullscreen ? undefined : { paddingTop: '56.25%' }}>
             <div ref={containerRef} className="absolute inset-0 w-full h-full" />
           </div>
         )}
+        {nativeFullscreen && (
+          <button
+            onClick={exitCleanFullscreen}
+            className="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center text-base"
+            title="Quitter le plein écran"
+          >
+            ✕
+          </button>
+        )}
       </div>
     </div>
+    </>
   );
 }
 
@@ -3549,6 +4033,13 @@ function SaveStatusBadge({ status, onForceSave }) {
 }
 
 // Panneau de debug intégré à l'écran (sans F12 sur iPad)
+// Petit pont global vers le DebugPanel : n'importe quel composant peut logger un message visible dans 🐛
+function glLog(msg, type = 'info') {
+  try {
+    window.dispatchEvent(new CustomEvent('gl-debug-log', { detail: { msg, type } }));
+  } catch (err) { /* ignore */ }
+}
+
 function DebugPanel() {
   const [debugOpen, setDebugOpen] = useState(false);
   const [logs, setLogs] = useState([]);
@@ -3559,6 +4050,9 @@ function DebugPanel() {
     const addLog = (msg, type = "info") => {
       setLogs(prev => [...prev, { msg, type, time: new Date().toLocaleTimeString() }].slice(-20));
     };
+
+    const onCustomLog = (e) => addLog(e.detail?.msg, e.detail?.type);
+    window.addEventListener("gl-debug-log", onCustomLog);
 
     window.addEventListener("error", e => {
       addLog(`❌ ${e.message}`, "error");
@@ -3619,6 +4113,25 @@ function DebugPanel() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Bloc repliable de la barre latérale bibliothèque (Trier, Filtres, Affichage...)
+function SidebarSection({ title, icon, isOpen, onToggle, badge, children }) {
+  return (
+    <div className="border-b border-gray-700">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-semibold text-gray-300 hover:bg-gray-750 hover:text-amber-300 transition"
+      >
+        <span className="flex items-center gap-1.5">
+          {icon} {title}
+          {badge ? <span className="text-[10px] font-normal text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">{badge}</span> : null}
+        </span>
+        <ChevronDown className={`w-3.5 h-3.5 flex-shrink-0 transition ${isOpen ? '' : '-rotate-90'}`} />
+      </button>
+      {isOpen && <div className="px-4 pb-3 space-y-3">{children}</div>}
     </div>
   );
 }
@@ -3739,8 +4252,14 @@ function GuitarApp() {
   const [tileSize, setTileSize] = useState('medium');
   const [sortBy, setSortBy] = useState('favorite');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const DEFAULT_SIDEBAR_SECTIONS = { sort: true, filters: false, display: false, roadmap: false, storage: false };
+  const [sidebarSections, setSidebarSections] = useState(DEFAULT_SIDEBAR_SECTIONS);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [prefsSaved, setPrefsSaved] = useState(false);
+
+  const toggleSidebarSection = (key) => {
+    setSidebarSections(prev => ({ ...prev, [key]: !prev[key] }));
+  };
 
   // Chargement des préférences d'affichage enregistrées
   useEffect(() => {
@@ -3756,6 +4275,9 @@ function GuitarApp() {
           if (p.groupBy) setGroupBy(p.groupBy);
           if (p.classificationFilter) setClassificationFilter(p.classificationFilter);
           if (typeof p.sidebarCollapsed === 'boolean') setSidebarCollapsed(p.sidebarCollapsed);
+          if (p.sidebarSections && typeof p.sidebarSections === 'object') {
+            setSidebarSections({ ...DEFAULT_SIDEBAR_SECTIONS, ...p.sidebarSections });
+          }
         }
       } catch (err) {
         // Aucune préférence enregistrée
@@ -3769,7 +4291,7 @@ function GuitarApp() {
   const saveDisplayPrefs = async () => {
     try {
       await window.storage.set(PREFS_STORAGE_KEY, JSON.stringify({
-        viewMode, tileSize, sortBy, groupBy, classificationFilter, sidebarCollapsed,
+        viewMode, tileSize, sortBy, groupBy, classificationFilter, sidebarCollapsed, sidebarSections,
       }), false);
       setPrefsSaved(true);
       setTimeout(() => setPrefsSaved(false), 2000);
@@ -3783,11 +4305,11 @@ function GuitarApp() {
     if (!prefsLoaded) return;
     const t = setTimeout(() => {
       window.storage.set(PREFS_STORAGE_KEY, JSON.stringify({
-        viewMode, tileSize, sortBy, groupBy, classificationFilter, sidebarCollapsed,
+        viewMode, tileSize, sortBy, groupBy, classificationFilter, sidebarCollapsed, sidebarSections,
       }), false).catch(() => {});
     }, 500);
     return () => clearTimeout(t);
-  }, [viewMode, tileSize, sortBy, groupBy, classificationFilter, sidebarCollapsed, prefsLoaded]);
+  }, [viewMode, tileSize, sortBy, groupBy, classificationFilter, sidebarCollapsed, sidebarSections, prefsLoaded]);
 
   const selectedSong = songs.find(s => s.id === selectedSongId);
   const selectedVersion = selectedSong?.versions.find(v => v.id === selectedVersionId) || selectedSong?.versions[0];
@@ -4018,13 +4540,14 @@ function GuitarApp() {
       {appMode === 'library' ? (
         <>
           {/* SIDEBAR */}
-          <div className={`${sidebarCollapsed ? 'w-8' : 'w-72'} bg-gray-800 border-r border-gray-700 flex flex-col flex-shrink-0 transition-all`}>
+          <div className={`${sidebarCollapsed ? 'w-8' : 'w-72'} bg-gray-800 border-r border-gray-700 flex flex-col flex-shrink-0 overflow-hidden transition-all`}>
             <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="p-2 hover:bg-gray-700 flex items-center justify-center border-b border-gray-700">
               {sidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
             </button>
             {!sidebarCollapsed && (
               <>
-                <div className="p-4 border-b border-gray-700">
+                {/* En-tête fixe : toujours visible, jamais dans le scroll */}
+                <div className="p-4 border-b border-gray-700 flex-shrink-0">
                   <div className="flex items-center gap-2 mb-4">
                     <Music className="w-5 h-5 text-amber-500" />
                     <h1 className="text-lg font-bold">Guitar Lab</h1>
@@ -4052,7 +4575,16 @@ function GuitarApp() {
                       <Plus className="w-4 h-4" />
                     </button>
                   </div>
-                  <div className="mt-3 space-y-2">
+                </div>
+
+                {/* Corps défilant : sections repliables (Trier ouvert par défaut) */}
+                <div className="flex-1 overflow-y-auto">
+                  <SidebarSection
+                    title="Trier"
+                    icon="🔃"
+                    isOpen={sidebarSections.sort}
+                    onToggle={() => toggleSidebarSection('sort')}
+                  >
                     <div>
                       <label className="text-xs text-gray-500 block mb-2">Regrouper :</label>
                       <select
@@ -4121,18 +4653,32 @@ function GuitarApp() {
                         </button>
                       </div>
                     </div>
+                  </SidebarSection>
+
+                  <SidebarSection
+                    title="Filtres"
+                    icon="🎯"
+                    isOpen={sidebarSections.filters}
+                    onToggle={() => toggleSidebarSection('filters')}
+                    badge={setlistOnly ? '🎉' : null}
+                  >
+                    <button
+                      onClick={() => setSetlistOnly(!setlistOnly)}
+                      className={`w-full px-2 py-2 rounded text-xs font-semibold transition text-left flex items-center gap-1.5 ${setlistOnly ? 'bg-amber-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-1px_0_rgba(0,0,0,0.3)]' : 'bg-gray-700 hover:bg-gray-600'}`}
+                      title="N'afficher que les titres sélectionnés pour une soirée"
+                    >
+                      🎉 Soirée uniquement
+                    </button>
+                  </SidebarSection>
+
+                  <SidebarSection
+                    title="Affichage"
+                    icon="🖼️"
+                    isOpen={sidebarSections.display}
+                    onToggle={() => toggleSidebarSection('display')}
+                  >
                     <div>
-                      <label className="text-xs text-gray-500 block mb-2">Filtres :</label>
-                      <button
-                        onClick={() => setSetlistOnly(!setlistOnly)}
-                        className={`w-full px-2 py-2 rounded text-xs font-semibold transition text-left flex items-center gap-1.5 ${setlistOnly ? 'bg-amber-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-1px_0_rgba(0,0,0,0.3)]' : 'bg-gray-700 hover:bg-gray-600'}`}
-                        title="N'afficher que les titres sélectionnés pour une soirée"
-                      >
-                        🎉 Soirée uniquement
-                      </button>
-                    </div>
-                    <div>
-                      <label className="text-xs text-gray-500 block mb-2">Affichage :</label>
+                      <label className="text-xs text-gray-500 block mb-2">Mode :</label>
                       <div className="flex gap-1">
                         <button
                           onClick={() => setViewMode('detailed')}
@@ -4183,22 +4729,39 @@ function GuitarApp() {
                         </div>
                       </div>
                     )}
-                  </div>
+                  </SidebarSection>
+
+                  <ClassificationManager
+                    options={classificationOptions}
+                    onAdd={addClassificationOption}
+                    onRemove={removeClassificationOption}
+                  />
+
+                  <SidebarSection
+                    title="Feuille de route"
+                    icon="🗺️"
+                    isOpen={sidebarSections.roadmap}
+                    onToggle={() => toggleSidebarSection('roadmap')}
+                  >
+                    <p className="text-xs text-gray-400">Objectifs en cours, morceaux maîtrisés et prochains défis.</p>
+                    <button
+                      onClick={() => setRoadmapOpen(true)}
+                      className="w-full px-2 py-2 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold transition"
+                      title="Ouvrir la feuille de route en grand"
+                    >
+                      Voir en grand →
+                    </button>
+                  </SidebarSection>
+
+                  <SidebarSection
+                    title="Stockage"
+                    icon="💾"
+                    isOpen={sidebarSections.storage}
+                    onToggle={() => toggleSidebarSection('storage')}
+                  >
+                    <StorageManager />
+                  </SidebarSection>
                 </div>
-                <ClassificationManager
-                  options={classificationOptions}
-                  onAdd={addClassificationOption}
-                  onRemove={removeClassificationOption}
-                />
-                <button
-                  onClick={() => setRoadmapOpen(true)}
-                  className="w-full text-left p-4 border-t border-gray-700 hover:bg-gray-750 transition"
-                  title="Ouvrir la feuille de route en grand"
-                >
-                  <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">🗺️ Feuille de route</p>
-                  <p className="text-xs text-gray-400">Cliquer pour voir la feuille de route complète</p>
-                </button>
-                <StorageManager />
               </>
             )}
           </div>
@@ -4774,9 +5337,9 @@ function StorageManager() {
   };
 
   return (
-    <div className="p-4 border-t border-gray-700">
+    <div>
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs text-gray-500">💾 Stockage</span>
+        <span className="text-xs text-gray-500">Espace utilisé</span>
         <button onClick={refreshEstimate} className="text-[10px] text-gray-500 hover:text-gray-300 px-1" title="Actualiser">↻</button>
       </div>
 
@@ -5759,6 +6322,13 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
     onUpdateSong(updatedSong);
   };
 
+  // Ajoute une ou plusieurs images (captures vidéo, imports...) à la galerie de la version en cours
+  const addImagesToVersion = (dataUrls) => {
+    if (!dataUrls || !dataUrls.length) return;
+    const added = dataUrls.map(src => ({ id: newId(), src, x: 0, y: 0, scale: 1 }));
+    updateVersion({ images: [...(version?.images || []), ...added] });
+  };
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="bg-gradient-to-r from-gray-800 to-gray-750 border-b border-gray-700 p-3 flex-shrink-0">
@@ -5953,7 +6523,7 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
       )}
 
       {activeLink && (
-        <YoutubeMiniPlayer link={activeLink} onSaveBookmark={saveBookmark} onClose={() => setActiveLink(null)} />
+        <YoutubeMiniPlayer link={activeLink} onSaveBookmark={saveBookmark} onClose={() => setActiveLink(null)} onAddImages={addImagesToVersion} />
       )}
 
       {historyOpen && (
@@ -6846,7 +7416,6 @@ function CenterPanel({ version, updateVersion }) {
   // Hauteur d'affichage des photos empilées : compact / moyen / entier
   const [imgHeight, setImgHeight] = useState('md');
   const HEIGHTS = { sm: 'max-h-64', md: 'max-h-96', full: 'max-h-none' };
-  const [captureToolOpen, setCaptureToolOpen] = useState(false);
 
   const addImages = (dataUrls) => {
     if (!dataUrls.length) return;
@@ -6942,13 +7511,6 @@ function CenterPanel({ version, updateVersion }) {
           📋 Coller
         </button>
 
-        <button
-          onClick={() => setCaptureToolOpen(true)}
-          className="px-2 py-1 bg-purple-700 hover:bg-purple-600 rounded text-xs font-semibold flex items-center gap-1"
-          title="Capturer une zone depuis la vidéo YouTube"
-        >
-          📸 Capturer
-        </button>
         {pasteStatus === 'empty' && (
           <span className="text-[10px] text-gray-400">Aucune image dans le presse-papiers</span>
         )}
@@ -7033,207 +7595,7 @@ function CenterPanel({ version, updateVersion }) {
           onClose={() => setEditingImageId(null)}
         />
       )}
-      {captureToolOpen && (
-        <VideoCaptureTool
-          onAddImages={addImages}
-          onClose={() => setCaptureToolOpen(false)}
-        />
-      )}
     </>
-  );
-}
-
-// Outil de capture : colle URL YouTube + screenshot, cadre interactif, exporte images vers la fiche
-
-// Outil de capture avancé : poignées interactives, verrou de cadre, drag
-function VideoCaptureTool({ onAddImages, onClose }) {
-  const [youtubeUrl, setYoutubeUrl] = useState('');
-  const [sourceImg, setSourceImg] = useState(null);
-  const [captures, setCaptures] = useState([]);
-  const [hasImage, setHasImage] = useState(false);
-  const [frameLocked, setFrameLocked] = useState(false);
-  const [normSel, setNormSel] = useState({ x: 0.12, y: 0.76, w: 0.76, h: 0.15 });
-  const [message, setMessage] = useState('');
-  const [dragState, setDragState] = useState(null);
-  const stageRef = useRef(null);
-  const frameRef = useRef(null);
-
-  const showMessage = (msg) => {
-    setMessage(msg);
-    setTimeout(() => setMessage(''), 2500);
-  };
-
-  const extractYoutubeId = (url) => {
-    const patterns = [
-      /youtube\.com\/watch\?v=([\w-]{11})/,
-      /youtu\.be\/([\w-]{11})/,
-      /youtube\.com\/embed\/([\w-]{11})/,
-      /youtube\.com\/shorts\/([\w-]{11})/,
-    ];
-    for (const p of patterns) {
-      const m = url.match(p);
-      if (m) return m[1];
-    }
-    return null;
-  };
-
-  const openYoutube = () => {
-    const id = extractYoutubeId(youtubeUrl);
-    const target = id ? `https://www.youtube.com/watch?v=${id}` : youtubeUrl;
-    if (!target) {
-      showMessage('Collez un lien YouTube');
-      return;
-    }
-    window.open(target, '_blank', 'noopener,noreferrer');
-    showMessage('Vidéo ouverte dans un nouvel onglet');
-  };
-
-  const loadImage = (blob) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        setSourceImg(img);
-        setHasImage(true);
-        if (frameLocked) doCapture(img);
-        else showMessage('Image collée — ajustez le cadre');
-      };
-      img.onerror = () => showMessage('Image illisible');
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(blob);
-  };
-
-  const handlePaste = (e) => {
-    e.preventDefault();
-    const items = e.clipboardData?.items || [];
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        loadImage(item.getAsFile());
-        return;
-      }
-    }
-    showMessage('Aucune image dans presse-papiers');
-  };
-
-  const doCapture = (img) => {
-    if (!img || !sourceImg) return;
-    const nw = img.naturalWidth;
-    const nh = img.naturalHeight;
-    const sx = Math.round(normSel.x * nw);
-    const sy = Math.round(normSel.y * nh);
-    const sw = Math.max(1, Math.round(normSel.w * nw));
-    const sh = Math.max(1, Math.round(normSel.h * nh));
-    const c = document.createElement('canvas');
-    c.width = sw;
-    c.height = sh;
-    c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-    setCaptures([...captures, c.toDataURL('image/jpeg', 0.85)]);
-    setFrameLocked(true);
-    showMessage('Capture ajoutée — collez l\'image suivante');
-  };
-
-  const handlePointerDown = (e) => {
-    if (!sourceImg || !frameRef.current) return;
-    frameRef.current.setPointerCapture(e.pointerId);
-    const r = stageRef.current?.getBoundingClientRect() || { width: 0, height: 0 };
-    setDragState({
-      id: e.pointerId,
-      startX: e.clientX,
-      startY: e.clientY,
-      orig: { ...normSel },
-      rw: r.width,
-      rh: r.height,
-    });
-  };
-
-  const handlePointerMove = (e) => {
-    if (!dragState || dragState.id !== e.pointerId) return;
-    const dx = (e.clientX - dragState.startX) / dragState.rw;
-    const dy = (e.clientY - dragState.startY) / dragState.rh;
-    setNormSel({
-      x: Math.max(0, Math.min(1 - dragState.orig.w, dragState.orig.x + dx)),
-      y: Math.max(0, Math.min(1 - dragState.orig.h, dragState.orig.y + dy)),
-      w: dragState.orig.w,
-      h: dragState.orig.h,
-    });
-  };
-
-  const handlePointerUp = (e) => {
-    if (dragState?.id === e.pointerId) {
-      setDragState(null);
-    }
-  };
-
-  const applyCaptures = () => {
-    if (captures.length === 0) {
-      showMessage('Aucune capture');
-      return;
-    }
-    onAddImages?.(captures);
-    showMessage('Images ajoutées à la fiche');
-    setTimeout(onClose, 1000);
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 overflow-y-auto">
-      <div className="bg-gray-800 rounded-lg max-w-xl w-full border border-gray-700 shadow-2xl my-4">
-        <div className="p-4 border-b border-gray-700 flex justify-between items-center">
-          <h2 className="font-bold text-amber-400">📸 Capture vidéo</h2>
-          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="p-4 space-y-3 max-h-[65vh] overflow-y-auto">
-          <div>
-            <label className="text-xs text-gray-400 uppercase tracking-wide mb-1 block font-semibold">YouTube</label>
-            <div className="flex gap-2">
-              <input type="text" value={youtubeUrl} onChange={(e) => setYoutubeUrl(e.target.value)} placeholder="youtube.com/watch?v=..." className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500" />
-              <button onClick={openYoutube} className="px-3 py-2 bg-red-600 hover:bg-red-500 rounded font-semibold text-sm">Ouvrir</button>
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs text-gray-400 uppercase tracking-wide mb-1 block font-semibold">Coller</label>
-            <div onPaste={handlePaste} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer?.files?.[0]; if (f) loadImage(f); }} className="w-full p-4 border-2 border-dashed border-gray-600 rounded text-center text-gray-400 text-sm" tabIndex={0}>Cmd+V ou drag-drop</div>
-          </div>
-
-          {hasImage && sourceImg && (
-            <div>
-              <label className="text-xs text-gray-400 uppercase tracking-wide mb-1 block font-semibold">Cadrage</label>
-              <div ref={stageRef} className="relative w-full bg-black rounded border border-gray-600 overflow-hidden" style={{ paddingTop: `${(sourceImg.naturalHeight / sourceImg.naturalWidth) * 100}%` }}>
-                <img src={sourceImg.src} className="absolute inset-0 w-full h-full object-cover pointer-events-none" alt="source" />
-                <div ref={frameRef} className="absolute border-2 border-amber-400 bg-amber-400/10 cursor-move" style={{ left: `${normSel.x * 100}%`, top: `${normSel.y * 100}%`, width: `${normSel.w * 100}%`, height: `${normSel.h * 100}%` }} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerUp}>
-                  <div className="absolute -top-6 left-0 bg-amber-400 text-black text-[10px] font-bold px-2 py-0.5 rounded whitespace-nowrap">{Math.round(normSel.w * sourceImg.naturalWidth)} × {Math.round(normSel.h * sourceImg.naturalHeight)} px</div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {captures.length > 0 && (
-            <div>
-              <label className="text-xs text-gray-400 uppercase tracking-wide mb-1 block font-semibold">Captures ({captures.length})</label>
-              <div className="max-h-40 overflow-y-auto space-y-1 bg-gray-750 rounded p-2 border border-gray-600">
-                {captures.map((src, i) => (
-                  <div key={i} className="flex items-center justify-between gap-2 bg-gray-700 p-2 rounded text-xs">
-                    <span>Capture {i + 1}</span>
-                    <button onClick={() => setCaptures(captures.filter((_, j) => j !== i))} className="px-2 py-1 bg-red-700 hover:bg-red-600 rounded text-[10px]">✕</button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {message && <p className="text-center text-xs text-green-400 font-semibold">{message}</p>}
-        </div>
-
-        <div className="p-4 border-t border-gray-700 flex gap-2">
-          <button onClick={() => doCapture(sourceImg)} disabled={!hasImage} className="flex-1 px-3 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded font-semibold text-sm">📷 Capturer</button>
-          <button onClick={applyCaptures} disabled={captures.length === 0} className="flex-1 px-3 py-2 bg-green-600 hover:bg-green-500 disabled:opacity-50 rounded font-semibold text-sm">✓ Ajouter</button>
-        </div>
-      </div>
-    </div>
   );
 }
 
