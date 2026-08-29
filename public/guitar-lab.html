@@ -7178,7 +7178,84 @@ function PerformanceMode({ song, version, onClose }) {
 
 
 
+// Formatte le contenu d'une cellule pour l'affichage synthétique (accord simple, ou top/bottom si divisée)
+function formatCellChord(cell) {
+  if (!cell) return '';
+  if (cell.split) {
+    const parts = [cell.top, cell.bottom].filter(Boolean);
+    return parts.join('/');
+  }
+  return cell.chord || '';
+}
+
+// Vue de synthèse : structure complète, lisible d'un coup d'œil, code couleur par section
+function StructureSummary({ structure }) {
+  if (!structure || structure.length === 0) {
+    return <p className="text-xs text-gray-500 italic text-center py-6">Aucune section pour l'instant.</p>;
+  }
+  return (
+    <div className="space-y-2.5">
+      {structure.map(section => {
+        const style = getSectionStyle(section.section);
+        const cols = section.cols || 1;
+        const cells = section.cells || [];
+        const rowCount = Math.max(1, Math.ceil(cells.length / cols));
+        const rows = Array.from({ length: rowCount }, (_, rowIdx) => {
+          const rowCells = cells.slice(rowIdx * cols, (rowIdx + 1) * cols);
+          const chords = rowCells.map(formatCellChord).filter(Boolean);
+          const repeat = section.rowRepeats?.[rowIdx] || 1;
+          return { repeat, chords };
+        }).filter(r => r.chords.length > 0);
+
+        return (
+          <div key={section.id} className={`rounded border-l-4 ${style.border} ${style.tint} border border-gray-600 px-3 py-2`}>
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${style.dot}`} />
+              <span className={`font-semibold text-xs ${style.text}`}>{section.section}</span>
+              {(section.repeat || 1) > 1 && (
+                <span className="text-[10px] text-gray-400 font-semibold">(section ×{section.repeat})</span>
+              )}
+            </div>
+            {rows.length === 0 ? (
+              <p className="text-[11px] text-gray-500 italic pl-3">Vide</p>
+            ) : (
+              <div className="space-y-0.5 pl-3">
+                {rows.map((row, i) => (
+                  <p key={i} className="text-xs text-gray-200 font-mono leading-relaxed">
+                    <span className="text-amber-400 font-semibold">{row.repeat}x</span>{' '}
+                    {row.chords.join(' - ')}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function LeftPanel({ version, updateVersion }) {
+  const SUMMARY_MODE_KEY = 'guitar-lab:structure-summary-mode';
+  const [summaryMode, setSummaryMode] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await window.storage.get(SUMMARY_MODE_KEY, false);
+        if (result?.value) setSummaryMode(JSON.parse(result.value));
+      } catch (err) { /* préférence par défaut : édition */ }
+    })();
+  }, []);
+
+  const toggleSummaryMode = () => {
+    setSummaryMode(prev => {
+      const next = !prev;
+      window.storage.set(SUMMARY_MODE_KEY, JSON.stringify(next), false).catch(() => {});
+      return next;
+    });
+  };
+
   const addSection = () => {
     const newSection = {
       id: Date.now().toString(),
@@ -7203,25 +7280,42 @@ function LeftPanel({ version, updateVersion }) {
       </datalist>
 
       <div className="bg-gray-750 border-b border-gray-700 p-3 flex-shrink-0">
-        <h3 className="font-semibold text-amber-400 text-sm mb-2">📋 Structure</h3>
-        <button onClick={addSection} className="w-full px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold transition mb-2">
-          + Section
-        </button>
-        {version.structure.length > 1 && (
-          <div className="flex gap-1">
-            <button onClick={() => setAllCollapsed(false)} className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[11px] transition">
-              Tout déplier
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-semibold text-amber-400 text-sm">📋 Structure</h3>
+          <button
+            onClick={toggleSummaryMode}
+            className={`px-2 py-1 rounded text-[11px] font-semibold transition flex items-center gap-1 ${summaryMode ? 'bg-sky-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
+            title={summaryMode ? "Revenir à l'édition de la grille" : 'Afficher une vue de synthèse, lecture seule'}
+          >
+            {summaryMode ? '✏️ Éditer' : '👁️ Synthèse'}
+          </button>
+        </div>
+        {!summaryMode && (
+          <>
+            <button onClick={addSection} className="w-full px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold transition mb-2">
+              + Section
             </button>
-            <button onClick={() => setAllCollapsed(true)} className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[11px] transition">
-              Tout replier
-            </button>
-          </div>
+            {version.structure.length > 1 && (
+              <div className="flex gap-1">
+                <button onClick={() => setAllCollapsed(false)} className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[11px] transition">
+                  Tout déplier
+                </button>
+                <button onClick={() => setAllCollapsed(true)} className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[11px] transition">
+                  Tout replier
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
       <div className="flex-1 overflow-y-auto space-y-2 p-3">
-        {version.structure.map((section, idx) => (
-          <SectionBuilder key={section.id} section={section} index={idx} version={version} updateVersion={updateVersion} />
-        ))}
+        {summaryMode ? (
+          <StructureSummary structure={version.structure} />
+        ) : (
+          version.structure.map((section, idx) => (
+            <SectionBuilder key={section.id} section={section} index={idx} version={version} updateVersion={updateVersion} />
+          ))
+        )}
       </div>
     </>
   );
