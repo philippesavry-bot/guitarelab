@@ -361,6 +361,21 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
     window.storage.set(YT_SIZE_KEY, JSON.stringify(DEFAULT_PLAYER_SIZE), false).catch(() => {});
   };
 
+  // --- Mode plein écran : masque le reste de l'appli derrière un fond noir, pour une capture d'écran propre ---
+  const [focusBackdrop, setFocusBackdrop] = useState(false);
+  const toggleFocusBackdrop = () => {
+    setFocusBackdrop(f => {
+      const next = !f;
+      if (next) {
+        setPlayerSize({
+          width: Math.min(window.innerWidth - 32, 820),
+          height: Math.min(window.innerHeight - 32, 760),
+        });
+      }
+      return next;
+    });
+  };
+
   // --- Capture d'accords depuis une capture d'écran de la vidéo (cadre verrouillable) ---
   const [captureOpen, setCaptureOpen] = useState(false);
   const [capImgSrc, setCapImgSrc] = useState(null);
@@ -375,7 +390,7 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
 
   const showCapMessage = (msg) => {
     setCapMessage(msg);
-    setTimeout(() => setCapMessage(''), 2500);
+    setTimeout(() => setCapMessage(''), 4000);
   };
 
   const resetCapture = () => {
@@ -463,15 +478,20 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
   const loadCaptureFile = (file, wasLocked) => {
     if (!file || !file.type?.startsWith('image/')) {
       showCapMessage('Fichier non reconnu comme image');
+      glLog('📸 Capture: fichier reçu non-image (' + (file?.type || 'type inconnu') + ')', 'warning');
       return;
     }
     const reader = new FileReader();
     reader.onload = (ev) => {
       setCapImgSrc(ev.target.result);
       setCapHasImage(true);
-      if (!wasLocked) showCapMessage('Image collée — ajuste le cadre puis tape « Capturer »');
+      if (!wasLocked) showCapMessage('Image chargée — ajuste le cadre puis tape « Capturer »');
+      glLog('📸 Capture: image chargée (' + file.type + ', ' + Math.round(file.size / 1024) + ' Ko)', 'success');
     };
-    reader.onerror = () => showCapMessage('Image illisible — réessaie');
+    reader.onerror = () => {
+      showCapMessage('Image illisible — réessaie');
+      glLog('📸 Capture: FileReader erreur au chargement', 'error');
+    };
     reader.readAsDataURL(file);
   };
 
@@ -483,19 +503,27 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
   const handleCapturePasteEvent = (e) => {
     e.preventDefault();
     const items = Array.from(e.clipboardData?.items || []);
+    const files = Array.from(e.clipboardData?.files || []);
+    glLog(`📸 Capture: événement paste reçu — items: [${items.map(i => i.type).join(', ') || 'aucun'}], files: [${files.map(f => f.type).join(', ') || 'aucun'}]`, 'info');
     const item = items.find(i => i.type.startsWith('image/'));
-    if (!item) { showCapMessage('Aucune image dans le presse-papiers'); return; }
-    loadCaptureFile(item.getAsFile(), capFrameLocked);
+    if (item) { loadCaptureFile(item.getAsFile(), capFrameLocked); return; }
+    const file = files.find(f => f.type.startsWith('image/'));
+    if (file) { loadCaptureFile(file, capFrameLocked); return; }
+    showCapMessage('Aucune image détectée dans le collage — essaie « 📁 Importer »');
   };
 
-  // Bouton "Coller" explicite : lit directement le presse-papiers (plus fiable que le geste sur iPad)
+  // Bouton "Coller" explicite : lit directement le presse-papiers.
+  // ⚠️ Sur iPad, en app installée depuis l'écran d'accueil, iOS bloque parfois cette lecture directe :
+  // dans ce cas utilise le geste natif juste en dessous, ou « 📁 Importer » (toujours fiable).
   const captureFromClipboardButton = async () => {
+    if (!navigator.clipboard?.read) {
+      showCapMessage("Collage direct indisponible ici (app installée) — utilise « Importer »");
+      glLog('📸 Capture: navigator.clipboard.read absent', 'warning');
+      return;
+    }
     try {
-      if (!navigator.clipboard?.read) {
-        showCapMessage('Collage direct indisponible — utilise le geste Coller ci-dessous');
-        return;
-      }
       const items = await navigator.clipboard.read();
+      glLog(`📸 Capture: clipboard.read() → ${items.length} élément(s)`, 'info');
       for (const item of items) {
         const imgType = item.types.find(t => t.startsWith('image/'));
         if (imgType) {
@@ -504,9 +532,10 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
           return;
         }
       }
-      showCapMessage('Aucune image dans le presse-papiers');
+      showCapMessage('Aucune image dans le presse-papiers — essaie « 📁 Importer »');
     } catch (err) {
-      showCapMessage('Collage indisponible — utilise le geste Coller ci-dessous');
+      showCapMessage("Collage indisponible ici — utilise « Importer » (photo prise juste avant)");
+      glLog('📸 Capture: clipboard.read() a échoué — ' + (err?.name || '') + ': ' + (err?.message || err), 'error');
     }
   };
 
@@ -579,6 +608,10 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
   };
 
   return (
+    <>
+      {focusBackdrop && (
+        <div className="fixed inset-0 bg-black z-40" onClick={() => setFocusBackdrop(false)} />
+      )}
     <div
       className="fixed bottom-4 right-4 z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-2xl overflow-hidden flex flex-col"
       style={{ width: playerSize.width, height: playerSize.height, maxWidth: 'calc(100vw - 32px)', maxHeight: 'calc(100vh - 32px)' }}
@@ -598,7 +631,18 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
         <span className="text-xs font-semibold text-gray-300 flex items-center gap-1">▶️ Vidéo</span>
         <div className="flex items-center gap-1">
           <button
-            onClick={() => setCaptureOpen(!captureOpen)}
+            onClick={toggleFocusBackdrop}
+            className={`text-[10px] px-1.5 py-0.5 rounded transition ${focusBackdrop ? 'bg-sky-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
+            title="Masquer le reste de l'écran pour une capture bien nette"
+          >
+            🖥️ Plein écran
+          </button>
+          <button
+            onClick={() => {
+              const next = !captureOpen;
+              setCaptureOpen(next);
+              if (next) glLog(`📸 Capture: panneau ouvert (clipboard.read ${navigator.clipboard?.read ? 'disponible' : 'ABSENT'}, contexte sécurisé: ${window.isSecureContext})`, 'info');
+            }}
             className={`text-[10px] px-1.5 py-0.5 rounded transition ${captureOpen ? 'bg-purple-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
             title="Capturer un accord affiché à l'écran (via capture d'écran iPad)"
           >
@@ -632,38 +676,44 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
         {captureOpen && (
           <div className="p-3 bg-gray-850 border-b border-gray-700 space-y-2">
             <p className="text-[10px] text-gray-400 leading-relaxed">
-              1. Mets la vidéo en pause sur l'accord voulu &nbsp;•&nbsp; 2. Capture d'écran iPad &nbsp;•&nbsp; 3. Colle-la ci-dessous
+              1. Tape « 🖥️ Plein écran » puis mets la vidéo en pause sur l'accord voulu &nbsp;•&nbsp; 2. Capture d'écran iPad &nbsp;•&nbsp; 3. Récupère l'image ci-dessous
             </p>
 
             <div className="flex items-center gap-1.5 flex-wrap">
-              <button
-                onClick={captureFromClipboardButton}
-                className="px-2 py-1 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded text-[10px] font-semibold"
-              >
-                📋 Coller
-              </button>
-              <label className="px-2 py-1 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded text-[10px] font-semibold cursor-pointer">
-                📁 Importer
+              <label className="px-2 py-1 bg-purple-700 hover:bg-purple-600 rounded text-[10px] font-semibold cursor-pointer flex items-center gap-1">
+                📁 Importer la capture
                 <input ref={capFileInputRef} type="file" accept="image/*" onChange={handleCaptureFileInput} className="hidden" />
               </label>
               {capHasImage && (
                 <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded ${capFrameLocked ? 'bg-purple-500/20 text-purple-300' : 'bg-amber-500/20 text-amber-300'}`}>
-                  {capFrameLocked ? '🔒 verrouillé — coller = capture auto' : '🔓 ajuste le cadre'}
+                  {capFrameLocked ? '🔒 verrouillé — importer = capture auto' : '🔓 ajuste le cadre'}
                 </span>
               )}
             </div>
+            <p className="text-[9px] text-gray-500">↑ Méthode fiable : ouvre ta pellicule et choisis la capture d'écran que tu viens de prendre.</p>
 
-            {/* Zone de collage tactile — contentEditable pour que le geste natif "Coller" d'iOS apparaisse */}
-            <div
-              contentEditable
-              suppressContentEditableWarning
-              inputMode="none"
-              onPaste={handleCapturePasteEvent}
-              onInput={(e) => { e.currentTarget.textContent = ''; }}
-              className="w-full px-2 py-3 bg-gray-900 border border-dashed border-gray-600 rounded text-center text-[10px] text-gray-500 focus:outline-none focus:border-purple-500"
-            >
-              Appuie ici puis « Coller »
-            </div>
+            <details className="text-[10px] text-gray-500">
+              <summary className="cursor-pointer text-gray-400 select-none">Ou essayer le collage direct (plus rapide, pas toujours dispo)</summary>
+              <div className="mt-1.5 space-y-1.5">
+                <button
+                  onClick={captureFromClipboardButton}
+                  className="px-2 py-1 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded text-[10px] font-semibold"
+                >
+                  📋 Coller depuis le presse-papiers
+                </button>
+                {/* Zone de collage tactile — contentEditable pour que le geste natif "Coller" d'iOS apparaisse */}
+                <div
+                  contentEditable
+                  suppressContentEditableWarning
+                  inputMode="none"
+                  onPaste={handleCapturePasteEvent}
+                  onInput={(e) => { e.currentTarget.textContent = ''; }}
+                  className="w-full px-2 py-3 bg-gray-900 border border-dashed border-gray-600 rounded text-center text-[10px] text-gray-500 focus:outline-none focus:border-purple-500"
+                >
+                  Appuie ici puis « Coller »
+                </div>
+              </div>
+            </details>
 
             {capHasImage && (
               <div ref={capStageRef} className="relative w-full bg-black rounded border border-gray-600 overflow-hidden">
@@ -843,6 +893,7 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
         )}
       </div>
     </div>
+    </>
   );
 }
 
@@ -4099,6 +4150,13 @@ function SaveStatusBadge({ status, onForceSave }) {
 }
 
 // Panneau de debug intégré à l'écran (sans F12 sur iPad)
+// Petit pont global vers le DebugPanel : n'importe quel composant peut logger un message visible dans 🐛
+function glLog(msg, type = 'info') {
+  try {
+    window.dispatchEvent(new CustomEvent('gl-debug-log', { detail: { msg, type } }));
+  } catch (err) { /* ignore */ }
+}
+
 function DebugPanel() {
   const [debugOpen, setDebugOpen] = useState(false);
   const [logs, setLogs] = useState([]);
@@ -4109,6 +4167,9 @@ function DebugPanel() {
     const addLog = (msg, type = "info") => {
       setLogs(prev => [...prev, { msg, type, time: new Date().toLocaleTimeString() }].slice(-20));
     };
+
+    const onCustomLog = (e) => addLog(e.detail?.msg, e.detail?.type);
+    window.addEventListener("gl-debug-log", onCustomLog);
 
     window.addEventListener("error", e => {
       addLog(`❌ ${e.message}`, "error");
