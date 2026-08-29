@@ -6325,6 +6325,159 @@ function CapoPicker({ capo, onChange }) {
   );
 }
 
+// Onglets de version : plusieurs versions d'un même morceau (accords/photos/notes/bpm/capo/clé propres à chacune),
+// affichés sous l'en-tête commun (titre, artiste, favoris, chrono, journal...). Nommage inline, ajout via l'onglet "+",
+// duplication et suppression disponibles sur l'onglet actif. N'affecte jamais les champs communs du morceau (song.*).
+function VersionTabsBar({ song, activeVersionId, onSelectVersion, onUpdateSong }) {
+  const versions = song.versions || [];
+  const [editingId, setEditingId] = useState(null);
+  const [editValue, setEditValue] = useState('');
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (editingId && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editingId]);
+
+  const startRename = (v) => {
+    setEditingId(v.id);
+    setEditValue(v.label || '');
+  };
+
+  const commitRename = () => {
+    const clean = editValue.trim();
+    if (editingId && clean) {
+      onUpdateSong({ ...song, versions: versions.map(v => (v.id === editingId ? { ...v, label: clean } : v)) });
+    }
+    setEditingId(null);
+  };
+
+  // Nouvelle version vierge (même structure de départ qu'à la création d'un morceau) : n'affecte jamais les autres versions
+  const addVersion = () => {
+    const stamp = Date.now().toString();
+    const newVersion = {
+      id: stamp + '-v',
+      label: `Version ${versions.length + 1}`,
+      bpm: 120,
+      capo: 0,
+      key: '',
+      structure: [{
+        id: stamp + '-s',
+        section: 'Intro',
+        cols: 4,
+        rows: 1,
+        rhythm: [],
+        cells: Array.from({ length: 4 }, (_, i) => ({ id: `${stamp}-${i}`, split: false, chord: '', top: '', bottom: '' })),
+      }],
+      images: [],
+      notes: '',
+      chordThumbnails: [],
+    };
+    onUpdateSong({ ...song, versions: [...versions, newVersion] });
+    onSelectVersion(newVersion.id);
+    startRename(newVersion);
+  };
+
+  // Duplique une version existante (accords, photos, notes, réglages) sous un nouvel id, sans jamais modifier l'originale
+  const duplicateVersion = (v) => {
+    const stamp = Date.now().toString();
+    const copy = {
+      ...v,
+      id: stamp + '-v',
+      label: `${v.label || 'Version'} (copie)`,
+      structure: (v.structure || []).map((s, si) => ({
+        ...s,
+        id: `${stamp}-s${si}`,
+        rhythm: (s.rhythm || []).map((r, ri) => ({ ...r, id: `${stamp}-s${si}-r${ri}` })),
+        cells: (s.cells || []).map((c, ci) => ({ ...c, id: `${stamp}-s${si}-c${ci}` })),
+      })),
+      images: (v.images || []).map((img, ii) => ({ ...img, id: `${stamp}-img${ii}` })),
+      chordThumbnails: (v.chordThumbnails || []).map((t, ti) => ({ ...t, id: `${stamp}-thumb${ti}` })),
+    };
+    onUpdateSong({ ...song, versions: [...versions, copy] });
+    onSelectVersion(copy.id);
+  };
+
+  const deleteVersion = (v) => {
+    if (versions.length <= 1) return; // toujours garder au moins une version
+    if (!window.confirm(`Supprimer la version « ${v.label || 'Sans nom'} » ? Cette action est définitive.`)) return;
+    const remaining = versions.filter(x => x.id !== v.id);
+    onUpdateSong({ ...song, versions: remaining });
+    if (activeVersionId === v.id) onSelectVersion(remaining[0]?.id);
+  };
+
+  return (
+    <div className="flex items-end gap-1 px-3 pt-2 bg-gray-850 border-b border-gray-700 overflow-x-auto flex-shrink-0">
+      {versions.map(v => {
+        const isActive = v.id === activeVersionId;
+        const isEditing = editingId === v.id;
+        return (
+          <div
+            key={v.id}
+            onClick={() => !isEditing && onSelectVersion(v.id)}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-t-lg text-xs font-semibold cursor-pointer transition flex-shrink-0 border border-b-0 ${
+              isActive ? 'bg-gray-900 text-amber-400 border-gray-700' : 'bg-gray-800 text-gray-400 hover:text-gray-200 border-transparent'
+            }`}
+          >
+            {isEditing ? (
+              <input
+                ref={inputRef}
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitRename();
+                  if (e.key === 'Escape') setEditingId(null);
+                }}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-gray-700 border border-amber-500 rounded px-1 py-0.5 text-xs w-24 focus:outline-none"
+              />
+            ) : (
+              <span className="truncate max-w-[120px]">{v.label || 'Sans nom'}</span>
+            )}
+            {isActive && !isEditing && (
+              <span className="flex items-center gap-0.5 flex-shrink-0">
+                <button
+                  onClick={(e) => { e.stopPropagation(); startRename(v); }}
+                  className="p-0.5 hover:bg-gray-700 rounded"
+                  title="Renommer cette version"
+                >
+                  <Edit2 className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); duplicateVersion(v); }}
+                  className="p-0.5 hover:bg-gray-700 rounded text-[10px] leading-none"
+                  title="Dupliquer cette version"
+                >
+                  ⧉
+                </button>
+                {versions.length > 1 && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deleteVersion(v); }}
+                    className="p-0.5 hover:bg-red-900 rounded text-red-400"
+                    title="Supprimer cette version"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </span>
+            )}
+          </div>
+        );
+      })}
+      <button
+        onClick={addVersion}
+        className="flex-shrink-0 px-3 py-1.5 rounded-t-lg text-sm font-bold text-gray-400 hover:text-amber-400 hover:bg-gray-800 transition"
+        title="Ajouter une nouvelle version du morceau"
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
 function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVersion, onUpdateSong, classificationOptions = [], onAddClassificationOption, onRemoveClassificationOption, practiceSessions = [], onLogPracticeSession, weeklyGoalMinutes = 120, onUpdateWeeklyGoal, sessionInfo = null, onSessionNext, onSessionEnd }) {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
@@ -6698,6 +6851,15 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
 
         </div>
       </div>
+
+      {!focusMode && (
+        <VersionTabsBar
+          song={song}
+          activeVersionId={version.id}
+          onSelectVersion={onSelectVersion}
+          onUpdateSong={onUpdateSong}
+        />
+      )}
 
       {performance && (
         <PerformanceMode song={song} version={version} onClose={() => setPerformance(false)} />
