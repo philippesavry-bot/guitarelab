@@ -180,20 +180,48 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
     window.storage.set(YT_SIZE_KEY, JSON.stringify(DEFAULT_PLAYER_SIZE), false).catch(() => {});
   };
 
-  // --- Mode plein écran : masque le reste de l'appli derrière un fond noir, pour une capture d'écran propre ---
+  // --- Mode plein écran "propre" : n'affiche QUE la vidéo, aucun bouton de l'app par-dessus (idéal pour capture d'écran) ---
+  // Priorité à l'API Fullscreen native du navigateur (rien d'autre à l'écran que la vidéo) ;
+  // repli sur un simple fond noir si l'API est indisponible (ex. certains contextes PWA installés).
+  const videoWrapperRef = useRef(null);
+  const [nativeFullscreen, setNativeFullscreen] = useState(false);
   const [focusBackdrop, setFocusBackdrop] = useState(false);
-  const toggleFocusBackdrop = () => {
-    setFocusBackdrop(f => {
-      const next = !f;
-      if (next) {
-        setPlayerSize({
-          width: Math.min(window.innerWidth - 32, 820),
-          height: Math.min(window.innerHeight - 32, 760),
-        });
-      }
-      return next;
-    });
+
+  const enterCleanFullscreen = async () => {
+    const el = videoWrapperRef.current;
+    const request = el && (el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen);
+    if (!request) {
+      setFocusBackdrop(true);
+      setPlayerSize({ width: Math.min(window.innerWidth - 32, 820), height: Math.min(window.innerHeight - 32, 760) });
+      glLog('📸 Plein écran natif indisponible — repli sur le mode fond noir', 'warning');
+      return;
+    }
+    try {
+      await request.call(el);
+    } catch (err) {
+      setFocusBackdrop(true);
+      glLog('📸 Échec du plein écran natif — repli sur le mode fond noir : ' + (err?.message || err), 'warning');
+    }
   };
+
+  const exitCleanFullscreen = () => {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+    if (document.fullscreenElement || document.webkitFullscreenElement) exit?.call(document);
+    setFocusBackdrop(false);
+  };
+
+  useEffect(() => {
+    const onFsChange = () => {
+      const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+      setNativeFullscreen(!!fsEl && fsEl === videoWrapperRef.current);
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange);
+    };
+  }, []);
 
   // --- Capture d'accords depuis une capture d'écran de la vidéo (cadre verrouillable) ---
   const [captureOpen, setCaptureOpen] = useState(false);
@@ -319,17 +347,43 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
     if (capFrameLocked) doCapture(e.target, capNormSel);
   };
 
-  const handleCapturePasteEvent = (e) => {
-    e.preventDefault();
+  // Extrait un fichier image d'un événement paste, quelle que soit sa provenance (items ou files)
+  const extractImageFromClipboardEvent = (e) => {
     const items = Array.from(e.clipboardData?.items || []);
     const files = Array.from(e.clipboardData?.files || []);
     glLog(`📸 Capture: événement paste reçu — items: [${items.map(i => i.type).join(', ') || 'aucun'}], files: [${files.map(f => f.type).join(', ') || 'aucun'}]`, 'info');
-    const item = items.find(i => i.type.startsWith('image/'));
-    if (item) { loadCaptureFile(item.getAsFile(), capFrameLocked); return; }
-    const file = files.find(f => f.type.startsWith('image/'));
-    if (file) { loadCaptureFile(file, capFrameLocked); return; }
-    showCapMessage('Aucune image détectée dans le collage — essaie « 📁 Importer »');
+    const item = items.find(i => i.type?.startsWith('image/'));
+    if (item) return item.getAsFile();
+    return files.find(f => f.type?.startsWith('image/')) || null;
   };
+
+  const handleCapturePasteEvent = (e) => {
+    const file = extractImageFromClipboardEvent(e);
+    if (!file) {
+      showCapMessage('Aucune image détectée dans le collage — essaie « 📁 Importer »');
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    loadCaptureFile(file, capFrameLocked);
+  };
+
+  // ⚠️ Important : tant que ce panneau de capture est ouvert, on intercepte le collage en PHASE DE CAPTURE
+  // au niveau du document, avant qu'il n'atteigne l'écouteur de la galerie principale (CenterPanel).
+  // Sans ça, coller une image ici l'envoyait directement dans la galerie du morceau au lieu d'apparaître
+  // dans l'aperçu de cadrage ci-dessous — c'est ce qui rendait le cadre de sélection invisible.
+  useEffect(() => {
+    if (!captureOpen) return;
+    const onGlobalCapturePaste = (e) => {
+      const file = extractImageFromClipboardEvent(e);
+      if (!file) return; // pas d'image : on laisse le collage suivre son cours normal ailleurs dans l'app
+      e.preventDefault();
+      e.stopPropagation();
+      loadCaptureFile(file, capFrameLocked);
+    };
+    document.addEventListener('paste', onGlobalCapturePaste, true);
+    return () => document.removeEventListener('paste', onGlobalCapturePaste, true);
+  }, [captureOpen, capFrameLocked]);
 
   // Bouton "Coller" explicite : lit directement le presse-papiers.
   // ⚠️ Sur iPad, en app installée depuis l'écran d'accueil, iOS bloque parfois cette lecture directe :
@@ -450,11 +504,11 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
         <span className="text-xs font-semibold text-gray-300 flex items-center gap-1">▶️ Vidéo</span>
         <div className="flex items-center gap-1">
           <button
-            onClick={toggleFocusBackdrop}
-            className={`text-[10px] px-1.5 py-0.5 rounded transition ${focusBackdrop ? 'bg-sky-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
-            title="Masquer le reste de l'écran pour une capture bien nette"
+            onClick={enterCleanFullscreen}
+            className={`text-[10px] px-1.5 py-0.5 rounded transition ${(nativeFullscreen || focusBackdrop) ? 'bg-sky-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
+            title="Plein écran SANS aucun bouton par-dessus — pour une capture d'écran bien nette"
           >
-            🖥️ Plein écran
+            ⛶ Plein écran net
           </button>
           <button
             onClick={() => {
@@ -495,7 +549,8 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
         {captureOpen && (
           <div className="p-3 bg-gray-850 border-b border-gray-700 space-y-2">
             <p className="text-[10px] text-gray-400 leading-relaxed">
-              1. Tape « 🖥️ Plein écran » puis mets la vidéo en pause sur l'accord voulu &nbsp;•&nbsp; 2. Capture d'écran iPad &nbsp;•&nbsp; 3. Récupère l'image ci-dessous
+              1. Tape « ⛶ Plein écran net » puis mets la vidéo en pause sur l'accord voulu &nbsp;•&nbsp;
+              2. Capture d'écran iPad &nbsp;•&nbsp; 3. Colle-la ci-dessous (n'importe où sur cet écran)
             </p>
 
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -503,36 +558,33 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
                 📁 Importer la capture
                 <input ref={capFileInputRef} type="file" accept="image/*" onChange={handleCaptureFileInput} className="hidden" />
               </label>
+              <button
+                onClick={captureFromClipboardButton}
+                className="px-2 py-1 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded text-[10px] font-semibold"
+              >
+                📋 Coller depuis le presse-papiers
+              </button>
               {capHasImage && (
                 <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded ${capFrameLocked ? 'bg-purple-500/20 text-purple-300' : 'bg-amber-500/20 text-amber-300'}`}>
-                  {capFrameLocked ? '🔒 verrouillé — importer = capture auto' : '🔓 ajuste le cadre'}
+                  {capFrameLocked ? '🔒 verrouillé — coller/importer = capture auto' : '🔓 ajuste le cadre'}
                 </span>
               )}
             </div>
-            <p className="text-[9px] text-gray-500">↑ Méthode fiable : ouvre ta pellicule et choisis la capture d'écran que tu viens de prendre.</p>
 
-            <details className="text-[10px] text-gray-500">
-              <summary className="cursor-pointer text-gray-400 select-none">Ou essayer le collage direct (plus rapide, pas toujours dispo)</summary>
-              <div className="mt-1.5 space-y-1.5">
-                <button
-                  onClick={captureFromClipboardButton}
-                  className="px-2 py-1 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded text-[10px] font-semibold"
-                >
-                  📋 Coller depuis le presse-papiers
-                </button>
-                {/* Zone de collage tactile — contentEditable pour que le geste natif "Coller" d'iOS apparaisse */}
-                <div
-                  contentEditable
-                  suppressContentEditableWarning
-                  inputMode="none"
-                  onPaste={handleCapturePasteEvent}
-                  onInput={(e) => { e.currentTarget.textContent = ''; }}
-                  className="w-full px-2 py-3 bg-gray-900 border border-dashed border-gray-600 rounded text-center text-[10px] text-gray-500 focus:outline-none focus:border-purple-500"
-                >
-                  Appuie ici puis « Coller »
-                </div>
-              </div>
-            </details>
+            {/* Zone de collage tactile — contentEditable pour que le geste natif "Coller" d'iOS apparaisse.
+                Le collage fonctionne en réalité n'importe où sur cet écran tant que ce panneau est ouvert
+                (voir l'écouteur global plus haut) : cette zone sert surtout à faire apparaître le bouton
+                natif "Coller" d'iOS au appui long. */}
+            <div
+              contentEditable
+              suppressContentEditableWarning
+              inputMode="none"
+              onPaste={handleCapturePasteEvent}
+              onInput={(e) => { e.currentTarget.textContent = ''; }}
+              className="w-full px-2 py-3 bg-gray-900 border border-dashed border-gray-600 rounded text-center text-[10px] text-gray-500 focus:outline-none focus:border-purple-500"
+            >
+              Appuie ici puis « Coller », ou colle directement où tu veux sur cet écran
+            </div>
 
             {capHasImage && (
               <div ref={capStageRef} className="relative w-full bg-black rounded border border-gray-600 overflow-hidden">
@@ -691,9 +743,12 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
         )}
       </div>
 
-      <div className="flex-shrink-0">
+      <div
+        ref={videoWrapperRef}
+        className={nativeFullscreen ? 'fixed inset-0 z-[9999] bg-black flex items-center justify-center' : 'flex-shrink-0'}
+      >
         {apiFailed ? (
-          <div className="relative w-full bg-black" style={{ paddingTop: '56.25%' }}>
+          <div className={nativeFullscreen ? 'relative w-full h-full' : 'relative w-full bg-black'} style={nativeFullscreen ? undefined : { paddingTop: '56.25%' }}>
             <iframe
               key={videoId}
               src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0&playsinline=1&modestbranding=1&start=${resumeChoice === 'resume' ? firstBookmark : 0}`}
@@ -706,9 +761,18 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
             />
           </div>
         ) : (
-          <div className="relative w-full bg-black" style={{ paddingTop: '56.25%' }}>
+          <div className={nativeFullscreen ? 'relative w-full h-full' : 'relative w-full bg-black'} style={nativeFullscreen ? undefined : { paddingTop: '56.25%' }}>
             <div ref={containerRef} className="absolute inset-0 w-full h-full" />
           </div>
+        )}
+        {nativeFullscreen && (
+          <button
+            onClick={exitCleanFullscreen}
+            className="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center text-base"
+            title="Quitter le plein écran"
+          >
+            ✕
+          </button>
         )}
       </div>
     </div>
@@ -6080,6 +6144,159 @@ function CapoPicker({ capo, onChange }) {
   );
 }
 
+// Onglets de version : plusieurs versions d'un même morceau (accords/photos/notes/bpm/capo/clé propres à chacune),
+// affichés sous l'en-tête commun (titre, artiste, favoris, chrono, journal...). Nommage inline, ajout via l'onglet "+",
+// duplication et suppression disponibles sur l'onglet actif. N'affecte jamais les champs communs du morceau (song.*).
+function VersionTabsBar({ song, activeVersionId, onSelectVersion, onUpdateSong }) {
+  const versions = song.versions || [];
+  const [editingId, setEditingId] = useState(null);
+  const [editValue, setEditValue] = useState('');
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (editingId && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editingId]);
+
+  const startRename = (v) => {
+    setEditingId(v.id);
+    setEditValue(v.label || '');
+  };
+
+  const commitRename = () => {
+    const clean = editValue.trim();
+    if (editingId && clean) {
+      onUpdateSong({ ...song, versions: versions.map(v => (v.id === editingId ? { ...v, label: clean } : v)) });
+    }
+    setEditingId(null);
+  };
+
+  // Nouvelle version vierge (même structure de départ qu'à la création d'un morceau) : n'affecte jamais les autres versions
+  const addVersion = () => {
+    const stamp = Date.now().toString();
+    const newVersion = {
+      id: stamp + '-v',
+      label: `Version ${versions.length + 1}`,
+      bpm: 120,
+      capo: 0,
+      key: '',
+      structure: [{
+        id: stamp + '-s',
+        section: 'Intro',
+        cols: 4,
+        rows: 1,
+        rhythm: [],
+        cells: Array.from({ length: 4 }, (_, i) => ({ id: `${stamp}-${i}`, split: false, chord: '', top: '', bottom: '' })),
+      }],
+      images: [],
+      notes: '',
+      chordThumbnails: [],
+    };
+    onUpdateSong({ ...song, versions: [...versions, newVersion] });
+    onSelectVersion(newVersion.id);
+    startRename(newVersion);
+  };
+
+  // Duplique une version existante (accords, photos, notes, réglages) sous un nouvel id, sans jamais modifier l'originale
+  const duplicateVersion = (v) => {
+    const stamp = Date.now().toString();
+    const copy = {
+      ...v,
+      id: stamp + '-v',
+      label: `${v.label || 'Version'} (copie)`,
+      structure: (v.structure || []).map((s, si) => ({
+        ...s,
+        id: `${stamp}-s${si}`,
+        rhythm: (s.rhythm || []).map((r, ri) => ({ ...r, id: `${stamp}-s${si}-r${ri}` })),
+        cells: (s.cells || []).map((c, ci) => ({ ...c, id: `${stamp}-s${si}-c${ci}` })),
+      })),
+      images: (v.images || []).map((img, ii) => ({ ...img, id: `${stamp}-img${ii}` })),
+      chordThumbnails: (v.chordThumbnails || []).map((t, ti) => ({ ...t, id: `${stamp}-thumb${ti}` })),
+    };
+    onUpdateSong({ ...song, versions: [...versions, copy] });
+    onSelectVersion(copy.id);
+  };
+
+  const deleteVersion = (v) => {
+    if (versions.length <= 1) return; // toujours garder au moins une version
+    if (!window.confirm(`Supprimer la version « ${v.label || 'Sans nom'} » ? Cette action est définitive.`)) return;
+    const remaining = versions.filter(x => x.id !== v.id);
+    onUpdateSong({ ...song, versions: remaining });
+    if (activeVersionId === v.id) onSelectVersion(remaining[0]?.id);
+  };
+
+  return (
+    <div className="flex items-end gap-1 px-3 pt-2 bg-gray-850 border-b border-gray-700 overflow-x-auto flex-shrink-0">
+      {versions.map(v => {
+        const isActive = v.id === activeVersionId;
+        const isEditing = editingId === v.id;
+        return (
+          <div
+            key={v.id}
+            onClick={() => !isEditing && onSelectVersion(v.id)}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-t-lg text-xs font-semibold cursor-pointer transition flex-shrink-0 border border-b-0 ${
+              isActive ? 'bg-gray-900 text-amber-400 border-gray-700' : 'bg-gray-800 text-gray-400 hover:text-gray-200 border-transparent'
+            }`}
+          >
+            {isEditing ? (
+              <input
+                ref={inputRef}
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitRename();
+                  if (e.key === 'Escape') setEditingId(null);
+                }}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-gray-700 border border-amber-500 rounded px-1 py-0.5 text-xs w-24 focus:outline-none"
+              />
+            ) : (
+              <span className="truncate max-w-[120px]">{v.label || 'Sans nom'}</span>
+            )}
+            {isActive && !isEditing && (
+              <span className="flex items-center gap-0.5 flex-shrink-0">
+                <button
+                  onClick={(e) => { e.stopPropagation(); startRename(v); }}
+                  className="p-0.5 hover:bg-gray-700 rounded"
+                  title="Renommer cette version"
+                >
+                  <Edit2 className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); duplicateVersion(v); }}
+                  className="p-0.5 hover:bg-gray-700 rounded text-[10px] leading-none"
+                  title="Dupliquer cette version"
+                >
+                  ⧉
+                </button>
+                {versions.length > 1 && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deleteVersion(v); }}
+                    className="p-0.5 hover:bg-red-900 rounded text-red-400"
+                    title="Supprimer cette version"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </span>
+            )}
+          </div>
+        );
+      })}
+      <button
+        onClick={addVersion}
+        className="flex-shrink-0 px-3 py-1.5 rounded-t-lg text-sm font-bold text-gray-400 hover:text-amber-400 hover:bg-gray-800 transition"
+        title="Ajouter une nouvelle version du morceau"
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
 function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVersion, onUpdateSong, classificationOptions = [], onAddClassificationOption, onRemoveClassificationOption, practiceSessions = [], onLogPracticeSession, weeklyGoalMinutes = 120, onUpdateWeeklyGoal, sessionInfo = null, onSessionNext, onSessionEnd }) {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
@@ -6242,11 +6459,16 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
     }
   }, [focusMode]);
 
-  // En mode Focus, forcer le collapse des panneaux
+  // En mode Focus, forcer le collapse des panneaux, puis restaurer leur état précédent en sortant
+  const panelStateBeforeFocusRef = useRef({ left: leftCollapsed, right: rightCollapsed });
   useEffect(() => {
     if (focusMode) {
+      panelStateBeforeFocusRef.current = { left: leftCollapsed, right: rightCollapsed };
       setLeftCollapsed(true);
       setRightCollapsed(true);
+    } else {
+      setLeftCollapsed(panelStateBeforeFocusRef.current.left);
+      setRightCollapsed(panelStateBeforeFocusRef.current.right);
     }
   }, [focusMode]);
 
@@ -6268,6 +6490,13 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="bg-gradient-to-r from-gray-800 to-gray-750 border-b border-gray-700 p-3 flex-shrink-0">
+        <div className="text-center mb-2 px-2">
+          <h2 className="text-base font-bold flex items-center justify-center gap-1.5 flex-wrap">
+            <DifficultyPick difficulty={song.difficulty} size={16} onChange={(d) => onUpdateSong({ ...song, difficulty: d })} />
+            <span className="break-words">{song.title}</span>
+          </h2>
+          <p className="text-xs text-gray-400 break-words">{song.artist}</p>
+        </div>
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <button
@@ -6307,14 +6536,6 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
                 </button>
               </>
             )}
-          </div>
-
-          <div className="text-center flex-1 min-w-0">
-            <h2 className="text-base font-bold truncate flex items-center justify-center gap-1.5">
-              <DifficultyPick difficulty={song.difficulty} size={16} onChange={(d) => onUpdateSong({ ...song, difficulty: d })} />
-              <span className="truncate">{song.title}</span>
-            </h2>
-            <p className="text-xs text-gray-400 truncate">{song.artist}</p>
           </div>
 
           <div className={`flex items-center gap-2 ${focusMode ? 'bg-transparent border-0 p-0' : 'bg-gray-900 rounded p-2 border border-gray-700'} text-xs`}>
@@ -6453,6 +6674,15 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
 
         </div>
       </div>
+
+      {!focusMode && (
+        <VersionTabsBar
+          song={song}
+          activeVersionId={version.id}
+          onSelectVersion={onSelectVersion}
+          onUpdateSong={onUpdateSong}
+        />
+      )}
 
       {performance && (
         <PerformanceMode song={song} version={version} onClose={() => setPerformance(false)} />
