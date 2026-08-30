@@ -1,5 +1,5 @@
 // Suggestions de noms de section (structure du morceau)
-const SECTION_NAME_SUGGESTIONS = ['Intro', 'Couplet', 'Refrain', 'Pont', 'Outro'];
+const SECTION_NAME_SUGGESTIONS = ['Intro', 'Couplet', 'Pré-refrain', 'Refrain', 'Pont', 'Interlude', 'Solo', 'Outro', 'Coda', 'Finale'];
 
 // Couleurs associées aux types de section usuels, pour les distinguer visuellement d'un coup d'œil
 const SECTION_COLOR_MAP = {
@@ -4988,7 +4988,12 @@ function GuitarApp() {
       {roadmapOpen && (
         <RoadmapModal
           songs={songs}
-          onSelectSong={setSelectedSongId}
+          onSelectSong={(id) => {
+            setSelectedSongId(id);
+            const song = songs.find(s => s.id === id);
+            setSelectedVersionId(song?.versions[0]?.id);
+            setAppMode('editor');
+          }}
           onClose={() => setRoadmapOpen(false)}
         />
       )}
@@ -4997,67 +5002,185 @@ function GuitarApp() {
 }
 
 // Version modale/plein-écran de la roadmap, pour une meilleure visibilité sur petit écran
+const ROADMAP_ORDER_KEY = 'guitar-lab:roadmap-order';
+const ROADMAP_OVERRIDES_KEY = 'guitar-lab:roadmap-overrides';
+const ROADMAP_SECTION_META = {
+  progress: { label: '📌 En cours', titleColor: 'text-amber-400' },
+  mastered: { label: '✓ Maîtrisés', titleColor: 'text-green-400' },
+  challenges: { label: '🎯 Prochains défis', titleColor: 'text-gray-400' },
+};
+
+// Dégradé continu rouge → ambre → vert selon le % de progression (0 à 100), utilisé pour la bordure de chaque ligne
+function progressToRoadmapColor(pct) {
+  const p = Math.max(0, Math.min(100, pct || 0));
+  const [lo, hi] = p >= 50
+    ? [{ p: 50, c: [245, 158, 11] }, { p: 100, c: [34, 197, 94] }]
+    : [{ p: 0, c: [239, 68, 68] }, { p: 50, c: [245, 158, 11] }];
+  const t = hi.p === lo.p ? 0 : (p - lo.p) / (hi.p - lo.p);
+  const rgb = lo.c.map((v, i) => Math.round(v + (hi.c[i] - v) * t));
+  return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+}
+
 function RoadmapModal({ songs, onSelectSong, onClose }) {
   const now = new Date();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-  const inProgress = songs.filter(s => {
-    if (!s.lastPracticedAt) return false;
-    const lastDate = new Date(s.lastPracticedAt);
-    const isRecent = lastDate >= sevenDaysAgo;
-    const notMastered = getDifficulty(s) !== 'hard';
-    return isRecent && notMastered;
-  });
+  // Déplacements manuels vers une autre catégorie (prioritaires sur le classement automatique) et ordre au sein
+  // de chaque section, mémorisés d'une session à l'autre. Tant que l'utilisateur n'interagit pas, rien ne change
+  // par rapport au comportement d'origine (100% automatique).
+  const [overrides, setOverrides] = useState({});
+  const [order, setOrder] = useState({ progress: [], mastered: [], challenges: [] });
 
-  const mastered = songs.filter(s => {
-    if (!s.lastPracticedAt) return false;
+  useEffect(() => {
+    (async () => {
+      try {
+        const o = await window.storage.get(ROADMAP_OVERRIDES_KEY, false);
+        if (o?.value) setOverrides(JSON.parse(o.value));
+      } catch (err) { /* pas de déplacement enregistré */ }
+      try {
+        const r = await window.storage.get(ROADMAP_ORDER_KEY, false);
+        if (r?.value) setOrder(JSON.parse(r.value));
+      } catch (err) { /* pas d'ordre enregistré */ }
+    })();
+  }, []);
+
+  const saveOverrides = (next) => {
+    setOverrides(next);
+    window.storage.set(ROADMAP_OVERRIDES_KEY, JSON.stringify(next), false).catch(() => {});
+  };
+  const saveOrder = (next) => {
+    setOrder(next);
+    window.storage.set(ROADMAP_ORDER_KEY, JSON.stringify(next), false).catch(() => {});
+  };
+
+  // Catégorie automatique : reprend la logique d'origine, mais attribue une seule catégorie par morceau
+  // (auparavant un même morceau pouvait apparaître à la fois dans "En cours" et "Maîtrisés")
+  const computeAutoSection = (s) => {
+    if (!s.lastPracticedAt) return 'challenges';
     const diff = getDifficulty(s);
     const sessionCount = (s.practiceSessions || []).length;
-    return diff === 'hard' || sessionCount >= 5;
+    if (diff === 'hard' || sessionCount >= 5) return 'mastered';
+    const isRecent = new Date(s.lastPracticedAt) >= sevenDaysAgo;
+    if (isRecent) return 'progress';
+    return 'challenges';
+  };
+
+  const bySection = { progress: [], mastered: [], challenges: [] };
+  songs.forEach(s => {
+    const section = overrides[s.id] && bySection[overrides[s.id]] ? overrides[s.id] : computeAutoSection(s);
+    bySection[section].push(s);
   });
 
-  const inProgressIds = new Set(inProgress.map(s => s.id));
-  const masteredIds = new Set(mastered.map(s => s.id));
-  const nextChallenges = songs
-    .filter(s => !inProgressIds.has(s.id) && !masteredIds.has(s.id))
-    .sort((a, b) => {
+  // Applique l'ordre manuel mémorisé ; les morceaux jamais déplacés gardent l'ordre naturel, ajoutés à la fin
+  const applyOrder = (section, list) => {
+    const savedIds = order[section] || [];
+    const byId = new Map(list.map(s => [s.id, s]));
+    const ordered = savedIds.map(id => byId.get(id)).filter(Boolean);
+    const remaining = list.filter(s => !savedIds.includes(s.id));
+    if (section === 'challenges' && savedIds.length === 0) {
       const diffOrder = { easy: 0, medium: 1, hard: 2 };
-      const da = diffOrder[getDifficulty(a)] || 0;
-      const db = diffOrder[getDifficulty(b)] || 0;
-      return da - db;
+      remaining.sort((a, b) => (diffOrder[getDifficulty(a)] || 0) - (diffOrder[getDifficulty(b)] || 0));
+    }
+    return [...ordered, ...remaining];
+  };
+
+  const listsBySection = {
+    progress: applyOrder('progress', bySection.progress),
+    mastered: applyOrder('mastered', bySection.mastered),
+    challenges: applyOrder('challenges', bySection.challenges),
+  };
+
+  const moveInSection = (section, songId, dir) => {
+    const ids = listsBySection[section].map(s => s.id);
+    const i = ids.indexOf(songId);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    saveOrder({ ...order, [section]: ids });
+  };
+
+  const moveToSection = (songId, fromSection, toSection) => {
+    if (fromSection === toSection) return;
+    saveOverrides({ ...overrides, [songId]: toSection });
+    saveOrder({
+      ...order,
+      [fromSection]: (order[fromSection] || []).filter(id => id !== songId),
+      [toSection]: [songId, ...(order[toSection] || []).filter(id => id !== songId)],
     });
+  };
+
+  const resetOverride = (songId) => {
+    const next = { ...overrides };
+    delete next[songId];
+    saveOverrides(next);
+  };
 
   const diffColor = (diff) => {
     const colors = { easy: 'text-green-400', medium: 'text-amber-400', hard: 'text-red-400' };
     return colors[diff] || 'text-gray-400';
   };
 
-  const SongRow = ({ song, section }) => (
-    <button
-      onClick={() => { onSelectSong?.(song.id); onClose?.(); }}
-      className="w-full text-left p-3 bg-gray-750 hover:bg-gray-700 rounded transition border-l-4 flex items-center justify-between"
-      style={{
-        borderColor: section === 'progress' ? '#b45309' : section === 'mastered' ? '#22c55e' : '#9ca3af'
-      }}
-    >
-      <div>
-        <p className="font-semibold text-sm">{song.title}</p>
-        <p className="text-xs text-gray-400">{song.artist}</p>
+  const SongRow = ({ song, section }) => {
+    const ids = listsBySection[section].map(s => s.id);
+    const isFirst = ids[0] === song.id;
+    const isLast = ids[ids.length - 1] === song.id;
+    const isOverridden = !!overrides[song.id];
+    return (
+      <div
+        className="w-full p-3 bg-gray-750 hover:bg-gray-700 rounded transition border-l-4 flex items-center gap-2"
+        style={{ borderColor: progressToRoadmapColor(song.progress) }}
+      >
+        <button onClick={() => { onSelectSong?.(song.id); onClose?.(); }} className="flex-1 min-w-0 text-left">
+          <p className="font-semibold text-sm truncate flex items-center gap-1.5">
+            <span className="truncate">{song.title}</span>
+            {section === 'challenges' && (
+              <span className={`text-[10px] font-bold flex-shrink-0 ${diffColor(getDifficulty(song))}`}>
+                {getDifficulty(song)[0].toUpperCase()}
+              </span>
+            )}
+          </p>
+          <p className="text-xs text-gray-400 truncate">{song.artist} • {song.progress || 0}% maîtrisé</p>
+        </button>
+
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          <button onClick={() => moveInSection(section, song.id, -1)} disabled={isFirst} className="p-1.5 hover:bg-gray-600 rounded disabled:opacity-20" title="Monter dans la liste">
+            <ArrowUp className="w-3.5 h-3.5" />
+          </button>
+          <button onClick={() => moveInSection(section, song.id, 1)} disabled={isLast} className="p-1.5 hover:bg-gray-600 rounded disabled:opacity-20" title="Descendre dans la liste">
+            <ArrowDown className="w-3.5 h-3.5" />
+          </button>
+          <select
+            value=""
+            onChange={(e) => { if (e.target.value) moveToSection(song.id, section, e.target.value); e.target.value = ''; }}
+            className="bg-gray-800 border border-gray-600 rounded text-[10px] px-1 py-1.5 focus:outline-none max-w-[92px]"
+            title="Déplacer vers une autre catégorie"
+          >
+            <option value="">↔ Déplacer</option>
+            {Object.entries(ROADMAP_SECTION_META).filter(([key]) => key !== section).map(([key, meta]) => (
+              <option key={key} value={key}>{meta.label}</option>
+            ))}
+          </select>
+          {isOverridden && (
+            <button onClick={() => resetOverride(song.id)} className="p-1.5 hover:bg-gray-600 rounded text-gray-400" title="Revenir au classement automatique">
+              ↺
+            </button>
+          )}
+        </div>
       </div>
-      {section === 'challenges' && (
-        <span className={`text-xs font-bold ${diffColor(getDifficulty(song))}`}>
-          {getDifficulty(song)[0].toUpperCase()}
-        </span>
-      )}
-    </button>
-  );
+    );
+  };
+
+  const { progress: inProgress, mastered, challenges: nextChallenges } = listsBySection;
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div className="bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-gray-700 shadow-2xl">
-        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-center">
-          <h2 className="font-bold text-amber-400 text-lg">🗺️ Feuille de route</h2>
-          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded">
+        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-start gap-2">
+          <div>
+            <h2 className="font-bold text-amber-400 text-lg">🗺️ Feuille de route</h2>
+            <p className="text-[11px] text-gray-500 mt-0.5">↑↓ réordonne • le menu déplace vers une autre catégorie • ↺ revient à l'automatique</p>
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded flex-shrink-0">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -5065,7 +5188,7 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
         <div className="p-4 space-y-4">
           {inProgress.length > 0 && (
             <section>
-              <h3 className="font-semibold text-amber-400 mb-2">📌 En cours</h3>
+              <h3 className={`font-semibold mb-2 ${ROADMAP_SECTION_META.progress.titleColor}`}>{ROADMAP_SECTION_META.progress.label}</h3>
               <div className="space-y-2">
                 {inProgress.map(s => <SongRow key={s.id} song={s} section="progress" />)}
               </div>
@@ -5074,7 +5197,7 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
 
           {mastered.length > 0 && (
             <section>
-              <h3 className="font-semibold text-green-400 mb-2">✓ Maîtrisés</h3>
+              <h3 className={`font-semibold mb-2 ${ROADMAP_SECTION_META.mastered.titleColor}`}>{ROADMAP_SECTION_META.mastered.label}</h3>
               <div className="space-y-2">
                 {mastered.map(s => <SongRow key={s.id} song={s} section="mastered" />)}
               </div>
@@ -5083,7 +5206,7 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
 
           {nextChallenges.length > 0 && (
             <section>
-              <h3 className="font-semibold text-gray-400 mb-2">🎯 Prochains défis</h3>
+              <h3 className={`font-semibold mb-2 ${ROADMAP_SECTION_META.challenges.titleColor}`}>{ROADMAP_SECTION_META.challenges.label}</h3>
               <div className="space-y-2">
                 {nextChallenges.map(s => <SongRow key={s.id} song={s} section="challenges" />)}
               </div>
@@ -7094,10 +7217,6 @@ function LeftPanel({ version, updateVersion }) {
 
   return (
     <>
-      <datalist id="section-name-suggestions">
-        {SECTION_NAME_SUGGESTIONS.map(s => <option key={s} value={s} />)}
-      </datalist>
-
       <div className="bg-gray-750 border-b border-gray-700 p-3 flex-shrink-0">
         <div className="flex items-center justify-between mb-2">
           <h3 className="font-semibold text-amber-400 text-sm">📋 Structure</h3>
@@ -7222,7 +7341,7 @@ function SectionBuilder({ section, index, version, updateVersion }) {
         <select
           value={section.section}
           onChange={(e) => updateSection({ section: e.target.value })}
-          className={`w-[4.75rem] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-[11px] font-semibold focus:outline-none focus:border-amber-500 ${style.text}`}
+          className={`w-24 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-[11px] font-semibold focus:outline-none focus:border-amber-500 ${style.text}`}
         >
           {SECTION_NAME_SUGGESTIONS.map((name) => (
             <option key={name} value={name}>{name}</option>
