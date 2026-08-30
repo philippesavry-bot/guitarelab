@@ -5070,6 +5070,7 @@ function GuitarApp() {
       {roadmapOpen && (
         <RoadmapModal
           songs={songs}
+          practiceSessions={practiceSessions}
           onSelectSong={(id) => {
             setSelectedSongId(id);
             const song = songs.find(s => s.id === id);
@@ -5110,9 +5111,52 @@ function progressToRoadmapFill(pct) {
   return `rgba(${r}, ${g}, ${b}, 0.35)`;
 }
 
-function RoadmapModal({ songs, onSelectSong, onClose }) {
+// Formate une durée en secondes en texte compact ("45 min", "2h15")
+function formatDuration(totalSec) {
+  const totalMin = Math.round((totalSec || 0) / 60);
+  if (totalMin < 1) return '< 1 min';
+  if (totalMin < 60) return `${totalMin} min`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return m > 0 ? `${h}h${m.toString().padStart(2, '0')}` : `${h}h`;
+}
+
+function daysSince(dateStr) {
+  if (!dateStr) return null;
+  return Math.floor((Date.now() - new Date(dateStr).getTime()) / (24 * 60 * 60 * 1000));
+}
+
+// Petit visuel selon le style musical déclaré (reconnaissance par mots-clés simples)
+function styleIcon(style) {
+  const s = (style || '').toLowerCase();
+  if (/rock|metal|punk/.test(s)) return '🤘';
+  if (/pop/.test(s)) return '🎧';
+  if (/folk|chanson|variété|acoustique/.test(s)) return '🪕';
+  if (/blues/.test(s)) return '🎷';
+  if (/jazz|swing/.test(s)) return '🎺';
+  if (/classi/.test(s)) return '🎻';
+  if (/reggae/.test(s)) return '🌴';
+  if (/latin|salsa/.test(s)) return '💃';
+  if (/soul|motown|r&b|rnb/.test(s)) return '🎙️';
+  return null;
+}
+
+function RoadmapModal({ songs, practiceSessions = [], onSelectSong, onClose }) {
   const now = new Date();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  // Statistiques de pratique par morceau (temps total, nb de sessions, dernière session), à partir du vrai journal
+  const statsBySong = useMemo(() => {
+    const map = {};
+    (practiceSessions || []).forEach(entry => {
+      if (!map[entry.songId]) map[entry.songId] = { totalSec: 0, count: 0, lastDate: null };
+      const st = map[entry.songId];
+      st.totalSec += entry.durationSec || 0;
+      st.count += 1;
+      if (!st.lastDate || new Date(entry.date) > new Date(st.lastDate)) st.lastDate = entry.date;
+    });
+    return map;
+  }, [practiceSessions]);
 
   // Déplacements manuels vers une autre catégorie (prioritaires sur le classement automatique) et ordre au sein
   // de chaque section, mémorisés d'une session à l'autre. Tant que l'utilisateur n'interagit pas, rien ne change
@@ -5147,7 +5191,7 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
   const computeAutoSection = (s) => {
     if (!s.lastPracticedAt) return 'challenges';
     const diff = getDifficulty(s);
-    const sessionCount = (s.practiceSessions || []).length;
+    const sessionCount = statsBySong[s.id]?.count || 0;
     if (diff === 'hard' || sessionCount >= 5) return 'mastered';
     const isRecent = new Date(s.lastPracticedAt) >= sevenDaysAgo;
     if (isRecent) return 'progress';
@@ -5178,6 +5222,42 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
     mastered: applyOrder('mastered', bySection.mastered),
     challenges: applyOrder('challenges', bySection.challenges),
   };
+  const { progress: inProgress, mastered, challenges: nextChallenges } = listsBySection;
+
+  // Statistiques globales : de quoi transformer la page en vrai tableau de bord du parcours
+  const totalPracticeSec = (practiceSessions || []).reduce((sum, e) => sum + (e.durationSec || 0), 0);
+  const weekAgoTs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const weekPracticeSec = (practiceSessions || [])
+    .filter(e => new Date(e.date).getTime() >= weekAgoTs)
+    .reduce((sum, e) => sum + (e.durationSec || 0), 0);
+  const mostNeglected = songs
+    .filter(s => s.lastPracticedAt)
+    .sort((a, b) => new Date(a.lastPracticedAt) - new Date(b.lastPracticedAt))[0];
+  const neverPracticedCount = songs.filter(s => !s.lastPracticedAt).length;
+
+  // Carnet d'idées : morceaux qui donnent envie, pas encore dans la bibliothèque
+  const IDEAS_KEY = 'guitar-lab:roadmap-ideas';
+  const [ideas, setIdeas] = useState([]);
+  const [newIdea, setNewIdea] = useState('');
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await window.storage.get(IDEAS_KEY, false);
+        if (r?.value) setIdeas(JSON.parse(r.value));
+      } catch (err) { /* pas d'idée enregistrée */ }
+    })();
+  }, []);
+  const saveIdeas = (next) => {
+    setIdeas(next);
+    window.storage.set(IDEAS_KEY, JSON.stringify(next), false).catch(() => {});
+  };
+  const addIdea = () => {
+    const clean = newIdea.trim();
+    if (!clean) return;
+    saveIdeas([{ id: newId(), text: clean }, ...ideas]);
+    setNewIdea('');
+  };
+  const removeIdea = (id) => saveIdeas(ideas.filter(i => i.id !== id));
 
   const moveInSection = (section, songId, dir) => {
     const ids = listsBySection[section].map(s => s.id);
@@ -5202,11 +5282,6 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
     const next = { ...overrides };
     delete next[songId];
     saveOverrides(next);
-  };
-
-  const diffColor = (diff) => {
-    const colors = { easy: 'text-green-400', medium: 'text-amber-400', hard: 'text-red-400' };
-    return colors[diff] || 'text-gray-400';
   };
 
   const SongRow = ({ song, section }) => {
@@ -5260,6 +5335,8 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
     };
 
     const fillPct = Math.max(0, Math.min(100, song.progress || 0));
+    const stat = statsBySong[song.id];
+    const sIcon = styleIcon(song.style);
 
     return (
       <div
@@ -5293,14 +5370,19 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
 
           <button onClick={() => { onSelectSong?.(song.id); onClose?.(); }} className="flex-1 min-w-0 text-left">
             <p className="font-semibold text-sm truncate flex items-center gap-1.5">
+              <PickIcon difficulty={song.difficulty} size={13} className="flex-shrink-0" />
               <span className="truncate">{song.title}</span>
-              {section === 'challenges' && (
-                <span className={`text-[10px] font-bold flex-shrink-0 ${diffColor(getDifficulty(song))}`}>
-                  {getDifficulty(song)[0].toUpperCase()}
-                </span>
+              <span className="flex-shrink-0 text-xs" title={song.songType === 'instrumental' ? 'Instrumental' : 'Chanté'}>
+                {song.songType === 'instrumental' ? '🎸' : '🎤'}
+              </span>
+              {sIcon && (
+                <span className="flex-shrink-0 text-xs" title={song.style}>{sIcon}</span>
               )}
             </p>
-            <p className="text-xs text-gray-300 truncate">{song.artist} • {song.progress || 0}% maîtrisé</p>
+            <p className="text-xs text-gray-300 truncate">
+              {song.artist} • {song.progress || 0}% maîtrisé
+              {stat?.totalSec ? <> • ⏱️ {formatDuration(stat.totalSec)}</> : <span className="text-gray-500"> • jamais pratiqué</span>}
+            </p>
           </button>
 
           <div className="flex items-center gap-0.5 flex-shrink-0">
@@ -5332,8 +5414,6 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
     );
   };
 
-  const { progress: inProgress, mastered, challenges: nextChallenges } = listsBySection;
-
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div className="bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-gray-700 shadow-2xl">
@@ -5346,6 +5426,36 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Tableau de bord : vue d'ensemble du parcours */}
+        <div className="p-4 pb-0 grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+            <div className="text-[10px] text-gray-400">📚 Morceaux</div>
+            <div className="text-lg font-bold text-amber-400">{songs.length}</div>
+          </div>
+          <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+            <div className="text-[10px] text-gray-400">✓ Maîtrisés</div>
+            <div className="text-lg font-bold text-green-400">{mastered.length}</div>
+          </div>
+          <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+            <div className="text-[10px] text-gray-400">⏱️ Temps total</div>
+            <div className="text-lg font-bold text-sky-400">{formatDuration(totalPracticeSec)}</div>
+          </div>
+          <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+            <div className="text-[10px] text-gray-400">🔥 Cette semaine</div>
+            <div className="text-lg font-bold text-purple-400">{formatDuration(weekPracticeSec)}</div>
+          </div>
+        </div>
+
+        {mostNeglected && (
+          <button
+            onClick={() => { onSelectSong?.(mostNeglected.id); onClose?.(); }}
+            className="mx-4 mt-3 block w-[calc(100%-2rem)] text-left px-3 py-2 bg-gray-750 hover:bg-gray-700 border border-dashed border-gray-600 rounded-lg text-xs text-gray-400 transition"
+          >
+            🕰️ À ne pas oublier : <span className="text-gray-200 font-semibold">{mostNeglected.title}</span> — pas pratiqué depuis {daysSince(mostNeglected.lastPracticedAt)} jour{daysSince(mostNeglected.lastPracticedAt) > 1 ? 's' : ''}
+            {neverPracticedCount > 0 && <span className="text-gray-500"> • {neverPracticedCount} morceau{neverPracticedCount > 1 ? 'x' : ''} jamais pratiqué{neverPracticedCount > 1 ? 's' : ''}</span>}
+          </button>
+        )}
 
         <div className="p-4 space-y-4">
           {inProgress.length > 0 && (
@@ -5378,6 +5488,34 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
           {inProgress.length === 0 && mastered.length === 0 && nextChallenges.length === 0 && (
             <p className="text-center text-gray-500 py-8">Ajoute des morceaux pour voir ta feuille de route</p>
           )}
+
+          <section className="pt-2 border-t border-gray-700">
+            <h3 className="font-semibold mb-2 text-sky-400">💡 Idées de morceaux à apprendre</h3>
+            <div className="flex gap-1 mb-2">
+              <input
+                value={newIdea}
+                onChange={(e) => setNewIdea(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addIdea()}
+                placeholder="Un morceau qui te tente..."
+                className="flex-1 px-2 py-1.5 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
+              />
+              <button onClick={addIdea} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 rounded text-sm font-semibold transition">+</button>
+            </div>
+            {ideas.length === 0 ? (
+              <p className="text-xs text-gray-500 italic">Pas encore d'idée notée.</p>
+            ) : (
+              <div className="space-y-1">
+                {ideas.map(idea => (
+                  <div key={idea.id} className="flex items-center justify-between gap-2 bg-gray-750 rounded px-3 py-1.5">
+                    <span className="text-sm truncate">{idea.text}</span>
+                    <button onClick={() => removeIdea(idea.id)} className="text-gray-500 hover:text-red-400 flex-shrink-0" title="Retirer">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         </div>
       </div>
     </div>
@@ -7958,6 +8096,24 @@ function CenterPanel({ version, updateVersion }) {
   const [imgHeight, setImgHeight] = useState('md');
   const HEIGHTS = { sm: 'max-h-64', md: 'max-h-96', full: 'max-h-none' };
 
+  // Numéro de chaque image : discret, à gauche, affichable/masquable selon préférence
+  const [showImgNumbers, setShowImgNumbers] = useState(true);
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await window.storage.get('guitar-lab:gallery-show-numbers', false);
+        if (result?.value != null) setShowImgNumbers(JSON.parse(result.value));
+      } catch (err) { /* préférence par défaut : affiché */ }
+    })();
+  }, []);
+  const toggleShowImgNumbers = () => {
+    setShowImgNumbers(prev => {
+      const next = !prev;
+      window.storage.set('guitar-lab:gallery-show-numbers', JSON.stringify(next), false).catch(() => {});
+      return next;
+    });
+  };
+
   const addImages = (dataUrls) => {
     if (!dataUrls.length) return;
     const added = dataUrls.map(src => ({ id: newId(), src, x: 0, y: 0, scale: 1 }));
@@ -8074,6 +8230,14 @@ function CenterPanel({ version, updateVersion }) {
         </div>
 
         <button
+          onClick={toggleShowImgNumbers}
+          className={`px-1.5 py-1 rounded text-xs font-semibold ${showImgNumbers ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+          title={showImgNumbers ? 'Masquer le numéro des images' : 'Afficher le numéro des images'}
+        >
+          # {showImgNumbers ? 'affiché' : 'masqué'}
+        </button>
+
+        <button
           onClick={() => setIsAutoScrolling(!isAutoScrolling)}
           className={`px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 ${isAutoScrolling ? 'bg-amber-600 text-white' : 'bg-gray-700'}`}
         >
@@ -8088,33 +8252,37 @@ function CenterPanel({ version, updateVersion }) {
         <Metronome bpm={bpm} onBpmChange={(v) => { setBpm(v); updateVersion({ bpm: v }); }} />
       </div>
 
-      <div ref={galleryRef} className="flex-1 overflow-y-auto bg-gray-900 p-4 space-y-4" style={{ touchAction: 'pan-y' }} onPaste={handlePaste}>
+      <div ref={galleryRef} className="flex-1 overflow-y-auto bg-gray-900 p-4 space-y-px" style={{ touchAction: 'pan-y' }} onPaste={handlePaste}>
         {images.length > 0 ? (
           images.map((img, idx) => (
-            <div key={img.id} className="relative group" style={{ touchAction: 'pan-y' }}>
-              <img
-                src={img.src}
-                alt={`Tablature ${idx + 1}`}
-                draggable={false}
-                className={`w-full ${HEIGHTS[imgHeight]} object-contain bg-black rounded border border-gray-700 select-none`}
-                style={{ touchAction: 'pan-y' }}
-              />
-              <span className="absolute top-2 left-2 bg-black/70 text-gray-300 text-[10px] px-1.5 py-0.5 rounded">
-                {idx + 1}/{images.length}
-              </span>
-              <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition">
-                <button onClick={() => moveImage(img.id, -1)} disabled={idx === 0} className="bg-gray-800/90 hover:bg-gray-700 disabled:opacity-30 rounded-full p-2" title="Monter">
-                  <ArrowUp className="w-4 h-4" />
-                </button>
-                <button onClick={() => moveImage(img.id, 1)} disabled={idx === images.length - 1} className="bg-gray-800/90 hover:bg-gray-700 disabled:opacity-30 rounded-full p-2" title="Descendre">
-                  <ArrowDown className="w-4 h-4" />
-                </button>
-                <button onClick={() => setEditingImageId(img.id)} className="bg-amber-700 hover:bg-amber-600 rounded-full p-2" title="Éditer cette image">
-                  <Edit2 className="w-4 h-4" />
-                </button>
-                <button onClick={() => deleteImage(img.id)} className="bg-red-900 hover:bg-red-800 rounded-full p-2" title="Supprimer">
-                  <Trash2 className="w-4 h-4" />
-                </button>
+            <div key={img.id} className="flex items-start gap-1.5">
+              {showImgNumbers && (
+                <span className="w-4 flex-shrink-0 text-right text-[9px] leading-none text-gray-600 pt-1.5 select-none">
+                  {idx + 1}
+                </span>
+              )}
+              <div className="relative group flex-1 min-w-0" style={{ touchAction: 'pan-y' }}>
+                <img
+                  src={img.src}
+                  alt={`Tablature ${idx + 1}`}
+                  draggable={false}
+                  className={`w-full ${HEIGHTS[imgHeight]} object-contain bg-black rounded border border-gray-700 select-none`}
+                  style={{ touchAction: 'pan-y' }}
+                />
+                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition">
+                  <button onClick={() => moveImage(img.id, -1)} disabled={idx === 0} className="bg-gray-800/90 hover:bg-gray-700 disabled:opacity-30 rounded-full p-2" title="Monter">
+                    <ArrowUp className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => moveImage(img.id, 1)} disabled={idx === images.length - 1} className="bg-gray-800/90 hover:bg-gray-700 disabled:opacity-30 rounded-full p-2" title="Descendre">
+                    <ArrowDown className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => setEditingImageId(img.id)} className="bg-amber-700 hover:bg-amber-600 rounded-full p-2" title="Éditer cette image">
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => deleteImage(img.id)} className="bg-red-900 hover:bg-red-800 rounded-full p-2" title="Supprimer">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           ))
