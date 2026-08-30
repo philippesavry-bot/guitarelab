@@ -1,5 +1,5 @@
 // Suggestions de noms de section (structure du morceau)
-const SECTION_NAME_SUGGESTIONS = ['Intro', 'Couplet', 'Refrain', 'Pont', 'Outro'];
+const SECTION_NAME_SUGGESTIONS = ['Intro', 'Couplet', 'Pré-refrain', 'Refrain', 'Pont', 'Interlude', 'Solo', 'Outro', 'Coda', 'Finale'];
 
 // Couleurs associées aux types de section usuels, pour les distinguer visuellement d'un coup d'œil
 const SECTION_COLOR_MAP = {
@@ -116,6 +116,7 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
   const firstBookmark = bookmarks.length > 0 ? bookmarks[0].seconds : 0;
   const [resumeChoice, setResumeChoice] = useState(bookmarks.length > 0 ? null : 'start');
   const [apiReady, setApiReady] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [apiFailed, setApiFailed] = useState(false);
   const [newBookmarkMode, setNewBookmarkMode] = useState(false); // true = en train de créer un nouveau
   const [bookmarkName, setBookmarkName] = useState('');
@@ -253,6 +254,7 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
     setResumeChoice(bookmarks.length > 0 ? null : 'start');
     setApiReady(false);
     setApiFailed(false);
+    setIsPlaying(false);
     setNewBookmarkMode(false);
     setCaptureOpen(false);
     resetCapture();
@@ -267,8 +269,17 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
         playerRef.current = new YT.Player(containerRef.current, {
           videoId,
           host: 'https://www.youtube-nocookie.com',
-          playerVars: { rel: 0, playsinline: 1, modestbranding: 1, start: resumeChoice === 'resume' ? firstBookmark : 0 },
-          events: { onReady: () => !cancelled && setApiReady(true) },
+          playerVars: {
+            rel: 0, playsinline: 1, modestbranding: 1, controls: 0, iv_load_policy: 3,
+            start: resumeChoice === 'resume' ? firstBookmark : 0,
+          },
+          events: {
+            onReady: () => !cancelled && setApiReady(true),
+            onStateChange: (e) => {
+              if (cancelled) return;
+              setIsPlaying(e.data === window.YT?.PlayerState?.PLAYING);
+            },
+          },
         });
       })
       .catch(() => !cancelled && setApiFailed(true));
@@ -302,6 +313,15 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
 
   const jumpToBookmark = (seconds) => {
     if (playerRef.current?.seekTo) playerRef.current.seekTo(seconds);
+  };
+
+  // Lecture/pause pilotée par l'app (les commandes natives YouTube sont masquées via controls=0
+  // pour ne plus polluer l'image lors d'une capture — voir plus bas)
+  const togglePlayPause = () => {
+    const p = playerRef.current;
+    if (!p) return;
+    if (isPlaying) p.pauseVideo?.();
+    else p.playVideo?.();
   };
 
   // Découpe l'image collée selon le cadre normalisé (0..1) et ajoute la capture à la liste
@@ -521,6 +541,15 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
           >
             📸 Capture
           </button>
+          {apiReady && (
+            <button
+              onClick={togglePlayPause}
+              className="text-[10px] px-1.5 py-0.5 rounded transition bg-gray-700 hover:bg-gray-600 text-gray-300"
+              title={isPlaying ? 'Mettre en pause' : 'Lire'}
+            >
+              {isPlaying ? '⏸️' : '▶️'}
+            </button>
+          )}
           {apiReady && (
             <button
               onClick={() => setNewBookmarkMode(!newBookmarkMode)}
@@ -751,7 +780,7 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
           <div className={nativeFullscreen ? 'relative w-full h-full' : 'relative w-full bg-black'} style={nativeFullscreen ? undefined : { paddingTop: '56.25%' }}>
             <iframe
               key={videoId}
-              src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0&playsinline=1&modestbranding=1&start=${resumeChoice === 'resume' ? firstBookmark : 0}`}
+              src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0&playsinline=1&modestbranding=1&controls=0&iv_load_policy=3&start=${resumeChoice === 'resume' ? firstBookmark : 0}`}
               title="YouTube video player"
               className="absolute inset-0 w-full h-full"
               style={{ border: 0 }}
@@ -763,6 +792,15 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
         ) : (
           <div className={nativeFullscreen ? 'relative w-full h-full' : 'relative w-full bg-black'} style={nativeFullscreen ? undefined : { paddingTop: '56.25%' }}>
             <div ref={containerRef} className="absolute inset-0 w-full h-full" />
+            {/* Calque invisible : un tap sur l'image lit/met en pause, comme sur youtube.com — sans jamais
+                afficher de bouton par-dessus la vidéo (les commandes YouTube natives sont masquées via controls=0) */}
+            <button
+              onClick={togglePlayPause}
+              className="absolute inset-0 w-full h-full bg-transparent cursor-pointer"
+              style={{ WebkitTapHighlightColor: 'transparent' }}
+              title={isPlaying ? 'Mettre en pause' : 'Lire'}
+              aria-label={isPlaying ? 'Mettre en pause' : 'Lire'}
+            />
           </div>
         )}
         {nativeFullscreen && (
@@ -4988,7 +5026,12 @@ function GuitarApp() {
       {roadmapOpen && (
         <RoadmapModal
           songs={songs}
-          onSelectSong={setSelectedSongId}
+          onSelectSong={(id) => {
+            setSelectedSongId(id);
+            const song = songs.find(s => s.id === id);
+            setSelectedVersionId(song?.versions[0]?.id);
+            setAppMode('editor');
+          }}
           onClose={() => setRoadmapOpen(false)}
         />
       )}
@@ -4997,67 +5040,265 @@ function GuitarApp() {
 }
 
 // Version modale/plein-écran de la roadmap, pour une meilleure visibilité sur petit écran
+const ROADMAP_ORDER_KEY = 'guitar-lab:roadmap-order';
+const ROADMAP_OVERRIDES_KEY = 'guitar-lab:roadmap-overrides';
+const ROADMAP_SECTION_META = {
+  progress: { label: '📌 En cours', titleColor: 'text-amber-400' },
+  mastered: { label: '✓ Maîtrisés', titleColor: 'text-green-400' },
+  challenges: { label: '🎯 Prochains défis', titleColor: 'text-gray-400' },
+};
+
+// Dégradé continu rouge → ambre → vert selon le % de progression (0 à 100)
+function progressToRoadmapRgb(pct) {
+  const p = Math.max(0, Math.min(100, pct || 0));
+  const [lo, hi] = p >= 50
+    ? [{ p: 50, c: [245, 158, 11] }, { p: 100, c: [34, 197, 94] }]
+    : [{ p: 0, c: [239, 68, 68] }, { p: 50, c: [245, 158, 11] }];
+  const t = hi.p === lo.p ? 0 : (p - lo.p) / (hi.p - lo.p);
+  return lo.c.map((v, i) => Math.round(v + (hi.c[i] - v) * t));
+}
+function progressToRoadmapColor(pct) {
+  const [r, g, b] = progressToRoadmapRgb(pct);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+function progressToRoadmapFill(pct) {
+  const [r, g, b] = progressToRoadmapRgb(pct);
+  return `rgba(${r}, ${g}, ${b}, 0.35)`;
+}
+
 function RoadmapModal({ songs, onSelectSong, onClose }) {
   const now = new Date();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-  const inProgress = songs.filter(s => {
-    if (!s.lastPracticedAt) return false;
-    const lastDate = new Date(s.lastPracticedAt);
-    const isRecent = lastDate >= sevenDaysAgo;
-    const notMastered = getDifficulty(s) !== 'hard';
-    return isRecent && notMastered;
-  });
+  // Déplacements manuels vers une autre catégorie (prioritaires sur le classement automatique) et ordre au sein
+  // de chaque section, mémorisés d'une session à l'autre. Tant que l'utilisateur n'interagit pas, rien ne change
+  // par rapport au comportement d'origine (100% automatique).
+  const [overrides, setOverrides] = useState({});
+  const [order, setOrder] = useState({ progress: [], mastered: [], challenges: [] });
 
-  const mastered = songs.filter(s => {
-    if (!s.lastPracticedAt) return false;
+  useEffect(() => {
+    (async () => {
+      try {
+        const o = await window.storage.get(ROADMAP_OVERRIDES_KEY, false);
+        if (o?.value) setOverrides(JSON.parse(o.value));
+      } catch (err) { /* pas de déplacement enregistré */ }
+      try {
+        const r = await window.storage.get(ROADMAP_ORDER_KEY, false);
+        if (r?.value) setOrder(JSON.parse(r.value));
+      } catch (err) { /* pas d'ordre enregistré */ }
+    })();
+  }, []);
+
+  const saveOverrides = (next) => {
+    setOverrides(next);
+    window.storage.set(ROADMAP_OVERRIDES_KEY, JSON.stringify(next), false).catch(() => {});
+  };
+  const saveOrder = (next) => {
+    setOrder(next);
+    window.storage.set(ROADMAP_ORDER_KEY, JSON.stringify(next), false).catch(() => {});
+  };
+
+  // Catégorie automatique : reprend la logique d'origine, mais attribue une seule catégorie par morceau
+  // (auparavant un même morceau pouvait apparaître à la fois dans "En cours" et "Maîtrisés")
+  const computeAutoSection = (s) => {
+    if (!s.lastPracticedAt) return 'challenges';
     const diff = getDifficulty(s);
     const sessionCount = (s.practiceSessions || []).length;
-    return diff === 'hard' || sessionCount >= 5;
+    if (diff === 'hard' || sessionCount >= 5) return 'mastered';
+    const isRecent = new Date(s.lastPracticedAt) >= sevenDaysAgo;
+    if (isRecent) return 'progress';
+    return 'challenges';
+  };
+
+  const bySection = { progress: [], mastered: [], challenges: [] };
+  songs.forEach(s => {
+    const section = overrides[s.id] && bySection[overrides[s.id]] ? overrides[s.id] : computeAutoSection(s);
+    bySection[section].push(s);
   });
 
-  const inProgressIds = new Set(inProgress.map(s => s.id));
-  const masteredIds = new Set(mastered.map(s => s.id));
-  const nextChallenges = songs
-    .filter(s => !inProgressIds.has(s.id) && !masteredIds.has(s.id))
-    .sort((a, b) => {
+  // Applique l'ordre manuel mémorisé ; les morceaux jamais déplacés gardent l'ordre naturel, ajoutés à la fin
+  const applyOrder = (section, list) => {
+    const savedIds = order[section] || [];
+    const byId = new Map(list.map(s => [s.id, s]));
+    const ordered = savedIds.map(id => byId.get(id)).filter(Boolean);
+    const remaining = list.filter(s => !savedIds.includes(s.id));
+    if (section === 'challenges' && savedIds.length === 0) {
       const diffOrder = { easy: 0, medium: 1, hard: 2 };
-      const da = diffOrder[getDifficulty(a)] || 0;
-      const db = diffOrder[getDifficulty(b)] || 0;
-      return da - db;
+      remaining.sort((a, b) => (diffOrder[getDifficulty(a)] || 0) - (diffOrder[getDifficulty(b)] || 0));
+    }
+    return [...ordered, ...remaining];
+  };
+
+  const listsBySection = {
+    progress: applyOrder('progress', bySection.progress),
+    mastered: applyOrder('mastered', bySection.mastered),
+    challenges: applyOrder('challenges', bySection.challenges),
+  };
+
+  const moveInSection = (section, songId, dir) => {
+    const ids = listsBySection[section].map(s => s.id);
+    const i = ids.indexOf(songId);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    saveOrder({ ...order, [section]: ids });
+  };
+
+  const moveToSection = (songId, fromSection, toSection) => {
+    if (fromSection === toSection) return;
+    saveOverrides({ ...overrides, [songId]: toSection });
+    saveOrder({
+      ...order,
+      [fromSection]: (order[fromSection] || []).filter(id => id !== songId),
+      [toSection]: [songId, ...(order[toSection] || []).filter(id => id !== songId)],
     });
+  };
+
+  const resetOverride = (songId) => {
+    const next = { ...overrides };
+    delete next[songId];
+    saveOverrides(next);
+  };
 
   const diffColor = (diff) => {
     const colors = { easy: 'text-green-400', medium: 'text-amber-400', hard: 'text-red-400' };
     return colors[diff] || 'text-gray-400';
   };
 
-  const SongRow = ({ song, section }) => (
-    <button
-      onClick={() => { onSelectSong?.(song.id); onClose?.(); }}
-      className="w-full text-left p-3 bg-gray-750 hover:bg-gray-700 rounded transition border-l-4 flex items-center justify-between"
-      style={{
-        borderColor: section === 'progress' ? '#b45309' : section === 'mastered' ? '#22c55e' : '#9ca3af'
-      }}
-    >
-      <div>
-        <p className="font-semibold text-sm">{song.title}</p>
-        <p className="text-xs text-gray-400">{song.artist}</p>
+  const SongRow = ({ song, section }) => {
+    const ids = listsBySection[section].map(s => s.id);
+    const index = ids.indexOf(song.id);
+    const isFirst = index === 0;
+    const isLast = index === ids.length - 1;
+    const isOverridden = !!overrides[song.id];
+    const rowRef = useRef(null);
+    const [dragDy, setDragDy] = useState(null); // null = pas en cours de glisser
+    const dragging = dragDy !== null;
+
+    // Glisser-déposer tactile pour réordonner (le drag-and-drop HTML5 natif ne fonctionne pas au doigt sur iPad)
+    const startRowDrag = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const pointer = e.touches ? e.touches[0] : e;
+      const startY = pointer.clientY;
+      const list = listsBySection[section];
+      const startIndex = list.map(s => s.id).indexOf(song.id);
+      const stepHeight = (rowRef.current?.offsetHeight || 60) + 8; // + l'espacement entre lignes (space-y-2)
+      const count = list.length;
+      setDragDy(0);
+
+      const onMove = (ev) => {
+        ev.preventDefault?.();
+        const p = ev.touches ? ev.touches[0] : ev;
+        setDragDy(p.clientY - startY);
+      };
+      const onUp = (ev) => {
+        const p = ev.changedTouches ? ev.changedTouches[0] : ev;
+        const dy = (p ? p.clientY : startY) - startY;
+        const delta = Math.round(dy / stepHeight);
+        const targetIndex = Math.max(0, Math.min(count - 1, startIndex + delta));
+        if (targetIndex !== startIndex) {
+          const newIds = list.map(s => s.id);
+          newIds.splice(startIndex, 1);
+          newIds.splice(targetIndex, 0, song.id);
+          saveOrder({ ...order, [section]: newIds });
+        }
+        setDragDy(null);
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        window.removeEventListener('touchmove', onMove);
+        window.removeEventListener('touchend', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+      window.addEventListener('touchmove', onMove, { passive: false });
+      window.addEventListener('touchend', onUp);
+    };
+
+    const fillPct = Math.max(0, Math.min(100, song.progress || 0));
+
+    return (
+      <div
+        ref={rowRef}
+        className="relative w-full rounded overflow-hidden border-l-4 group"
+        style={{
+          borderColor: progressToRoadmapColor(song.progress),
+          transform: dragging ? `translateY(${dragDy}px) scale(1.02)` : undefined,
+          transition: dragging ? 'none' : 'transform 0.15s ease',
+          zIndex: dragging ? 30 : undefined,
+          boxShadow: dragging ? '0 10px 24px rgba(0,0,0,0.55)' : undefined,
+        }}
+      >
+        {/* Fond + remplissage proportionnel au % de maîtrise (100% = case pleine, 50% = à moitié...) */}
+        <div className="absolute inset-0 bg-gray-750 group-hover:bg-gray-700 transition-colors" />
+        <div
+          className="absolute inset-y-0 left-0 transition-[width] duration-300"
+          style={{ width: `${fillPct}%`, backgroundColor: progressToRoadmapFill(song.progress) }}
+        />
+
+        <div className="relative flex items-center gap-2 p-3">
+          <div
+            onMouseDown={startRowDrag}
+            onTouchStart={startRowDrag}
+            className="flex-shrink-0 text-gray-400 hover:text-gray-200 active:text-amber-400 -ml-1 p-1"
+            style={{ touchAction: 'none', cursor: 'grab' }}
+            title="Glisser pour réordonner"
+          >
+            <GripVertical className="w-4 h-4" />
+          </div>
+
+          <button onClick={() => { onSelectSong?.(song.id); onClose?.(); }} className="flex-1 min-w-0 text-left">
+            <p className="font-semibold text-sm truncate flex items-center gap-1.5">
+              <span className="truncate">{song.title}</span>
+              {section === 'challenges' && (
+                <span className={`text-[10px] font-bold flex-shrink-0 ${diffColor(getDifficulty(song))}`}>
+                  {getDifficulty(song)[0].toUpperCase()}
+                </span>
+              )}
+            </p>
+            <p className="text-xs text-gray-300 truncate">{song.artist} • {song.progress || 0}% maîtrisé</p>
+          </button>
+
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            <button onClick={() => moveInSection(section, song.id, -1)} disabled={isFirst} className="p-1.5 hover:bg-gray-600/60 rounded disabled:opacity-20" title="Monter dans la liste">
+              <ArrowUp className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={() => moveInSection(section, song.id, 1)} disabled={isLast} className="p-1.5 hover:bg-gray-600/60 rounded disabled:opacity-20" title="Descendre dans la liste">
+              <ArrowDown className="w-3.5 h-3.5" />
+            </button>
+            <select
+              value=""
+              onChange={(e) => { if (e.target.value) moveToSection(song.id, section, e.target.value); e.target.value = ''; }}
+              className="bg-gray-800/90 border border-gray-600 rounded text-[10px] px-1 py-1.5 focus:outline-none max-w-[92px]"
+              title="Déplacer vers une autre catégorie"
+            >
+              <option value="">↔ Déplacer</option>
+              {Object.entries(ROADMAP_SECTION_META).filter(([key]) => key !== section).map(([key, meta]) => (
+                <option key={key} value={key}>{meta.label}</option>
+              ))}
+            </select>
+            {isOverridden && (
+              <button onClick={() => resetOverride(song.id)} className="p-1.5 hover:bg-gray-600/60 rounded text-gray-400" title="Revenir au classement automatique">
+                ↺
+              </button>
+            )}
+          </div>
+        </div>
       </div>
-      {section === 'challenges' && (
-        <span className={`text-xs font-bold ${diffColor(getDifficulty(song))}`}>
-          {getDifficulty(song)[0].toUpperCase()}
-        </span>
-      )}
-    </button>
-  );
+    );
+  };
+
+  const { progress: inProgress, mastered, challenges: nextChallenges } = listsBySection;
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div className="bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-gray-700 shadow-2xl">
-        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-center">
-          <h2 className="font-bold text-amber-400 text-lg">🗺️ Feuille de route</h2>
-          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded">
+        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-start gap-2">
+          <div>
+            <h2 className="font-bold text-amber-400 text-lg">🗺️ Feuille de route</h2>
+            <p className="text-[11px] text-gray-500 mt-0.5">⠿ glisse pour réordonner • ↑↓ pas à pas • le menu déplace vers une autre catégorie • ↺ revient à l'automatique</p>
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded flex-shrink-0">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -5065,7 +5306,7 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
         <div className="p-4 space-y-4">
           {inProgress.length > 0 && (
             <section>
-              <h3 className="font-semibold text-amber-400 mb-2">📌 En cours</h3>
+              <h3 className={`font-semibold mb-2 ${ROADMAP_SECTION_META.progress.titleColor}`}>{ROADMAP_SECTION_META.progress.label}</h3>
               <div className="space-y-2">
                 {inProgress.map(s => <SongRow key={s.id} song={s} section="progress" />)}
               </div>
@@ -5074,7 +5315,7 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
 
           {mastered.length > 0 && (
             <section>
-              <h3 className="font-semibold text-green-400 mb-2">✓ Maîtrisés</h3>
+              <h3 className={`font-semibold mb-2 ${ROADMAP_SECTION_META.mastered.titleColor}`}>{ROADMAP_SECTION_META.mastered.label}</h3>
               <div className="space-y-2">
                 {mastered.map(s => <SongRow key={s.id} song={s} section="mastered" />)}
               </div>
@@ -5083,7 +5324,7 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
 
           {nextChallenges.length > 0 && (
             <section>
-              <h3 className="font-semibold text-gray-400 mb-2">🎯 Prochains défis</h3>
+              <h3 className={`font-semibold mb-2 ${ROADMAP_SECTION_META.challenges.titleColor}`}>{ROADMAP_SECTION_META.challenges.label}</h3>
               <div className="space-y-2">
                 {nextChallenges.map(s => <SongRow key={s.id} song={s} section="challenges" />)}
               </div>
@@ -6459,11 +6700,16 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
     }
   }, [focusMode]);
 
-  // En mode Focus, forcer le collapse des panneaux
+  // En mode Focus, forcer le collapse des panneaux, puis restaurer leur état précédent en sortant
+  const panelStateBeforeFocusRef = useRef({ left: leftCollapsed, right: rightCollapsed });
   useEffect(() => {
     if (focusMode) {
+      panelStateBeforeFocusRef.current = { left: leftCollapsed, right: rightCollapsed };
       setLeftCollapsed(true);
       setRightCollapsed(true);
+    } else {
+      setLeftCollapsed(panelStateBeforeFocusRef.current.left);
+      setRightCollapsed(panelStateBeforeFocusRef.current.right);
     }
   }, [focusMode]);
 
@@ -6485,6 +6731,13 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="bg-gradient-to-r from-gray-800 to-gray-750 border-b border-gray-700 p-3 flex-shrink-0">
+        <div className="text-center mb-2 px-2">
+          <h2 className="text-base font-bold flex items-center justify-center gap-1.5 flex-wrap">
+            <DifficultyPick difficulty={song.difficulty} size={16} onChange={(d) => onUpdateSong({ ...song, difficulty: d })} />
+            <span className="break-words">{song.title}</span>
+          </h2>
+          <p className="text-xs text-gray-400 break-words">{song.artist}</p>
+        </div>
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <button
@@ -6524,14 +6777,6 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
                 </button>
               </>
             )}
-          </div>
-
-          <div className="text-center flex-1 min-w-0">
-            <h2 className="text-base font-bold truncate flex items-center justify-center gap-1.5">
-              <DifficultyPick difficulty={song.difficulty} size={16} onChange={(d) => onUpdateSong({ ...song, difficulty: d })} />
-              <span className="truncate">{song.title}</span>
-            </h2>
-            <p className="text-xs text-gray-400 truncate">{song.artist}</p>
           </div>
 
           <div className={`flex items-center gap-2 ${focusMode ? 'bg-transparent border-0 p-0' : 'bg-gray-900 rounded p-2 border border-gray-700'} text-xs`}>
@@ -6993,7 +7238,84 @@ function PerformanceMode({ song, version, onClose }) {
 
 
 
+// Formatte le contenu d'une cellule pour l'affichage synthétique (accord simple, ou top/bottom si divisée)
+function formatCellChord(cell) {
+  if (!cell) return '';
+  if (cell.split) {
+    const parts = [cell.top, cell.bottom].filter(Boolean);
+    return parts.join('/');
+  }
+  return cell.chord || '';
+}
+
+// Vue de synthèse : structure complète, lisible d'un coup d'œil, code couleur par section
+function StructureSummary({ structure }) {
+  if (!structure || structure.length === 0) {
+    return <p className="text-xs text-gray-500 italic text-center py-6">Aucune section pour l'instant.</p>;
+  }
+  return (
+    <div className="space-y-2.5">
+      {structure.map(section => {
+        const style = getSectionStyle(section.section);
+        const cols = section.cols || 1;
+        const cells = section.cells || [];
+        const rowCount = Math.max(1, Math.ceil(cells.length / cols));
+        const rows = Array.from({ length: rowCount }, (_, rowIdx) => {
+          const rowCells = cells.slice(rowIdx * cols, (rowIdx + 1) * cols);
+          const chords = rowCells.map(formatCellChord).filter(Boolean);
+          const repeat = section.rowRepeats?.[rowIdx] || 1;
+          return { repeat, chords };
+        }).filter(r => r.chords.length > 0);
+
+        return (
+          <div key={section.id} className={`rounded border-l-4 ${style.border} ${style.tint} border border-gray-600 px-3 py-2`}>
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${style.dot}`} />
+              <span className={`font-semibold text-xs ${style.text}`}>{section.section}</span>
+              {(section.repeat || 1) > 1 && (
+                <span className="text-[10px] text-gray-400 font-semibold">(section ×{section.repeat})</span>
+              )}
+            </div>
+            {rows.length === 0 ? (
+              <p className="text-[11px] text-gray-500 italic pl-3">Vide</p>
+            ) : (
+              <div className="space-y-0.5 pl-3">
+                {rows.map((row, i) => (
+                  <p key={i} className="text-xs text-gray-200 font-mono leading-relaxed">
+                    <span className="text-amber-400 font-semibold">{row.repeat}x</span>{' '}
+                    {row.chords.join(' - ')}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function LeftPanel({ version, updateVersion }) {
+  const SUMMARY_MODE_KEY = 'guitar-lab:structure-summary-mode';
+  const [summaryMode, setSummaryMode] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await window.storage.get(SUMMARY_MODE_KEY, false);
+        if (result?.value) setSummaryMode(JSON.parse(result.value));
+      } catch (err) { /* préférence par défaut : édition */ }
+    })();
+  }, []);
+
+  const toggleSummaryMode = () => {
+    setSummaryMode(prev => {
+      const next = !prev;
+      window.storage.set(SUMMARY_MODE_KEY, JSON.stringify(next), false).catch(() => {});
+      return next;
+    });
+  };
+
   const addSection = () => {
     const newSection = {
       id: Date.now().toString(),
@@ -7013,30 +7335,43 @@ function LeftPanel({ version, updateVersion }) {
 
   return (
     <>
-      <datalist id="section-name-suggestions">
-        {SECTION_NAME_SUGGESTIONS.map(s => <option key={s} value={s} />)}
-      </datalist>
-
       <div className="bg-gray-750 border-b border-gray-700 p-3 flex-shrink-0">
-        <h3 className="font-semibold text-amber-400 text-sm mb-2">📋 Structure</h3>
-        <button onClick={addSection} className="w-full px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold transition mb-2">
-          + Section
-        </button>
-        {version.structure.length > 1 && (
-          <div className="flex gap-1">
-            <button onClick={() => setAllCollapsed(false)} className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[11px] transition">
-              Tout déplier
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-semibold text-amber-400 text-sm">📋 Structure</h3>
+          <button
+            onClick={toggleSummaryMode}
+            className={`px-2 py-1 rounded text-[11px] font-semibold transition flex items-center gap-1 ${summaryMode ? 'bg-sky-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
+            title={summaryMode ? "Revenir à l'édition de la grille" : 'Afficher une vue de synthèse, lecture seule'}
+          >
+            {summaryMode ? '✏️ Éditer' : '👁️ Synthèse'}
+          </button>
+        </div>
+        {!summaryMode && (
+          <>
+            <button onClick={addSection} className="w-full px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold transition mb-2">
+              + Section
             </button>
-            <button onClick={() => setAllCollapsed(true)} className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[11px] transition">
-              Tout replier
-            </button>
-          </div>
+            {version.structure.length > 1 && (
+              <div className="flex gap-1">
+                <button onClick={() => setAllCollapsed(false)} className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[11px] transition">
+                  Tout déplier
+                </button>
+                <button onClick={() => setAllCollapsed(true)} className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[11px] transition">
+                  Tout replier
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
       <div className="flex-1 overflow-y-auto space-y-2 p-3">
-        {version.structure.map((section, idx) => (
-          <SectionBuilder key={section.id} section={section} index={idx} version={version} updateVersion={updateVersion} />
-        ))}
+        {summaryMode ? (
+          <StructureSummary structure={version.structure} />
+        ) : (
+          version.structure.map((section, idx) => (
+            <SectionBuilder key={section.id} section={section} index={idx} version={version} updateVersion={updateVersion} />
+          ))
+        )}
       </div>
     </>
   );
@@ -7124,7 +7459,7 @@ function SectionBuilder({ section, index, version, updateVersion }) {
         <select
           value={section.section}
           onChange={(e) => updateSection({ section: e.target.value })}
-          className={`w-[4.75rem] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-[11px] font-semibold focus:outline-none focus:border-amber-500 ${style.text}`}
+          className={`w-24 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-[11px] font-semibold focus:outline-none focus:border-amber-500 ${style.text}`}
         >
           {SECTION_NAME_SUGGESTIONS.map((name) => (
             <option key={name} value={name}>{name}</option>
