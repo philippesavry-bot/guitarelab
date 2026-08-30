@@ -176,7 +176,7 @@
       const {
         ChevronDown, ChevronRight, ChevronLeft, Plus, Music, X, Star, Menu, Edit2,
         Trash2, Play, Pause, BookOpen, Maximize2, Minimize2, ArrowDown, ArrowUp, Volume2, VolumeX,
-        TrendingUp, Calendar, Zap, Search,
+        TrendingUp, Calendar, Zap, Search, GripVertical,
       } = window.Icons;
 
 // Suggestions de noms de section (structure du morceau)
@@ -5191,15 +5191,22 @@ const ROADMAP_SECTION_META = {
   challenges: { label: '🎯 Prochains défis', titleColor: 'text-gray-400' },
 };
 
-// Dégradé continu rouge → ambre → vert selon le % de progression (0 à 100), utilisé pour la bordure de chaque ligne
-function progressToRoadmapColor(pct) {
+// Dégradé continu rouge → ambre → vert selon le % de progression (0 à 100)
+function progressToRoadmapRgb(pct) {
   const p = Math.max(0, Math.min(100, pct || 0));
   const [lo, hi] = p >= 50
     ? [{ p: 50, c: [245, 158, 11] }, { p: 100, c: [34, 197, 94] }]
     : [{ p: 0, c: [239, 68, 68] }, { p: 50, c: [245, 158, 11] }];
   const t = hi.p === lo.p ? 0 : (p - lo.p) / (hi.p - lo.p);
-  const rgb = lo.c.map((v, i) => Math.round(v + (hi.c[i] - v) * t));
-  return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+  return lo.c.map((v, i) => Math.round(v + (hi.c[i] - v) * t));
+}
+function progressToRoadmapColor(pct) {
+  const [r, g, b] = progressToRoadmapRgb(pct);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+function progressToRoadmapFill(pct) {
+  const [r, g, b] = progressToRoadmapRgb(pct);
+  return `rgba(${r}, ${g}, ${b}, 0.35)`;
 }
 
 function RoadmapModal({ songs, onSelectSong, onClose }) {
@@ -5303,49 +5310,122 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
 
   const SongRow = ({ song, section }) => {
     const ids = listsBySection[section].map(s => s.id);
-    const isFirst = ids[0] === song.id;
-    const isLast = ids[ids.length - 1] === song.id;
+    const index = ids.indexOf(song.id);
+    const isFirst = index === 0;
+    const isLast = index === ids.length - 1;
     const isOverridden = !!overrides[song.id];
+    const rowRef = useRef(null);
+    const [dragDy, setDragDy] = useState(null); // null = pas en cours de glisser
+    const dragging = dragDy !== null;
+
+    // Glisser-déposer tactile pour réordonner (le drag-and-drop HTML5 natif ne fonctionne pas au doigt sur iPad)
+    const startRowDrag = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const pointer = e.touches ? e.touches[0] : e;
+      const startY = pointer.clientY;
+      const list = listsBySection[section];
+      const startIndex = list.map(s => s.id).indexOf(song.id);
+      const stepHeight = (rowRef.current?.offsetHeight || 60) + 8; // + l'espacement entre lignes (space-y-2)
+      const count = list.length;
+      setDragDy(0);
+
+      const onMove = (ev) => {
+        ev.preventDefault?.();
+        const p = ev.touches ? ev.touches[0] : ev;
+        setDragDy(p.clientY - startY);
+      };
+      const onUp = (ev) => {
+        const p = ev.changedTouches ? ev.changedTouches[0] : ev;
+        const dy = (p ? p.clientY : startY) - startY;
+        const delta = Math.round(dy / stepHeight);
+        const targetIndex = Math.max(0, Math.min(count - 1, startIndex + delta));
+        if (targetIndex !== startIndex) {
+          const newIds = list.map(s => s.id);
+          newIds.splice(startIndex, 1);
+          newIds.splice(targetIndex, 0, song.id);
+          saveOrder({ ...order, [section]: newIds });
+        }
+        setDragDy(null);
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        window.removeEventListener('touchmove', onMove);
+        window.removeEventListener('touchend', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+      window.addEventListener('touchmove', onMove, { passive: false });
+      window.addEventListener('touchend', onUp);
+    };
+
+    const fillPct = Math.max(0, Math.min(100, song.progress || 0));
+
     return (
       <div
-        className="w-full p-3 bg-gray-750 hover:bg-gray-700 rounded transition border-l-4 flex items-center gap-2"
-        style={{ borderColor: progressToRoadmapColor(song.progress) }}
+        ref={rowRef}
+        className="relative w-full rounded overflow-hidden border-l-4 group"
+        style={{
+          borderColor: progressToRoadmapColor(song.progress),
+          transform: dragging ? `translateY(${dragDy}px) scale(1.02)` : undefined,
+          transition: dragging ? 'none' : 'transform 0.15s ease',
+          zIndex: dragging ? 30 : undefined,
+          boxShadow: dragging ? '0 10px 24px rgba(0,0,0,0.55)' : undefined,
+        }}
       >
-        <button onClick={() => { onSelectSong?.(song.id); onClose?.(); }} className="flex-1 min-w-0 text-left">
-          <p className="font-semibold text-sm truncate flex items-center gap-1.5">
-            <span className="truncate">{song.title}</span>
-            {section === 'challenges' && (
-              <span className={`text-[10px] font-bold flex-shrink-0 ${diffColor(getDifficulty(song))}`}>
-                {getDifficulty(song)[0].toUpperCase()}
-              </span>
-            )}
-          </p>
-          <p className="text-xs text-gray-400 truncate">{song.artist} • {song.progress || 0}% maîtrisé</p>
-        </button>
+        {/* Fond + remplissage proportionnel au % de maîtrise (100% = case pleine, 50% = à moitié...) */}
+        <div className="absolute inset-0 bg-gray-750 group-hover:bg-gray-700 transition-colors" />
+        <div
+          className="absolute inset-y-0 left-0 transition-[width] duration-300"
+          style={{ width: `${fillPct}%`, backgroundColor: progressToRoadmapFill(song.progress) }}
+        />
 
-        <div className="flex items-center gap-0.5 flex-shrink-0">
-          <button onClick={() => moveInSection(section, song.id, -1)} disabled={isFirst} className="p-1.5 hover:bg-gray-600 rounded disabled:opacity-20" title="Monter dans la liste">
-            <ArrowUp className="w-3.5 h-3.5" />
-          </button>
-          <button onClick={() => moveInSection(section, song.id, 1)} disabled={isLast} className="p-1.5 hover:bg-gray-600 rounded disabled:opacity-20" title="Descendre dans la liste">
-            <ArrowDown className="w-3.5 h-3.5" />
-          </button>
-          <select
-            value=""
-            onChange={(e) => { if (e.target.value) moveToSection(song.id, section, e.target.value); e.target.value = ''; }}
-            className="bg-gray-800 border border-gray-600 rounded text-[10px] px-1 py-1.5 focus:outline-none max-w-[92px]"
-            title="Déplacer vers une autre catégorie"
+        <div className="relative flex items-center gap-2 p-3">
+          <div
+            onMouseDown={startRowDrag}
+            onTouchStart={startRowDrag}
+            className="flex-shrink-0 text-gray-400 hover:text-gray-200 active:text-amber-400 -ml-1 p-1"
+            style={{ touchAction: 'none', cursor: 'grab' }}
+            title="Glisser pour réordonner"
           >
-            <option value="">↔ Déplacer</option>
-            {Object.entries(ROADMAP_SECTION_META).filter(([key]) => key !== section).map(([key, meta]) => (
-              <option key={key} value={key}>{meta.label}</option>
-            ))}
-          </select>
-          {isOverridden && (
-            <button onClick={() => resetOverride(song.id)} className="p-1.5 hover:bg-gray-600 rounded text-gray-400" title="Revenir au classement automatique">
-              ↺
+            <GripVertical className="w-4 h-4" />
+          </div>
+
+          <button onClick={() => { onSelectSong?.(song.id); onClose?.(); }} className="flex-1 min-w-0 text-left">
+            <p className="font-semibold text-sm truncate flex items-center gap-1.5">
+              <span className="truncate">{song.title}</span>
+              {section === 'challenges' && (
+                <span className={`text-[10px] font-bold flex-shrink-0 ${diffColor(getDifficulty(song))}`}>
+                  {getDifficulty(song)[0].toUpperCase()}
+                </span>
+              )}
+            </p>
+            <p className="text-xs text-gray-300 truncate">{song.artist} • {song.progress || 0}% maîtrisé</p>
+          </button>
+
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            <button onClick={() => moveInSection(section, song.id, -1)} disabled={isFirst} className="p-1.5 hover:bg-gray-600/60 rounded disabled:opacity-20" title="Monter dans la liste">
+              <ArrowUp className="w-3.5 h-3.5" />
             </button>
-          )}
+            <button onClick={() => moveInSection(section, song.id, 1)} disabled={isLast} className="p-1.5 hover:bg-gray-600/60 rounded disabled:opacity-20" title="Descendre dans la liste">
+              <ArrowDown className="w-3.5 h-3.5" />
+            </button>
+            <select
+              value=""
+              onChange={(e) => { if (e.target.value) moveToSection(song.id, section, e.target.value); e.target.value = ''; }}
+              className="bg-gray-800/90 border border-gray-600 rounded text-[10px] px-1 py-1.5 focus:outline-none max-w-[92px]"
+              title="Déplacer vers une autre catégorie"
+            >
+              <option value="">↔ Déplacer</option>
+              {Object.entries(ROADMAP_SECTION_META).filter(([key]) => key !== section).map(([key, meta]) => (
+                <option key={key} value={key}>{meta.label}</option>
+              ))}
+            </select>
+            {isOverridden && (
+              <button onClick={() => resetOverride(song.id)} className="p-1.5 hover:bg-gray-600/60 rounded text-gray-400" title="Revenir au classement automatique">
+                ↺
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -5359,7 +5439,7 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
         <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-start gap-2">
           <div>
             <h2 className="font-bold text-amber-400 text-lg">🗺️ Feuille de route</h2>
-            <p className="text-[11px] text-gray-500 mt-0.5">↑↓ réordonne • le menu déplace vers une autre catégorie • ↺ revient à l'automatique</p>
+            <p className="text-[11px] text-gray-500 mt-0.5">⠿ glisse pour réordonner • ↑↓ pas à pas • le menu déplace vers une autre catégorie • ↺ revient à l'automatique</p>
           </div>
           <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded flex-shrink-0">
             <X className="w-5 h-5" />
