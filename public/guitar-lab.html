@@ -297,8 +297,10 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
   const firstBookmark = bookmarks.length > 0 ? bookmarks[0].seconds : 0;
   const [resumeChoice, setResumeChoice] = useState(bookmarks.length > 0 ? null : 'start');
   const [apiReady, setApiReady] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [apiFailed, setApiFailed] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [curTime, setCurTime] = useState(0);
+  const [duration, setDuration] = useState(0);
   const [newBookmarkMode, setNewBookmarkMode] = useState(false); // true = en train de créer un nouveau
   const [bookmarkName, setBookmarkName] = useState('');
   const [savedFlash, setSavedFlash] = useState(null); // null | 'save' | 'delete'
@@ -435,7 +437,6 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
     setResumeChoice(bookmarks.length > 0 ? null : 'start');
     setApiReady(false);
     setApiFailed(false);
-    setIsPlaying(false);
     setNewBookmarkMode(false);
     setCaptureOpen(false);
     resetCapture();
@@ -451,14 +452,22 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
           videoId,
           host: 'https://www.youtube-nocookie.com',
           playerVars: {
-            rel: 0, playsinline: 1, modestbranding: 1, controls: 0, iv_load_policy: 3,
+            rel: 0, playsinline: 1, modestbranding: 1,
+            controls: 0, iv_load_policy: 3, fs: 0, disablekb: 1, cc_load_policy: 0,
             start: resumeChoice === 'resume' ? firstBookmark : 0,
           },
           events: {
-            onReady: () => !cancelled && setApiReady(true),
+            onReady: () => {
+              if (cancelled) return;
+              setApiReady(true);
+              try { setDuration(playerRef.current?.getDuration?.() || 0); } catch (_) {}
+            },
             onStateChange: (e) => {
               if (cancelled) return;
-              setIsPlaying(e.data === window.YT?.PlayerState?.PLAYING);
+              setIsPlaying(e.data === 1); // 1 = YT.PlayerState.PLAYING
+              if (e.data === 1 || e.data === 2) {
+                try { setDuration(playerRef.current?.getDuration?.() || 0); } catch (_) {}
+              }
             },
           },
         });
@@ -470,6 +479,18 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
       playerRef.current = null;
     };
   }, [videoId, resumeChoice]);
+
+  // Suit la position de lecture pour notre propre barre de défilement (l'API ne la pousse pas toute seule)
+  useEffect(() => {
+    if (!apiReady) return;
+    const id = setInterval(() => {
+      try {
+        const t = playerRef.current?.getCurrentTime?.();
+        if (typeof t === 'number') setCurTime(t);
+      } catch (_) {}
+    }, 400);
+    return () => clearInterval(id);
+  }, [apiReady]);
 
   if (!videoId) return null;
 
@@ -494,15 +515,6 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
 
   const jumpToBookmark = (seconds) => {
     if (playerRef.current?.seekTo) playerRef.current.seekTo(seconds);
-  };
-
-  // Lecture/pause pilotée par l'app (les commandes natives YouTube sont masquées via controls=0
-  // pour ne plus polluer l'image lors d'une capture — voir plus bas)
-  const togglePlayPause = () => {
-    const p = playerRef.current;
-    if (!p) return;
-    if (isPlaying) p.pauseVideo?.();
-    else p.playVideo?.();
   };
 
   // Découpe l'image collée selon le cadre normalisé (0..1) et ajoute la capture à la liste
@@ -722,15 +734,6 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
           >
             📸 Capture
           </button>
-          {apiReady && (
-            <button
-              onClick={togglePlayPause}
-              className="text-[10px] px-1.5 py-0.5 rounded transition bg-gray-700 hover:bg-gray-600 text-gray-300"
-              title={isPlaying ? 'Mettre en pause' : 'Lire'}
-            >
-              {isPlaying ? '⏸️' : '▶️'}
-            </button>
-          )}
           {apiReady && (
             <button
               onClick={() => setNewBookmarkMode(!newBookmarkMode)}
@@ -955,13 +958,13 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
 
       <div
         ref={videoWrapperRef}
-        className={nativeFullscreen ? 'fixed inset-0 z-[9999] bg-black flex items-center justify-center' : 'flex-shrink-0'}
+        className={nativeFullscreen ? 'fixed inset-0 z-[9999] bg-black flex flex-col' : 'flex-shrink-0'}
       >
         {apiFailed ? (
-          <div className={nativeFullscreen ? 'relative w-full h-full' : 'relative w-full bg-black'} style={nativeFullscreen ? undefined : { paddingTop: '56.25%' }}>
+          <div className={nativeFullscreen ? 'relative flex-1 min-h-0' : 'relative w-full bg-black'} style={nativeFullscreen ? undefined : { paddingTop: '56.25%' }}>
             <iframe
               key={videoId}
-              src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0&playsinline=1&modestbranding=1&controls=0&iv_load_policy=3&start=${resumeChoice === 'resume' ? firstBookmark : 0}`}
+              src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0&playsinline=1&modestbranding=1&start=${resumeChoice === 'resume' ? firstBookmark : 0}`}
               title="YouTube video player"
               className="absolute inset-0 w-full h-full"
               style={{ border: 0 }}
@@ -971,19 +974,60 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
             />
           </div>
         ) : (
-          <div className={nativeFullscreen ? 'relative w-full h-full' : 'relative w-full bg-black'} style={nativeFullscreen ? undefined : { paddingTop: '56.25%' }}>
+          <div className={nativeFullscreen ? 'relative flex-1 min-h-0' : 'relative w-full bg-black'} style={nativeFullscreen ? undefined : { paddingTop: '56.25%' }}>
             <div ref={containerRef} className="absolute inset-0 w-full h-full" />
-            {/* Calque invisible : un tap sur l'image lit/met en pause, comme sur youtube.com — sans jamais
-                afficher de bouton par-dessus la vidéo (les commandes YouTube natives sont masquées via controls=0) */}
-            <button
-              onClick={togglePlayPause}
-              className="absolute inset-0 w-full h-full bg-transparent cursor-pointer"
-              style={{ WebkitTapHighlightColor: 'transparent' }}
-              title={isPlaying ? 'Mettre en pause' : 'Lire'}
-              aria-label={isPlaying ? 'Mettre en pause' : 'Lire'}
-            />
           </div>
         )}
+
+        {/* Notre propre barre de lecture — sous la vidéo, jamais par-dessus l'image (les commandes YouTube sont masquées) */}
+        {apiReady && !apiFailed && (
+          <div className="flex items-center gap-1.5 px-2 py-1.5 bg-gray-900 border-t border-gray-700 flex-shrink-0">
+            <button
+              onClick={() => { try { playerRef.current?.seekTo(Math.max(0, curTime - 5), true); } catch (_) {} }}
+              className="p-1.5 hover:bg-gray-700 rounded flex-shrink-0"
+              title="Reculer de 5s"
+            >
+              ⏪
+            </button>
+            <button
+              onClick={() => {
+                try {
+                  if (isPlaying) playerRef.current?.pauseVideo();
+                  else playerRef.current?.playVideo();
+                } catch (_) {}
+              }}
+              className="p-1.5 bg-gray-700 hover:bg-gray-600 rounded flex-shrink-0"
+              title={isPlaying ? 'Mettre en pause' : 'Lecture'}
+            >
+              {isPlaying ? '⏸️' : '▶️'}
+            </button>
+            <button
+              onClick={() => { try { playerRef.current?.seekTo(Math.min(duration || curTime, curTime + 5), true); } catch (_) {} }}
+              className="p-1.5 hover:bg-gray-700 rounded flex-shrink-0"
+              title="Avancer de 5s"
+            >
+              ⏩
+            </button>
+            <input
+              type="range"
+              min="0"
+              max={duration || 0}
+              step="0.1"
+              value={Math.min(curTime, duration || curTime)}
+              onChange={(e) => {
+                const t = parseFloat(e.target.value);
+                setCurTime(t);
+                try { playerRef.current?.seekTo(t, true); } catch (_) {}
+              }}
+              className="flex-1 accent-amber-500"
+              style={{ touchAction: 'none' }}
+            />
+            <span className="text-[10px] text-gray-400 font-mono flex-shrink-0 whitespace-nowrap">
+              {formatBookmarkTime(Math.floor(curTime))} / {formatBookmarkTime(Math.floor(duration))}
+            </span>
+          </div>
+        )}
+
         {nativeFullscreen && (
           <button
             onClick={exitCleanFullscreen}
