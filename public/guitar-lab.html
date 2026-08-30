@@ -297,6 +297,7 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
   const firstBookmark = bookmarks.length > 0 ? bookmarks[0].seconds : 0;
   const [resumeChoice, setResumeChoice] = useState(bookmarks.length > 0 ? null : 'start');
   const [apiReady, setApiReady] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [apiFailed, setApiFailed] = useState(false);
   const [newBookmarkMode, setNewBookmarkMode] = useState(false); // true = en train de créer un nouveau
   const [bookmarkName, setBookmarkName] = useState('');
@@ -434,6 +435,7 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
     setResumeChoice(bookmarks.length > 0 ? null : 'start');
     setApiReady(false);
     setApiFailed(false);
+    setIsPlaying(false);
     setNewBookmarkMode(false);
     setCaptureOpen(false);
     resetCapture();
@@ -448,8 +450,17 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
         playerRef.current = new YT.Player(containerRef.current, {
           videoId,
           host: 'https://www.youtube-nocookie.com',
-          playerVars: { rel: 0, playsinline: 1, modestbranding: 1, start: resumeChoice === 'resume' ? firstBookmark : 0 },
-          events: { onReady: () => !cancelled && setApiReady(true) },
+          playerVars: {
+            rel: 0, playsinline: 1, modestbranding: 1, controls: 0, iv_load_policy: 3,
+            start: resumeChoice === 'resume' ? firstBookmark : 0,
+          },
+          events: {
+            onReady: () => !cancelled && setApiReady(true),
+            onStateChange: (e) => {
+              if (cancelled) return;
+              setIsPlaying(e.data === window.YT?.PlayerState?.PLAYING);
+            },
+          },
         });
       })
       .catch(() => !cancelled && setApiFailed(true));
@@ -483,6 +494,15 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
 
   const jumpToBookmark = (seconds) => {
     if (playerRef.current?.seekTo) playerRef.current.seekTo(seconds);
+  };
+
+  // Lecture/pause pilotée par l'app (les commandes natives YouTube sont masquées via controls=0
+  // pour ne plus polluer l'image lors d'une capture — voir plus bas)
+  const togglePlayPause = () => {
+    const p = playerRef.current;
+    if (!p) return;
+    if (isPlaying) p.pauseVideo?.();
+    else p.playVideo?.();
   };
 
   // Découpe l'image collée selon le cadre normalisé (0..1) et ajoute la capture à la liste
@@ -702,6 +722,15 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
           >
             📸 Capture
           </button>
+          {apiReady && (
+            <button
+              onClick={togglePlayPause}
+              className="text-[10px] px-1.5 py-0.5 rounded transition bg-gray-700 hover:bg-gray-600 text-gray-300"
+              title={isPlaying ? 'Mettre en pause' : 'Lire'}
+            >
+              {isPlaying ? '⏸️' : '▶️'}
+            </button>
+          )}
           {apiReady && (
             <button
               onClick={() => setNewBookmarkMode(!newBookmarkMode)}
@@ -932,7 +961,7 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
           <div className={nativeFullscreen ? 'relative w-full h-full' : 'relative w-full bg-black'} style={nativeFullscreen ? undefined : { paddingTop: '56.25%' }}>
             <iframe
               key={videoId}
-              src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0&playsinline=1&modestbranding=1&start=${resumeChoice === 'resume' ? firstBookmark : 0}`}
+              src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0&playsinline=1&modestbranding=1&controls=0&iv_load_policy=3&start=${resumeChoice === 'resume' ? firstBookmark : 0}`}
               title="YouTube video player"
               className="absolute inset-0 w-full h-full"
               style={{ border: 0 }}
@@ -944,6 +973,15 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
         ) : (
           <div className={nativeFullscreen ? 'relative w-full h-full' : 'relative w-full bg-black'} style={nativeFullscreen ? undefined : { paddingTop: '56.25%' }}>
             <div ref={containerRef} className="absolute inset-0 w-full h-full" />
+            {/* Calque invisible : un tap sur l'image lit/met en pause, comme sur youtube.com — sans jamais
+                afficher de bouton par-dessus la vidéo (les commandes YouTube natives sont masquées via controls=0) */}
+            <button
+              onClick={togglePlayPause}
+              className="absolute inset-0 w-full h-full bg-transparent cursor-pointer"
+              style={{ WebkitTapHighlightColor: 'transparent' }}
+              title={isPlaying ? 'Mettre en pause' : 'Lire'}
+              aria-label={isPlaying ? 'Mettre en pause' : 'Lire'}
+            />
           </div>
         )}
         {nativeFullscreen && (
