@@ -4515,7 +4515,7 @@ function GuitarApp() {
   const [tileSize, setTileSize] = useState('medium');
   const [sortBy, setSortBy] = useState('favorite');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const DEFAULT_SIDEBAR_SECTIONS = { sort: true, filters: false, display: false, roadmap: false, storage: false };
+  const DEFAULT_SIDEBAR_SECTIONS = { sort: true, filters: false, display: false, roadmap: false, journal: false, storage: false };
   const [sidebarSections, setSidebarSections] = useState(DEFAULT_SIDEBAR_SECTIONS);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [prefsSaved, setPrefsSaved] = useState(false);
@@ -4671,8 +4671,28 @@ function GuitarApp() {
     if (selectedSongId === id) setSelectedSongId(null);
   };
 
+  const [progressHistory, setProgressHistory] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await window.storage.get('guitar-lab:progress-history', false);
+        if (r?.value) setProgressHistory(JSON.parse(r.value));
+      } catch (err) { /* pas d'historique enregistré */ }
+    })();
+  }, []);
+
   const updateSong = (updatedSong) => {
+    const prev = songs.find(s => s.id === updatedSong.id);
     setSongs(songs.map(s => s.id === updatedSong.id ? { ...updatedSong, updatedAt: new Date().toISOString() } : s));
+    // Trace discrètement l'évolution de la maîtrise dans le temps, pour le futur graphe de tendance du Journal
+    if (prev && (prev.progress || 0) !== (updatedSong.progress || 0)) {
+      const entry = { songId: updatedSong.id, date: new Date().toISOString(), progress: updatedSong.progress || 0 };
+      setProgressHistory(hist => {
+        const next = [...hist, entry].slice(-3000);
+        window.storage.set('guitar-lab:progress-history', JSON.stringify(next), false).catch(() => {});
+        return next;
+      });
+    }
   };
 
   const toggleFavorite = (id) => {
@@ -4708,6 +4728,7 @@ function GuitarApp() {
   // Session du jour : enchaîne automatiquement les morceaux à revoir, avec chrono auto-démarré
   const [sessionSetupOpen, setSessionSetupOpen] = useState(false);
   const [roadmapOpen, setRoadmapOpen] = useState(false);
+  const [journalOpen, setJournalOpen] = useState(false);
   const [sessionQueue, setSessionQueue] = useState(null); // tableau d'ids, ou null si aucune session en cours
   const [sessionIndex, setSessionIndex] = useState(0);
 
@@ -5017,6 +5038,22 @@ function GuitarApp() {
                   </SidebarSection>
 
                   <SidebarSection
+                    title="Journal"
+                    icon="📊"
+                    isOpen={sidebarSections.journal}
+                    onToggle={() => toggleSidebarSection('journal')}
+                  >
+                    <p className="text-xs text-gray-400">Ton carnet de suivi : temps passé, styles joués, tendances dans le temps.</p>
+                    <button
+                      onClick={() => setJournalOpen(true)}
+                      className="w-full px-2 py-2 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold transition"
+                      title="Ouvrir le journal en grand"
+                    >
+                      Voir en grand →
+                    </button>
+                  </SidebarSection>
+
+                  <SidebarSection
                     title="Stockage"
                     icon="💾"
                     isOpen={sidebarSections.storage}
@@ -5258,7 +5295,24 @@ function GuitarApp() {
             setSelectedVersionId(song?.versions[0]?.id);
             setAppMode('editor');
           }}
+          onToggleSetlist={toggleSetlist}
           onClose={() => setRoadmapOpen(false)}
+        />
+      )}
+      {journalOpen && (
+        <JournalModal
+          songs={songs}
+          practiceSessions={practiceSessions}
+          progressHistory={progressHistory}
+          weeklyGoalMinutes={weeklyGoalMinutes}
+          onUpdateWeeklyGoal={updateWeeklyGoal}
+          onSelectSong={(id) => {
+            setSelectedSongId(id);
+            const song = songs.find(s => s.id === id);
+            setSelectedVersionId(song?.versions[0]?.id);
+            setAppMode('editor');
+          }}
+          onClose={() => setJournalOpen(false)}
         />
       )}
     </div>
@@ -5322,7 +5376,35 @@ function styleIcon(style) {
   return null;
 }
 
-function RoadmapModal({ songs, practiceSessions = [], onSelectSong, onClose }) {
+// Petit ascenseur flottant : accès rapide au haut / bas d'une longue liste (pratique pour le glisser-déposer)
+function QuickScrollButtons({ scrollRef }) {
+  const scrollTo = (pos) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: pos === 'top' ? 0 : el.scrollHeight, behavior: 'smooth' });
+  };
+  return (
+    <div className="absolute bottom-3 right-3 z-20 flex flex-col gap-1.5">
+      <button
+        onClick={() => scrollTo('top')}
+        className="w-8 h-8 rounded-full bg-gray-700/90 hover:bg-gray-600 border border-gray-600 shadow-lg flex items-center justify-center text-gray-300"
+        title="Aller tout en haut"
+      >
+        <ArrowUp className="w-4 h-4" />
+      </button>
+      <button
+        onClick={() => scrollTo('bottom')}
+        className="w-8 h-8 rounded-full bg-gray-700/90 hover:bg-gray-600 border border-gray-600 shadow-lg flex items-center justify-center text-gray-300"
+        title="Aller tout en bas"
+      >
+        <ArrowDown className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
+function RoadmapModal({ songs, practiceSessions = [], onSelectSong, onToggleSetlist, onClose }) {
+  const scrollRef = useRef(null);
   const now = new Date();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
@@ -5439,6 +5521,8 @@ function RoadmapModal({ songs, practiceSessions = [], onSelectSong, onClose }) {
     setNewIdea('');
   };
   const removeIdea = (id) => saveIdeas(ideas.filter(i => i.id !== id));
+
+  const setlistSongs = songs.filter(s => s.isSetlist);
 
   const moveInSection = (section, songId, dir) => {
     const ids = listsBySection[section].map(s => s.id);
@@ -5597,8 +5681,9 @@ function RoadmapModal({ songs, practiceSessions = [], onSelectSong, onClose }) {
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-gray-700 shadow-2xl">
-        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-start gap-2">
+      <div className="relative bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] border border-gray-700 shadow-2xl flex flex-col">
+      <div ref={scrollRef} className="overflow-y-auto rounded-lg">
+        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-start gap-2 z-10">
           <div>
             <h2 className="font-bold text-amber-400 text-lg">🗺️ Feuille de route</h2>
             <p className="text-[11px] text-gray-500 mt-0.5">⠿ glisse pour réordonner • ↑↓ pas à pas • le menu déplace vers une autre catégorie • ↺ revient à l'automatique</p>
@@ -5639,6 +5724,30 @@ function RoadmapModal({ songs, practiceSessions = [], onSelectSong, onClose }) {
         )}
 
         <div className="p-4 space-y-4">
+          {setlistSongs.length > 0 && (
+            <section>
+              <h3 className="font-semibold mb-2 text-pink-400">🎉 Prêt pour la scène</h3>
+              <div className="space-y-1.5">
+                {setlistSongs.map(s => (
+                  <div key={s.id} className="flex items-center gap-2 bg-gray-750 rounded-lg px-3 py-2 border-l-4" style={{ borderColor: progressToRoadmapColor(s.progress) }}>
+                    <PickIcon difficulty={s.difficulty} size={13} className="flex-shrink-0" />
+                    <button onClick={() => { onSelectSong?.(s.id); onClose?.(); }} className="flex-1 min-w-0 text-left">
+                      <p className="text-sm font-semibold truncate">{s.title}</p>
+                      <p className="text-xs text-gray-400 truncate">{s.artist} • {s.progress || 0}% maîtrisé</p>
+                    </button>
+                    <button
+                      onClick={() => onToggleSetlist?.(s.id)}
+                      className="flex-shrink-0 p-1.5 hover:bg-gray-600/60 rounded text-gray-400 hover:text-pink-400"
+                      title="Retirer de la sélection soirée"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
           {inProgress.length > 0 && (
             <section>
               <h3 className={`font-semibold mb-2 ${ROADMAP_SECTION_META.progress.titleColor}`}>{ROADMAP_SECTION_META.progress.label}</h3>
@@ -5699,11 +5808,305 @@ function RoadmapModal({ songs, practiceSessions = [], onSelectSong, onClose }) {
           </section>
         </div>
       </div>
+      <QuickScrollButtons scrollRef={scrollRef} />
+      </div>
     </div>
   );
 }
 
 // Modal de préparation de la session du jour : reprend la file de révision, réordonnable avant de lancer
+// Journal global : carnet de suivi (temps, styles, tendances) — pas un outil de planification
+const JOURNAL_WINDOWS = [
+  { key: '7', label: '7 jours', days: 7 },
+  { key: '30', label: '30 jours', days: 30 },
+  { key: 'all', label: 'Tout', days: null },
+];
+
+function JournalModal({ songs, practiceSessions = [], progressHistory = [], weeklyGoalMinutes = 120, onUpdateWeeklyGoal, onSelectSong, onClose }) {
+  const scrollRef = useRef(null);
+  const [windowKey, setWindowKey] = useState('7');
+  const win = JOURNAL_WINDOWS.find(w => w.key === windowKey);
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+  const cutoff = win.days ? now - win.days * DAY : 0;
+
+  const sessionsInWindow = useMemo(
+    () => practiceSessions.filter(e => new Date(e.date).getTime() >= cutoff),
+    [practiceSessions, cutoff]
+  );
+
+  const songById = useMemo(() => {
+    const map = {};
+    songs.forEach(s => { map[s.id] = s; });
+    return map;
+  }, [songs]);
+
+  const totalSec = sessionsInWindow.reduce((sum, e) => sum + (e.durationSec || 0), 0);
+  const sessionCount = sessionsInWindow.length;
+  const distinctSongsCount = new Set(sessionsInWindow.map(e => e.songId)).size;
+
+  // Série actuelle (jours consécutifs avec au moins une session), sur tout l'historique
+  const streak = useMemo(() => {
+    const daysWithSession = new Set(practiceSessions.map(e => new Date(e.date).toDateString()));
+    let count = 0;
+    let cursor = new Date();
+    if (!daysWithSession.has(cursor.toDateString())) cursor = new Date(cursor.getTime() - DAY);
+    while (daysWithSession.has(cursor.toDateString())) {
+      count++;
+      cursor = new Date(cursor.getTime() - DAY);
+    }
+    return count;
+  }, [practiceSessions]);
+
+  // Barres de temps par période (jour ou semaine selon la fenêtre choisie)
+  const barBuckets = useMemo(() => {
+    if (windowKey === 'all') {
+      if (practiceSessions.length === 0) return [];
+      const weekMs = 7 * DAY;
+      const oldest = Math.min(...practiceSessions.map(e => new Date(e.date).getTime()));
+      const weeksSpan = Math.min(12, Math.max(1, Math.ceil((now - oldest) / weekMs) + 1));
+      return Array.from({ length: weeksSpan }, (_, i) => {
+        const end = now - (weeksSpan - 1 - i) * weekMs;
+        const start = end - weekMs;
+        const sec = practiceSessions
+          .filter(e => { const t = new Date(e.date).getTime(); return t >= start && t < end; })
+          .reduce((sum, e) => sum + (e.durationSec || 0), 0);
+        return { minutes: Math.round(sec / 60) };
+      });
+    }
+    const days = win.days;
+    return Array.from({ length: days }, (_, i) => {
+      const d = new Date(now - (days - 1 - i) * DAY);
+      const sec = practiceSessions
+        .filter(e => new Date(e.date).toDateString() === d.toDateString())
+        .reduce((sum, e) => sum + (e.durationSec || 0), 0);
+      return { label: d.toLocaleDateString('fr-FR', { weekday: 'short' }), minutes: Math.round(sec / 60) };
+    });
+  }, [windowKey, practiceSessions, now]);
+  const maxBar = Math.max(...barBuckets.map(b => b.minutes), 1);
+
+  // Répartition par style / technique (temps cumulé sur la fenêtre choisie)
+  const rankBy = (keyFn) => {
+    const map = {};
+    sessionsInWindow.forEach(e => {
+      const song = songById[e.songId];
+      const key = song ? keyFn(song) : null;
+      if (!key) return;
+      map[key] = (map[key] || 0) + (e.durationSec || 0);
+    });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  };
+  const styleRanking = rankBy(s => s.style && s.style.trim());
+  const techniqueRanking = rankBy(s => s.technique);
+  const maxRankSec = Math.max(...styleRanking.map(([, v]) => v), ...techniqueRanking.map(([, v]) => v), 1);
+
+  // Top morceaux pratiqués sur la fenêtre
+  const songTimeMap = {};
+  sessionsInWindow.forEach(e => { songTimeMap[e.songId] = (songTimeMap[e.songId] || 0) + (e.durationSec || 0); });
+  const topSongs = Object.entries(songTimeMap)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([songId, sec]) => ({ song: songById[songId], sec }))
+    .filter(x => x.song);
+  const maxSongSec = Math.max(...topSongs.map(x => x.sec), 1);
+
+  // Tendance de progression : moyenne des mises à jour de maîtrise par semaine, si assez de recul
+  const progressWeeks = useMemo(() => {
+    if (progressHistory.length === 0) return [];
+    const weekMs = 7 * DAY;
+    const oldest = Math.min(...progressHistory.map(e => new Date(e.date).getTime()));
+    const span = Math.min(10, Math.max(1, Math.ceil((now - oldest) / weekMs) + 1));
+    return Array.from({ length: span }, (_, i) => {
+      const end = now - (span - 1 - i) * weekMs;
+      const start = end - weekMs;
+      const vals = progressHistory.filter(e => { const t = new Date(e.date).getTime(); return t >= start && t < end; }).map(e => e.progress);
+      return { avg: vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null };
+    });
+  }, [progressHistory, now]);
+  const hasEnoughProgressHistory = progressWeeks.filter(w => w.avg !== null).length >= 2;
+
+  const techniqueLabel = (t) => ({ fingerstyle: 'Fingerstyle', rythmique: 'Rythmique', 'les deux': 'Les deux' }[t] || t);
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="relative bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] border border-gray-700 shadow-2xl flex flex-col">
+      <div ref={scrollRef} className="overflow-y-auto rounded-lg">
+        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-start gap-2 z-10">
+          <div>
+            <h2 className="font-bold text-amber-400 text-lg">📊 Journal</h2>
+            <p className="text-[11px] text-gray-500 mt-0.5">Ton carnet de suivi — temps passé, styles joués, tendances. Pas un planning, juste ta progression au fil de l'envie.</p>
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded flex-shrink-0">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-5">
+          <div className="flex gap-1">
+            {JOURNAL_WINDOWS.map(w => (
+              <button
+                key={w.key}
+                onClick={() => setWindowKey(w.key)}
+                className={`flex-1 px-2 py-1.5 rounded text-xs font-semibold transition ${windowKey === w.key ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+              >
+                {w.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+              <div className="text-[10px] text-gray-400">⏱️ Temps</div>
+              <div className="text-lg font-bold text-sky-400">{formatDuration(totalSec)}</div>
+            </div>
+            <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+              <div className="text-[10px] text-gray-400">🎯 Sessions</div>
+              <div className="text-lg font-bold text-amber-400">{sessionCount}</div>
+            </div>
+            <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+              <div className="text-[10px] text-gray-400">🎸 Morceaux</div>
+              <div className="text-lg font-bold text-green-400">{distinctSongsCount}</div>
+            </div>
+            <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+              <div className="text-[10px] text-gray-400">🔥 Série</div>
+              <div className="text-lg font-bold text-purple-400">{streak} j</div>
+            </div>
+          </div>
+
+          {windowKey === '7' && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-gray-400">Objectif hebdomadaire</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={1}
+                    max={2000}
+                    value={weeklyGoalMinutes}
+                    onChange={(e) => onUpdateWeeklyGoal?.(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    className="w-16 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs text-right focus:outline-none focus:border-amber-500"
+                  />
+                  <span className="text-xs text-gray-400">min</span>
+                </div>
+              </div>
+              <div className="w-full bg-gray-700 rounded-full h-2">
+                <div className="bg-amber-500 h-full rounded-full transition-all" style={{ width: `${Math.min(100, Math.round((totalSec / 60) / Math.max(1, weeklyGoalMinutes) * 100))}%` }} />
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1">{Math.round(totalSec / 60)} / {weeklyGoalMinutes} min cette semaine</p>
+            </div>
+          )}
+
+          {barBuckets.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-400 mb-2">
+                {windowKey === 'all' ? 'Minutes par semaine' : windowKey === '30' ? 'Minutes par jour (30 derniers jours)' : 'Minutes par jour (7 derniers jours)'}
+              </p>
+              <div className="flex items-end gap-0.5 h-20">
+                {barBuckets.map((b, i) => (
+                  <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1 min-w-0">
+                    <div
+                      className="w-full bg-amber-600 rounded-t"
+                      style={{ height: `${Math.max(2, (b.minutes / maxBar) * 100)}%` }}
+                      title={`${b.minutes} min`}
+                    />
+                    {barBuckets.length <= 12 && <span className="text-[8px] text-gray-500 truncate w-full text-center">{b.label}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <p className="text-xs text-gray-400 mb-2">📈 Évolution de la maîtrise</p>
+            {hasEnoughProgressHistory ? (
+              <div className="flex items-end gap-1 h-16">
+                {progressWeeks.map((w, i) => (
+                  <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1">
+                    <div
+                      className="w-full rounded-t"
+                      style={{
+                        height: w.avg !== null ? `${Math.max(4, w.avg)}%` : '2%',
+                        backgroundColor: w.avg !== null ? progressToRoadmapColor(w.avg) : '#374151',
+                      }}
+                      title={w.avg !== null ? `${w.avg}% en moyenne cette semaine-là` : 'Pas de mise à jour cette semaine-là'}
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500 italic bg-gray-750 rounded-lg p-3 border border-gray-700">
+                Le suivi vient de démarrer — chaque fois que tu ajustes la maîtrise d'un morceau, ça s'enregistre ici. Reviens dans quelques semaines pour voir la tendance se dessiner. 🌱
+              </p>
+            )}
+          </div>
+
+          {styleRanking.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-400 mb-2">🎨 Styles les plus joués</p>
+              <div className="space-y-1.5">
+                {styleRanking.map(([style, sec]) => (
+                  <div key={style} className="flex items-center gap-2">
+                    <span className="text-xs w-24 truncate flex-shrink-0">{styleIcon(style) || '🎵'} {style}</span>
+                    <div className="flex-1 bg-gray-700 rounded-full h-2.5 overflow-hidden">
+                      <div className="bg-sky-500 h-full rounded-full" style={{ width: `${(sec / maxRankSec) * 100}%` }} />
+                    </div>
+                    <span className="text-[10px] text-gray-400 w-12 text-right flex-shrink-0">{formatDuration(sec)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {techniqueRanking.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-400 mb-2">✋ Techniques pratiquées</p>
+              <div className="space-y-1.5">
+                {techniqueRanking.map(([tech, sec]) => (
+                  <div key={tech} className="flex items-center gap-2">
+                    <span className="text-xs w-24 truncate flex-shrink-0">{techniqueLabel(tech)}</span>
+                    <div className="flex-1 bg-gray-700 rounded-full h-2.5 overflow-hidden">
+                      <div className="bg-purple-500 h-full rounded-full" style={{ width: `${(sec / maxRankSec) * 100}%` }} />
+                    </div>
+                    <span className="text-[10px] text-gray-400 w-12 text-right flex-shrink-0">{formatDuration(sec)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {topSongs.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-400 mb-2">🏆 Morceaux les plus pratiqués</p>
+              <div className="space-y-1.5">
+                {topSongs.map(({ song, sec }) => (
+                  <button
+                    key={song.id}
+                    onClick={() => { onSelectSong?.(song.id); onClose?.(); }}
+                    className="w-full flex items-center gap-2 bg-gray-750 hover:bg-gray-700 rounded-lg px-2.5 py-1.5 transition text-left"
+                  >
+                    <PickIcon difficulty={song.difficulty} size={12} className="flex-shrink-0" />
+                    <span className="text-xs flex-1 min-w-0 truncate">{song.title}</span>
+                    <div className="w-16 bg-gray-700 rounded-full h-1.5 flex-shrink-0">
+                      <div className="bg-amber-500 h-full rounded-full" style={{ width: `${(sec / maxSongSec) * 100}%` }} />
+                    </div>
+                    <span className="text-[10px] text-gray-400 w-12 text-right flex-shrink-0">{formatDuration(sec)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {sessionCount === 0 && (
+            <p className="text-center text-gray-500 py-6 text-sm">Aucune session de pratique sur cette période.</p>
+          )}
+        </div>
+      </div>
+      <QuickScrollButtons scrollRef={scrollRef} />
+      </div>
+    </div>
+  );
+}
+
 function SessionSetupModal({ songs, onStart, onCancel }) {
   const [order, setOrder] = useState(() => songs.map(s => s.id));
   const orderedSongs = order.map(id => songs.find(s => s.id === id)).filter(Boolean);
