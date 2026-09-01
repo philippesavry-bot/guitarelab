@@ -47,6 +47,21 @@
     <div id="root"></div>
 
     <script>
+      // --- Enregistrement du Service Worker (mise en cache offline) ---
+      // ⚠️ Sans cet appel, sw.js existe mais n'est jamais activé : rien n'est mis en cache et le mode
+      // hors connexion ne peut pas fonctionner. C'était le bug bloquant jusqu'ici.
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('./sw.js').then(reg => {
+            console.log('✅ Service Worker enregistré, scope :', reg.scope);
+          }).catch(err => {
+            console.error('❌ Échec de l\'enregistrement du Service Worker :', err);
+          });
+        });
+      }
+    </script>
+
+    <script>
       // --- Stockage persistant local (IndexedDB — quota bien plus généreux que localStorage,
       //     essentiel car les fiches contiennent des photos encodées en base64) ---
       var LS_PREFIX = 'guitar-lab-html:';
