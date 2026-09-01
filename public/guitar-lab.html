@@ -29,6 +29,13 @@
     <script src="https://unpkg.com/lucide@0.470.0/dist/umd/lucide.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js" crossorigin></script>
     <script src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
+    <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+    <script>
+      // Worker pdf.js chargé depuis le même CDN, nécessaire pour l'extraction de texte/rendu de pages
+      if (window['pdfjsLib']) {
+        window['pdfjsLib'].GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+      }
+    </script>
     <style>
       html, body, #root { height: 100%; }
       body { margin: 0; background: #111827; color: #fff; -webkit-text-size-adjust: 100%; }
@@ -4263,6 +4270,140 @@ function newId() {
   return Date.now().toString() + Math.random().toString(36).slice(2);
 }
 
+// ============================================================================
+// IMPORT PDF / TEXTE : analyse une fiche accords/paroles (chords au-dessus des
+// paroles) pour en déduire une structure (Intro / Couplet / Refrain...) et les
+// accords de chaque ligne. Reconnaît automatiquement les refrains qui se
+// répètent (même texte de paroles) pour les nommer "Refrain".
+// ============================================================================
+const CHORD_TOKEN_RE = /^\(?[A-G](#|b)?(maj7|m7b5|m7|maj|sus2|sus4|dim7|dim|aug|add\d|6|9|11|13|7|m)?(\/[A-G](#|b)?)?\)?$/;
+
+function isChordToken(tok) {
+  const t = (tok || '').trim();
+  if (!t || t === '|' || t === '-' || t === '_') return false;
+  return CHORD_TOKEN_RE.test(t);
+}
+
+function isLikelyChordLine(line) {
+  const tokens = line.replace(/\|/g, ' ').split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return false;
+  const chordish = tokens.filter(isChordToken).length;
+  return chordish / tokens.length >= 0.8;
+}
+
+function extractChordsFromLine(line) {
+  const tokens = line.replace(/\|/g, ' ').split(/\s+/).filter(Boolean);
+  return tokens.filter(isChordToken);
+}
+
+function normalizeLyricSignature(s) {
+  return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+// Lignes de bruit habituelles des sites de fiches d'accords, à ignorer si rencontrées
+const PDF_NOISE_PATTERNS = [
+  /la bo[iî]te [aà] chansons/i,
+  /^paroles et musique/i,
+  /^accords de guitare/i,
+  /ce document est r[ée]serv[ée]/i,
+  /^\d+\/\d+$/,
+  /^https?:\/\//i,
+];
+
+function isNoiseLine(line) {
+  const clean = line.trim();
+  if (!clean) return false;
+  return PDF_NOISE_PATTERNS.some(re => re.test(clean));
+}
+
+function parseChordSheetItems(items) {
+  const kept = [];
+  for (const it of items) {
+    const t = it.text || '';
+    if (/^accords de guitare/i.test(t.trim())) break;
+    if (isNoiseLine(t)) continue;
+    kept.push(it);
+  }
+
+  const blocks = [];
+  let current = [];
+  for (const it of kept) {
+    if (!(it.text || '').trim()) {
+      if (current.length) { blocks.push(current); current = []; }
+    } else {
+      current.push(it);
+    }
+  }
+  if (current.length) blocks.push(current);
+
+  const parsed = blocks.map(blockItems => {
+    const chords = [];
+    const lyricLines = [];
+    blockItems.forEach(it => {
+      const t = it.text;
+      if (isLikelyChordLine(t)) chords.push(...extractChordsFromLine(t));
+      else if (t.trim()) lyricLines.push(t.trim());
+    });
+    return { chords, lyricSig: normalizeLyricSignature(lyricLines[0] || ''), hasLyrics: lyricLines.length > 0, items: blockItems };
+  }).filter(b => b.chords.length > 0);
+
+  if (parsed.length === 0) return [];
+
+  const sigCounts = {};
+  parsed.forEach(b => { if (b.lyricSig) sigCounts[b.lyricSig] = (sigCounts[b.lyricSig] || 0) + 1; });
+
+  const refrainNames = {};
+  let refrainN = 0;
+  let coupletN = 0;
+  return parsed.map((b, i) => {
+    let name;
+    if (!b.hasLyrics && i === 0) {
+      name = 'Intro';
+    } else if (b.lyricSig && sigCounts[b.lyricSig] >= 2) {
+      if (!refrainNames[b.lyricSig]) {
+        refrainN += 1;
+        refrainNames[b.lyricSig] = refrainN === 1 ? 'Refrain' : `Refrain ${refrainN}`;
+      }
+      name = refrainNames[b.lyricSig];
+    } else {
+      coupletN += 1;
+      name = `Couplet ${coupletN}`;
+    }
+    return { name, chords: b.chords.slice(0, 64), items: b.items };
+  }).slice(0, 30);
+}
+
+// Version texte simple (pour le collage manuel, sans info de position pour l'image)
+function parseChordSheetLines(rawLines) {
+  return parseChordSheetItems(rawLines.map(text => ({ text }))).map(({ name, chords }) => ({ name, chords }));
+}
+
+// Convertit les sections détectées ({name, chords}) au format attendu par version.structure
+function chordSectionsToStructure(sections, colsPerRow = 4) {
+  return sections.map((sec, idx) => {
+    const cols = Math.min(colsPerRow, Math.max(1, sec.chords.length));
+    const cells = sec.chords.length > 0
+      ? sec.chords.map((chord, i) => ({ id: `${Date.now()}-${idx}-${i}`, split: false, chord, top: '', bottom: '' }))
+      : [{ id: `${Date.now()}-${idx}-0`, split: false, chord: '', top: '', bottom: '' }];
+    // Complète la dernière ligne avec des cases vides pour obtenir une grille rectangulaire
+    const remainder = cells.length % cols;
+    if (remainder !== 0) {
+      for (let i = 0; i < cols - remainder; i++) {
+        cells.push({ id: `${Date.now()}-${idx}-pad${i}`, split: false, chord: '', top: '', bottom: '' });
+      }
+    }
+    return {
+      id: `${Date.now()}-${idx}`,
+      section: sec.name,
+      cols,
+      rows: Math.ceil(cells.length / cols),
+      collapsed: false,
+      rhythm: [],
+      cells,
+    };
+  });
+}
+
 function SaveStatusBadge({ status, onForceSave }) {
   const [flashing, setFlashing] = useState(false);
   if (status === 'idle') return null;
@@ -8064,6 +8205,7 @@ function StructureSummary({ structure }) {
 function LeftPanel({ version, updateVersion }) {
   const SUMMARY_MODE_KEY = 'guitar-lab:structure-summary-mode';
   const [summaryMode, setSummaryMode] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -8117,6 +8259,9 @@ function LeftPanel({ version, updateVersion }) {
             <button onClick={addSection} className="w-full px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold transition mb-2">
               + Section
             </button>
+            <button onClick={() => setImportOpen(true)} className="w-full px-2 py-1 bg-sky-700 hover:bg-sky-600 rounded text-xs font-semibold transition mb-2" title="Importer un PDF de fiche accords/paroles pour pré-remplir la structure">
+              📄 Importer un PDF
+            </button>
             {version.structure.length > 1 && (
               <div className="flex gap-1">
                 <button onClick={() => setAllCollapsed(false)} className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[11px] transition">
@@ -8130,6 +8275,9 @@ function LeftPanel({ version, updateVersion }) {
           </>
         )}
       </div>
+      <datalist id="section-name-suggestions">
+        {SECTION_NAME_SUGGESTIONS.map(s => <option key={s} value={s} />)}
+      </datalist>
       <div className="flex-1 overflow-y-auto space-y-2 p-3">
         {summaryMode ? (
           <StructureSummary structure={version.structure} />
@@ -8139,6 +8287,13 @@ function LeftPanel({ version, updateVersion }) {
           ))
         )}
       </div>
+      {importOpen && (
+        <PdfImportModal
+          version={version}
+          updateVersion={updateVersion}
+          onClose={() => setImportOpen(false)}
+        />
+      )}
     </>
   );
 }
@@ -8222,15 +8377,13 @@ function SectionBuilder({ section, index, version, updateVersion }) {
         >
           {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
         </button>
-        <select
+        <input
+          type="text"
+          list="section-name-suggestions"
           value={section.section}
           onChange={(e) => updateSection({ section: e.target.value })}
           className={`w-24 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-[11px] font-semibold focus:outline-none focus:border-amber-500 ${style.text}`}
-        >
-          {SECTION_NAME_SUGGESTIONS.map((name) => (
-            <option key={name} value={name}>{name}</option>
-          ))}
-        </select>
+        />
         <div className="flex items-center gap-0.5">
           <span className="text-gray-400 text-[9px] font-semibold">L</span>
           <button
@@ -9193,6 +9346,268 @@ function ImageEditorModal({ src, onSave, onClose }) {
           <button onClick={onClose} className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold">Annuler</button>
           <button onClick={() => onSave(canvasRef.current.toDataURL('image/jpeg', 0.7))} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold">💾 Enregistrer (JPEG 70%)</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Reconstruit les lignes de texte d'une page PDF à partir des items positionnés,
+// en conservant leur position (pour pouvoir ensuite découper une image par section)
+async function extractPageLines(page, viewport) {
+  const textContent = await page.getTextContent();
+  const items = textContent.items.filter(it => (it.str || '').trim() !== '' || it.hasEOL);
+
+  // Regroupe les items par ligne (même ordonnée, à une petite tolérance près)
+  const rows = [];
+  items.forEach(it => {
+    const y = it.transform[5];
+    let row = rows.find(r => Math.abs(r.y - y) < 3);
+    if (!row) { row = { y, items: [] }; rows.push(row); }
+    row.items.push(it);
+  });
+  rows.sort((a, b) => b.y - a.y); // haut de page en premier (PDF: y croît vers le haut)
+
+  return rows.map(row => {
+    const sorted = row.items.slice().sort((a, b) => a.transform[4] - b.transform[4]);
+    let text = '';
+    let lastEndX = null;
+    const points = [];
+    sorted.forEach(it => {
+      const x = it.transform[4];
+      if (lastEndX !== null && x - lastEndX > 3) text += ' ';
+      text += it.str;
+      lastEndX = x + (it.width || 0);
+      try {
+        const p1 = viewport.convertToViewportPoint(x, it.transform[5]);
+        const p2 = viewport.convertToViewportPoint(x + (it.width || 0), it.transform[5] + (it.height || 10));
+        points.push(p1, p2);
+      } catch (err) { /* ignore un item si la conversion échoue */ }
+    });
+    const xs = points.map(p => p[0]);
+    const ys = points.map(p => p[1]);
+    return {
+      text,
+      minX: xs.length ? Math.min(...xs) : 0,
+      maxX: xs.length ? Math.max(...xs) : 0,
+      minY: ys.length ? Math.min(...ys) : 0,
+      maxY: ys.length ? Math.max(...ys) : 0,
+    };
+  });
+}
+
+// Découpe une image nette (sans marge superflue) à partir du canvas de la page, pour une section donnée
+function cropSectionImage(canvas, blockItems, padding = 10) {
+  try {
+    const valid = blockItems.filter(it => it.maxY > it.minY);
+    if (!valid.length) return null;
+    const minX = Math.max(0, Math.min(...valid.map(it => it.minX)) - padding);
+    const maxX = Math.min(canvas.width, Math.max(...valid.map(it => it.maxX)) + padding);
+    const minY = Math.max(0, Math.min(...valid.map(it => it.minY)) - padding);
+    const maxY = Math.min(canvas.height, Math.max(...valid.map(it => it.maxY)) + padding);
+    const w = Math.round(maxX - minX);
+    const h = Math.round(maxY - minY);
+    if (w < 10 || h < 10) return null;
+    const out = document.createElement('canvas');
+    out.width = w;
+    out.height = h;
+    out.getContext('2d').drawImage(canvas, minX, minY, w, h, 0, 0, w, h);
+    return out.toDataURL('image/png');
+  } catch (err) {
+    return null;
+  }
+}
+
+// Modale d'import PDF (ou collage de texte) : analyse une fiche accords/paroles et
+// propose une structure pré-remplie, à valider avant intégration dans la fiche.
+function PdfImportModal({ version, updateVersion, onClose }) {
+  const [status, setStatus] = useState('start'); // start | loading | preview | error
+  const [errorMsg, setErrorMsg] = useState('');
+  const [sections, setSections] = useState([]); // [{ id, name, chords, image, include }]
+  const [manualText, setManualText] = useState('');
+  const [showManual, setShowManual] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const buildSectionsFromParsed = (parsed) => parsed.map((p, i) => ({
+    id: `pdfimp-${i}`,
+    name: p.name,
+    chords: p.chords,
+    image: p.image || null,
+    include: true,
+  }));
+
+  const handlePdfFile = async (file) => {
+    if (!file) return;
+    setStatus('loading');
+    setErrorMsg('');
+    try {
+      if (!window.pdfjsLib) throw new Error('pdfjsLib absent');
+      const buf = await file.arrayBuffer();
+      const doc = await window.pdfjsLib.getDocument({ data: buf }).promise;
+      const allItems = [];
+      const pageBlanks = []; // marqueur de saut de page (ligne vide) entre les pages
+
+      for (let p = 1; p <= doc.numPages; p++) {
+        const page = await doc.getPage(p);
+        const viewport = page.getViewport({ scale: 2 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        try {
+          await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+        } catch (err) { /* le rendu image est facultatif : on continue sans capture si ça échoue */ }
+
+        const lines = await extractPageLines(page, viewport);
+        lines.forEach(l => allItems.push({ ...l, canvas }));
+        if (p < doc.numPages) allItems.push({ text: '', canvas: null }); // sépare les pages comme une ligne vide
+      }
+
+      const parsed = parseChordSheetItems(allItems);
+
+      if (parsed.length === 0) {
+        setStatus('error');
+        setErrorMsg("Aucun accord n'a pu être lu dans ce PDF — il s'agit probablement d'une fiche protégée où le texte est en réalité une image (fréquent sur les sites de paroles/accords). Colle le texte à la main ci-dessous à la place.");
+        setShowManual(true);
+        return;
+      }
+
+      const withImages = parsed.map(sec => {
+        const withCanvas = sec.items.filter(it => it.canvas);
+        const canvas = withCanvas[0]?.canvas;
+        const image = canvas ? cropSectionImage(canvas, withCanvas) : null;
+        return { name: sec.name, chords: sec.chords, image };
+      });
+
+      setSections(buildSectionsFromParsed(withImages));
+      setStatus('preview');
+    } catch (err) {
+      setStatus('error');
+      setErrorMsg("Impossible de lire ce PDF (" + (err?.message || err) + "). Colle le texte à la main ci-dessous à la place.");
+      setShowManual(true);
+    }
+  };
+
+  const handleManualParse = () => {
+    const parsed = parseChordSheetLines(manualText.split('\n'));
+    if (parsed.length === 0) {
+      setErrorMsg("Aucun accord détecté dans ce texte. Vérifie qu'il contient bien une ligne d'accords au-dessus de chaque ligne de paroles.");
+      return;
+    }
+    setErrorMsg('');
+    setSections(buildSectionsFromParsed(parsed));
+    setStatus('preview');
+  };
+
+  const updateSectionField = (id, updates) => {
+    setSections(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
+  };
+
+  const confirmImport = () => {
+    const chosen = sections.filter(s => s.include);
+    if (chosen.length === 0) { onClose?.(); return; }
+    const newStructure = chordSectionsToStructure(chosen);
+    const newImages = chosen.filter(s => s.image).map(s => ({ id: newId(), src: s.image, x: 0, y: 0, scale: 1 }));
+    updateVersion({
+      structure: [...version.structure, ...newStructure],
+      images: [...(version.images || []), ...newImages],
+    });
+    onClose?.();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-800 rounded-lg max-w-lg w-full max-h-[85vh] overflow-y-auto border border-gray-700 shadow-2xl">
+        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-center z-10">
+          <h3 className="font-bold text-sky-400">📄 Importer une fiche accords/paroles</h3>
+          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded"><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="p-4 space-y-3">
+          {status === 'start' && (
+            <>
+              <p className="text-xs text-gray-400">
+                Choisis un PDF de fiche accords/paroles (accords au-dessus des paroles). J'essaie d'en déduire automatiquement la structure (Intro, Couplet, Refrain...) et les accords de chaque ligne — vérifie et corrige ensuite si besoin.
+              </p>
+              <label className="block w-full text-center px-3 py-3 bg-sky-700 hover:bg-sky-600 rounded cursor-pointer font-semibold text-sm">
+                Choisir un fichier PDF
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/pdf"
+                  className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) handlePdfFile(f); }}
+                />
+              </label>
+              <button onClick={() => setShowManual(!showManual)} className="text-xs text-gray-400 hover:text-gray-200 underline">
+                {showManual ? 'Masquer' : "Ou coller le texte à la main"}
+              </button>
+            </>
+          )}
+
+          {status === 'loading' && (
+            <p className="text-sm text-gray-400 text-center py-6">Lecture du PDF en cours...</p>
+          )}
+
+          {status === 'error' && (
+            <p className="text-xs text-amber-400 bg-amber-900/20 border border-amber-700/40 rounded-lg p-3">{errorMsg}</p>
+          )}
+
+          {(showManual || status === 'error') && status !== 'preview' && (
+            <div className="space-y-2">
+              <textarea
+                value={manualText}
+                onChange={(e) => setManualText(e.target.value)}
+                placeholder={"Colle ici le texte, accords au-dessus des paroles, ex:\nC        G        Am\nLet's dance in style..."}
+                rows={8}
+                className="w-full px-2 py-2 bg-gray-900 border border-gray-600 rounded text-xs font-mono text-gray-200 focus:outline-none focus:border-sky-500"
+              />
+              <button onClick={handleManualParse} className="w-full px-3 py-2 bg-sky-700 hover:bg-sky-600 rounded text-sm font-semibold">
+                Analyser ce texte
+              </button>
+            </div>
+          )}
+
+          {status === 'preview' && (
+            <>
+              <p className="text-xs text-gray-400">{sections.length} section(s) détectée(s) — décoche celles à ignorer, corrige les noms si besoin.</p>
+              <div className="space-y-2">
+                {sections.map(sec => (
+                  <div key={sec.id} className={`rounded-lg border p-2 flex gap-2 ${sec.include ? 'border-sky-600 bg-sky-900/10' : 'border-gray-700 bg-gray-900/30 opacity-60'}`}>
+                    <input
+                      type="checkbox"
+                      checked={sec.include}
+                      onChange={(e) => updateSectionField(sec.id, { include: e.target.checked })}
+                      className="mt-1 flex-shrink-0"
+                    />
+                    {sec.image && (
+                      <img src={sec.image} alt="" className="w-14 h-14 object-cover rounded border border-gray-600 flex-shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <input
+                        type="text"
+                        list="section-name-suggestions"
+                        value={sec.name}
+                        onChange={(e) => updateSectionField(sec.id, { name: e.target.value })}
+                        className="w-full px-1.5 py-0.5 bg-gray-800 border border-gray-600 rounded text-xs font-semibold text-amber-300 mb-1 focus:outline-none focus:border-sky-500"
+                      />
+                      <p className="text-[11px] text-gray-400 font-mono truncate">{sec.chords.join(' - ') || '—'}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        {status === 'preview' && (
+          <div className="p-4 border-t border-gray-700 flex gap-2 sticky bottom-0 bg-gray-800">
+            <button onClick={confirmImport} className="flex-1 px-3 py-2 bg-sky-600 hover:bg-sky-500 rounded font-semibold text-sm">
+              ✓ Importer {sections.filter(s => s.include).length} section(s)
+            </button>
+            <button onClick={onClose} className="flex-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded font-semibold text-sm">
+              ✕ Annuler
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
