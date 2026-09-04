@@ -51,13 +51,13 @@
     <div id="root"></div>
 
     <script>
-      // --- Service Worker avec timeout de sécurité (ne bloque jamais React) ---
+      // Ancien cache hors-ligne retiré : il servait une version périmée de l'app
+      // installée sur l'écran d'accueil. On désenregistre ce qui traîne encore.
       if ('serviceWorker' in navigator) {
-        // Enregistrer le SW en arrière-plan sans bloquer
         setTimeout(() => {
-          navigator.serviceWorker.register('./sw.js')
-            .then(reg => console.log('✅ Service Worker enregistré'))
-            .catch(err => console.warn('⚠️ Service Worker non disponible (mode offline désactivé)'));
+          navigator.serviceWorker.getRegistrations()
+            .then((regs) => regs.forEach((r) => r.unregister()))
+            .catch(() => {});
         }, 100);
       }
 
@@ -70,6 +70,7 @@
         }
       }, 5000);
     </script>
+
 
     <script>
       // --- Stockage persistant local (IndexedDB — quota bien plus généreux que localStorage,
@@ -4113,15 +4114,7 @@ function DebugPanel() {
       setIsOnline(false);
       addLog("🔴 Offline mode", "warning");
     });
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.ready.then(reg => {
-        setSwStatus("✅ Actif");
-        addLog("Service Worker enregistré", "success");
-      }).catch(err => {
-        setSwStatus("❌ Erreur");
-        addLog(`SW error: ${err.message}`, "error");
-      });
-    }
+    setSwStatus("— désactivé");
     addLog("🎸 Guitar Lab démarré", "info");
   }, []);
   return /*#__PURE__*/React.createElement("div", {
