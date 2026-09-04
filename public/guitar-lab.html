@@ -10443,6 +10443,15 @@
       
             
       
-</script>
+
+      // Lancer React avec un timeout de sécurité
+      setTimeout(() => {
+        const bootEl = document.getElementById('boot');
+        if (bootEl) bootEl.remove();
+        if (document.getElementById('root')) {
+          ReactDOM.createRoot(document.getElementById('root')).render(<GuitarApp />);
+        }
+      }, 100);
+    </script>
   </body>
 </html>
