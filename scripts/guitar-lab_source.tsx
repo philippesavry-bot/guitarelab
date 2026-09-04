@@ -1,3 +1,10 @@
+const { useState, useRef, useEffect, useMemo, useCallback } = React;
+      const {
+        ChevronDown, ChevronRight, ChevronLeft, Plus, Music, X, Star, Menu, Edit2,
+        Trash2, Play, Pause, BookOpen, Maximize2, Minimize2, ArrowDown, ArrowUp, Volume2, VolumeX,
+        TrendingUp, Calendar, Zap, Search, GripVertical,
+      } = window.Icons;
+
 // Suggestions de noms de section (structure du morceau)
 const SECTION_NAME_SUGGESTIONS = ['Intro', 'Couplet', 'Pré-refrain', 'Refrain', 'Pont', 'Interlude', 'Solo', 'Outro', 'Coda', 'Finale'];
 
@@ -6704,33 +6711,19 @@ function suggestKeywords(song) {
 }
 
 // ============================================
-// 🎵 EXTRACTION & PRÉVISUALISATION YOUTUBE
+// 🎵 EXTRACTION YOUTUBE METADATA
 // ============================================
-
-/**
- * Extrait les métadonnées d'un titre YouTube
- * Patterns courants :
- *   "Artist - Title [Tutorial]"
- *   "Title - Artist"
- *   "Title | Artist"
- *   "Title by Artist"
- */
 const extractYouTubeMetadata = (title) => {
   if (!title || typeof title !== 'string') {
     return { title: '', artist: '', language: 'FR', style: '', bpm: 120 };
   }
-
   const normalizeText = (str) => str?.trim?.() || '';
   let extracted = { title: '', artist: '', language: 'FR', style: '', bpm: 120 };
-
-  // Patterns à tester (ordre d'importance)
   const patterns = [
     { regex: /^(.+?)\s*[-–—]\s*(.+?)\s*(?:\[.+?\])*$/i, groups: ['artist', 'title'] },
     { regex: /^(.+?)\s*\|\s*(.+?)$/i, groups: ['title', 'artist'] },
     { regex: /^(.+?)\s+by\s+(.+?)$/i, groups: ['title', 'artist'] },
-    { regex: /^(.+?)\s*\(\s*(.+?)\s*\)$/i, groups: ['title', 'artist'] },
   ];
-
   let matched = false;
   for (const { regex, groups } of patterns) {
     const match = title.match(regex);
@@ -6741,26 +6734,16 @@ const extractYouTubeMetadata = (title) => {
       break;
     }
   }
-
-  // Fallback : utilise tout le titre
-  if (!matched) {
-    extracted.title = normalizeText(title);
-  }
-
-  // Nettoie les artéfacts YouTube
+  if (!matched) extracted.title = normalizeText(title);
   ['[Tutorial]', '[Guitar Tutorial]', '[Lesson]', '[Guitare]', '[Tuto]', '[Cover]', '[Live]'].forEach(artifact => {
     extracted.title = extracted.title.replace(new RegExp(artifact, 'gi'), '').trim();
     extracted.artist = extracted.artist.replace(new RegExp(artifact, 'gi'), '').trim();
   });
-
-  // 🔍 Détection langue
   if (/[àâäéèêëïîôùûüœç]/i.test(extracted.title + extracted.artist)) {
     extracted.language = 'FR';
   } else {
     extracted.language = 'EN';
   }
-
-  // 🎸 Détection style (mots-clés courants)
   const styleKeywords = ['rock', 'blues', 'jazz', 'pop', 'folk', 'country', 'metal', 'funk', 'latin', 'reggae'];
   const lowerTitle = (extracted.title + ' ' + extracted.artist).toLowerCase();
   for (const keyword of styleKeywords) {
@@ -6769,28 +6752,16 @@ const extractYouTubeMetadata = (title) => {
       break;
     }
   }
-
-  // 🎯 Recherche BPM (120 par défaut)
   const bpmMatch = title.match(/(\d{2,3})\s*bpm/i);
   if (bpmMatch) {
     extracted.bpm = Math.max(40, Math.min(300, parseInt(bpmMatch[1]) || 120));
   }
-
   return extracted;
 };
 
-/**
- * Modale de review/confirmation après extraction YouTube
- * Permet à l'utilisateur de corriger les données extraites
- */
-function YouTubeImportReviewModal({
-  metadata,
-  youtubeUrl,
-  onConfirm,
-  onCancel,
-}) {
+// Modale de review YouTube
+function YouTubeImportReviewModal({ metadata, youtubeUrl, onConfirm, onCancel }) {
   const [reviewed, setReviewed] = useState(metadata);
-
   const handleConfirm = () => {
     if (!reviewed.title.trim()) {
       alert('⚠️ Le titre ne peut pas être vide');
@@ -6798,60 +6769,31 @@ function YouTubeImportReviewModal({
     }
     onConfirm({ ...reviewed, youtubeUrl });
   };
-
   const inputCls = 'w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500 text-white';
   const labelCls = 'text-xs text-gray-400 block mb-1';
-
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div className="bg-gray-800 rounded-lg max-w-sm w-full border border-gray-700 shadow-2xl">
-        {/* Header */}
         <div className="p-4 border-b border-gray-700 flex justify-between items-center">
           <h3 className="font-bold text-amber-400">🔗 Importer depuis YouTube</h3>
           <button onClick={onCancel} className="p-1 hover:bg-gray-700 rounded text-sm">✕</button>
         </div>
-
-        {/* Body */}
         <div className="p-4 space-y-3 max-h-[60vh] overflow-y-auto">
-          {/* Aperçu URL */}
           <div className="bg-gray-750 px-3 py-2 rounded border border-gray-600 text-xs text-gray-300 break-all">
             🎬 {youtubeUrl}
           </div>
-
-          {/* Titre */}
           <div>
             <label className={labelCls}>Titre *</label>
-            <input
-              type="text"
-              value={reviewed.title}
-              onChange={(e) => setReviewed({ ...reviewed, title: e.target.value })}
-              className={inputCls}
-              placeholder="ex. Wonderwall"
-              autoFocus
-            />
+            <input type="text" value={reviewed.title} onChange={(e) => setReviewed({ ...reviewed, title: e.target.value })} className={inputCls} placeholder="ex. Wonderwall" autoFocus />
           </div>
-
-          {/* Artiste */}
           <div>
             <label className={labelCls}>Artiste</label>
-            <input
-              type="text"
-              value={reviewed.artist}
-              onChange={(e) => setReviewed({ ...reviewed, artist: e.target.value })}
-              className={inputCls}
-              placeholder="ex. Oasis"
-            />
+            <input type="text" value={reviewed.artist} onChange={(e) => setReviewed({ ...reviewed, artist: e.target.value })} className={inputCls} placeholder="ex. Oasis" />
           </div>
-
-          {/* Grille 2 colonnes : Langue & Style */}
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className={labelCls}>Langue</label>
-              <select
-                value={reviewed.language}
-                onChange={(e) => setReviewed({ ...reviewed, language: e.target.value })}
-                className={inputCls}
-              >
+              <select value={reviewed.language} onChange={(e) => setReviewed({ ...reviewed, language: e.target.value })} className={inputCls}>
                 <option value="FR">🇫🇷 FR</option>
                 <option value="EN">🇬🇧 EN</option>
                 <option value="ES">🇪🇸 ES</option>
@@ -6860,51 +6802,20 @@ function YouTubeImportReviewModal({
             </div>
             <div>
               <label className={labelCls}>Style</label>
-              <input
-                type="text"
-                value={reviewed.style}
-                onChange={(e) => setReviewed({ ...reviewed, style: e.target.value })}
-                className={inputCls}
-                placeholder="ex. Rock"
-              />
+              <input type="text" value={reviewed.style} onChange={(e) => setReviewed({ ...reviewed, style: e.target.value })} className={inputCls} placeholder="ex. Rock" />
             </div>
           </div>
-
-          {/* BPM */}
           <div>
             <label className={labelCls}>BPM</label>
             <div className="flex gap-2">
-              <input
-                type="number"
-                value={reviewed.bpm}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value) || 120;
-                  setReviewed({ ...reviewed, bpm: Math.max(40, Math.min(300, val)) });
-                }}
-                className={inputCls}
-                min="40"
-                max="300"
-                step="5"
-              />
+              <input type="number" value={reviewed.bpm} onChange={(e) => { const val = parseInt(e.target.value) || 120; setReviewed({ ...reviewed, bpm: Math.max(40, Math.min(300, val)) }); }} className={inputCls} min="40" max="300" step="5" />
               <div className="text-xs text-gray-400 flex items-center">BPM</div>
             </div>
           </div>
         </div>
-
-        {/* Footer */}
         <div className="p-3 border-t border-gray-700 flex gap-2">
-          <button
-            onClick={onCancel}
-            className="flex-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm font-semibold transition"
-          >
-            Annuler
-          </button>
-          <button
-            onClick={handleConfirm}
-            className="flex-1 px-3 py-2 bg-amber-600 hover:bg-amber-500 rounded text-sm font-semibold transition text-white"
-          >
-            ✅ Importer
-          </button>
+          <button onClick={onCancel} className="flex-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm font-semibold transition">Annuler</button>
+          <button onClick={handleConfirm} className="flex-1 px-3 py-2 bg-amber-600 hover:bg-amber-500 rounded text-sm font-semibold transition text-white">✅ Importer</button>
         </div>
       </div>
     </div>
@@ -6963,11 +6874,9 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
   // Handlers pour l'import YouTube
   const handleYouTubeImport = () => {
     if (!youtubeImportUrl.trim()) {
-      alert('⚠️ Veuillez entrer une URL YouTube valide');
+      alert('⚠️ Veuillez entrer une URL ou titre YouTube valide');
       return;
     }
-    // Si c'est une URL, on extrait le titre de la barre de titre du navigateur (pas possible sans API)
-    // Sinon, on utilise le texte entré comme titre vidéo
     const metadata = extractYouTubeMetadata(youtubeImportUrl);
     setPendingImportMetadata(metadata);
     setReviewOpen(true);
@@ -6975,23 +6884,15 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
 
   const handleImportConfirm = (importedData) => {
     const { youtubeUrl, title, artist, language, style, bpm } = importedData;
-    
-    // Mise à jour de la chanson avec les données extraites
     onChange({
       ...song,
       title: title || song.title,
       artist: artist || song.artist,
       language: language || song.language,
       style: style || song.style,
-      youtubeUrls: youtubeUrl 
-        ? [...links.filter(l => l.url !== youtubeUrl), { id: newId(), url: youtubeUrl }]
-        : links,
-      versions: song.versions.map((v, i) => 
-        i === 0 ? { ...v, bpm: bpm || v.bpm } : v
-      ),
+      youtubeUrls: youtubeUrl ? [...links.filter(l => l.url !== youtubeUrl), { id: newId(), url: youtubeUrl }] : links,
+      versions: song.versions.map((v, i) => (i === 0 ? { ...v, bpm: bpm || v.bpm } : v)),
     });
-    
-    // Réinitialise l'import et ferme la modale
     setYoutubeImportUrl('');
     setReviewOpen(false);
     setPendingImportMetadata(null);
@@ -7294,20 +7195,20 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
           </button>
         </div>
       </div>
-    </div>
 
-    {/* Modale de review YouTube */}
-    {reviewOpen && pendingImportMetadata && (
-      <YouTubeImportReviewModal
-        metadata={pendingImportMetadata}
-        youtubeUrl={youtubeImportUrl}
-        onConfirm={handleImportConfirm}
-        onCancel={() => {
-          setReviewOpen(false);
-          setPendingImportMetadata(null);
-        }}
-      />
-    )}
+      {/* Modale de review YouTube */}
+      {reviewOpen && pendingImportMetadata && (
+        <YouTubeImportReviewModal
+          metadata={pendingImportMetadata}
+          youtubeUrl={youtubeImportUrl}
+          onConfirm={handleImportConfirm}
+          onCancel={() => {
+            setReviewOpen(false);
+            setPendingImportMetadata(null);
+          }}
+        />
+      )}
+    </div>
   );
 }
 
@@ -10232,8 +10133,6 @@ function RightPanel({ song, version, updateVersion, onUpdateSong, onPlayVideo })
   );
 }
 
-      
-
-      const bootEl = document.getElementById("boot");
+      const bootEl = document.getElementById('boot');
       if (bootEl) bootEl.remove();
-      ReactDOM.createRoot(document.getElementById("root")).render(<GuitarApp />);
+      ReactDOM.createRoot(document.getElementById('root')).render(<GuitarApp />);
