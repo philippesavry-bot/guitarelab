@@ -49,29 +49,22 @@
     <script>
       // --- Service Worker avec timeout de sécurité (ne bloque jamais React) ---
       if ('serviceWorker' in navigator) {
-        // Essayer d'enregistrer le SW en arrière-plan
-        const registerSW = () => {
+        // Enregistrer le SW en arrière-plan sans bloquer
+        setTimeout(() => {
           navigator.serviceWorker.register('./sw.js')
-            .then(reg => console.log('✅ Service Worker enregistré, scope :', reg.scope))
-            .catch(err => console.warn('⚠️ Service Worker non disponible:', err.message));
-        };
-        
-        // Enregistrer immédiatement en parallèle, ne pas attendre 'load'
-        setTimeout(registerSW, 500);
+            .then(reg => console.log('✅ Service Worker enregistré'))
+            .catch(err => console.warn('⚠️ Service Worker non disponible (mode offline désactivé)'));
+        }, 100);
       }
 
-      // ⚠️ Timeout de sécurité : force React à démarrer après max 2s même si tout n'est pas prêt
+      // Failsafe ultime : s'assure que le message de chargement disparaît après 5s max
       setTimeout(() => {
         const bootEl = document.getElementById('boot');
-        if (bootEl && bootEl.parentNode) bootEl.parentNode.removeChild(bootEl);
-        if (window.React && window.ReactDOM && document.getElementById('root')) {
-          try {
-            window.ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(window.GuitarApp || (() => null)));
-          } catch (e) {
-            console.error('❌ Erreur au démarrage de React:', e);
-          }
+        if (bootEl) {
+          bootEl.style.display = 'none';
+          console.warn('⚠️ Démarrage long, le message de chargement a été masqué');
         }
-      }, 2000);
+      }, 5000);
     </script>
 
     <script>
