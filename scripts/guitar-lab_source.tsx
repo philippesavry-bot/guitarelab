@@ -4447,15 +4447,15 @@ function GuitarApp() {
     return () => clearTimeout(classificationsSaveTimerRef.current);
   }, [classificationOptions, classificationsLoaded]);
 
-  const addClassificationOption = (label) => {
+  const addClassificationOption = useCallback((label) => {
     const clean = label.trim();
-    if (!clean || classificationOptions.includes(clean)) return;
-    setClassificationOptions([...classificationOptions, clean]);
-  };
+    if (!clean) return;
+    setClassificationOptions(prev => prev.includes(clean) ? prev : [...prev, clean]);
+  }, []);
 
-  const removeClassificationOption = (label) => {
-    setClassificationOptions(classificationOptions.filter(c => c !== label));
-  };
+  const removeClassificationOption = useCallback((label) => {
+    setClassificationOptions(prev => prev.filter(c => c !== label));
+  }, []);
 
   const [selectedSongId, setSelectedSongId] = useState(null);
   const [selectedVersionId, setSelectedVersionId] = useState(null);
@@ -4619,10 +4619,10 @@ function GuitarApp() {
     setDraftSong(null);
   };
 
-  const deleteSong = (id) => {
-    setSongs(songs.filter(s => s.id !== id));
-    if (selectedSongId === id) setSelectedSongId(null);
-  };
+  const deleteSong = useCallback((id) => {
+    setSongs(prev => prev.filter(s => s.id !== id));
+    setSelectedSongId(prev => (prev === id ? null : prev));
+  }, []);
 
   const [progressHistory, setProgressHistory] = useState([]);
   useEffect(() => {
@@ -4634,27 +4634,38 @@ function GuitarApp() {
     })();
   }, []);
 
-  const updateSong = (updatedSong) => {
-    const prev = songs.find(s => s.id === updatedSong.id);
-    setSongs(songs.map(s => s.id === updatedSong.id ? { ...updatedSong, updatedAt: new Date().toISOString() } : s));
-    // Trace discrètement l'évolution de la maîtrise dans le temps, pour le futur graphe de tendance du Journal
-    if (prev && (prev.progress || 0) !== (updatedSong.progress || 0)) {
-      const entry = { songId: updatedSong.id, date: new Date().toISOString(), progress: updatedSong.progress || 0 };
-      setProgressHistory(hist => {
-        const next = [...hist, entry].slice(-3000);
-        window.storage.set('guitar-lab:progress-history', JSON.stringify(next), false).catch(() => {});
-        return next;
-      });
-    }
-  };
+  const updateSong = useCallback((updatedSong) => {
+    setSongs(prev => {
+      const prevSong = prev.find(s => s.id === updatedSong.id);
+      // Trace discrètement l'évolution de la maîtrise dans le temps, pour le futur graphe de tendance du Journal
+      if (prevSong && (prevSong.progress || 0) !== (updatedSong.progress || 0)) {
+        const entry = { songId: updatedSong.id, date: new Date().toISOString(), progress: updatedSong.progress || 0 };
+        setProgressHistory(hist => {
+          const next = [...hist, entry].slice(-3000);
+          window.storage.set('guitar-lab:progress-history', JSON.stringify(next), false).catch(() => {});
+          return next;
+        });
+      }
+      return prev.map(s => s.id === updatedSong.id ? { ...updatedSong, updatedAt: new Date().toISOString() } : s);
+    });
+  }, []);
 
-  const toggleFavorite = (id) => {
-    setSongs(songs.map(s => s.id === id ? { ...s, isFavorite: !s.isFavorite } : s));
-  };
+  const toggleFavorite = useCallback((id) => {
+    setSongs(prev => prev.map(s => s.id === id ? { ...s, isFavorite: !s.isFavorite } : s));
+  }, []);
 
-  const toggleSetlist = (id) => {
-    setSongs(songs.map(s => s.id === id ? { ...s, isSetlist: !s.isSetlist } : s));
-  };
+  const toggleSetlist = useCallback((id) => {
+    setSongs(prev => prev.map(s => s.id === id ? { ...s, isSetlist: !s.isSetlist } : s));
+  }, []);
+
+  // Identité stable (jamais recréée) pour ouvrir un morceau depuis la bibliothèque —
+  // nécessaire pour que React.memo sur SongItem serve réellement à quelque chose
+  const openSong = useCallback((id) => {
+    setSelectedSongId(id);
+    const song = songsRef.current.find(s => s.id === id);
+    setSelectedVersionId(song?.versions[0]?.id);
+    setAppMode('editor');
+  }, []);
 
   const markPracticed = (id) => {
     setSongs(songs.map(s => s.id === id ? { ...s, lastPracticedAt: new Date().toISOString() } : s));
@@ -5137,14 +5148,10 @@ function GuitarApp() {
                       key={song.id}
                       song={song}
                       isSelected={selectedSongId === song.id}
-                      onSelect={() => {
-                        setSelectedSongId(song.id);
-                        setSelectedVersionId(song.versions[0]?.id);
-                        setAppMode('editor');
-                      }}
-                      onDelete={() => deleteSong(song.id)}
-                      onToggleFavorite={() => toggleFavorite(song.id)}
-                      onToggleSetlist={() => toggleSetlist(song.id)}
+                      onSelect={openSong}
+                      onDelete={deleteSong}
+                      onToggleFavorite={toggleFavorite}
+                      onToggleSetlist={toggleSetlist}
                       onUpdate={updateSong}
                       viewMode={viewMode}
                       classificationOptions={classificationOptions}
@@ -5170,14 +5177,10 @@ function GuitarApp() {
                               key={song.id}
                               song={song}
                               isSelected={selectedSongId === song.id}
-                              onSelect={() => {
-                                setSelectedSongId(song.id);
-                                setSelectedVersionId(song.versions[0]?.id);
-                                setAppMode('editor');
-                              }}
-                              onDelete={() => deleteSong(song.id)}
-                              onToggleFavorite={() => toggleFavorite(song.id)}
-                              onToggleSetlist={() => toggleSetlist(song.id)}
+                              onSelect={openSong}
+                              onDelete={deleteSong}
+                              onToggleFavorite={toggleFavorite}
+                              onToggleSetlist={toggleSetlist}
                               onUpdate={updateSong}
                               viewMode={viewMode}
                               classificationOptions={classificationOptions}
@@ -6270,22 +6273,38 @@ function StorageManager() {
     }
   };
 
+  const RECOVERY_KEY = 'pre-import-backup';
+  const [hasRecovery, setHasRecovery] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await window.storage.get(RECOVERY_KEY, false);
+        setHasRecovery(!!r?.value);
+      } catch (err) { /* pas de copie de sécurité */ }
+    })();
+  }, []);
+
   const handleImportFile = (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    if (!window.confirm("Importer ce fichier remplacera tes données actuelles (morceaux, préférences...) par celles du fichier. Continuer ?")) return;
+    if (!window.confirm("Importer ce fichier remplacera tes données actuelles (morceaux, préférences...) par celles du fichier.\n\nL'état actuel sera d'abord sauvegardé automatiquement, au cas où. Continuer ?")) return;
     setBusy(true);
     setMessage(null);
     const reader = new FileReader();
     reader.onload = async (ev) => {
       try {
         const payload = JSON.parse(ev.target.result);
+        // Filet de sécurité : on garde une copie de l'état actuel avant d'écraser quoi que ce soit
+        try {
+          const currentSnapshot = await window.storage.exportBackup();
+          await window.storage.set(RECOVERY_KEY, JSON.stringify(currentSnapshot), false);
+        } catch (snapErr) { /* si la copie de sécurité échoue, on tente quand même l'import */ }
         await window.storage.importBackup(payload);
         setMessage({ type: 'ok', text: 'Données importées, rechargement…' });
         setTimeout(() => location.reload(), 600);
       } catch (err) {
-        setMessage({ type: 'error', text: 'Fichier illisible : ' + (err.message || err) });
+        setMessage({ type: 'error', text: err.message || String(err) });
         setBusy(false);
       }
     };
@@ -6294,6 +6313,23 @@ function StorageManager() {
       setBusy(false);
     };
     reader.readAsText(file);
+  };
+
+  const handleRestoreRecovery = async () => {
+    if (!window.confirm("Restaurer l'état d'avant le dernier import ? Ce qui a été importé depuis sera perdu.")) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const r = await window.storage.get(RECOVERY_KEY, false);
+      if (!r?.value) throw new Error('Aucune copie de sécurité trouvée.');
+      const snapshot = JSON.parse(r.value);
+      await window.storage.importBackup(snapshot);
+      setMessage({ type: 'ok', text: 'État restauré, rechargement…' });
+      setTimeout(() => location.reload(), 600);
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message || String(err) });
+      setBusy(false);
+    }
   };
 
   return (
@@ -6325,6 +6361,17 @@ function StorageManager() {
           <input type="file" accept="application/json,.json" onChange={handleImportFile} className="hidden" />
         </label>
       </div>
+
+      {hasRecovery && (
+        <button
+          onClick={handleRestoreRecovery}
+          disabled={busy}
+          className="w-full mt-1.5 px-2 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded text-[11px] font-semibold transition text-gray-300"
+          title="Revenir à l'état d'avant le dernier import de sauvegarde"
+        >
+          ↩️ Annuler le dernier import
+        </button>
+      )}
 
       {message && (
         <p className={`text-[10px] mt-2 ${message.type === 'error' ? 'text-red-400' : 'text-green-400'}`}>{message.text}</p>
@@ -6385,7 +6432,9 @@ function ClassificationManager({ options, onAdd, onRemove }) {
   );
 }
 
-function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onToggleSetlist, onUpdate, viewMode, classificationOptions = [], onAddClassificationOption }) {
+// Mémorisé : avec 90+ morceaux (et leurs photos), une frappe dans un champ ne doit pas faire
+// re-rendre toute la bibliothèque — seul l'élément dont les données ont réellement changé se met à jour
+const SongItem = React.memo(function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onToggleSetlist, onUpdate, viewMode, classificationOptions = [], onAddClassificationOption }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState(song);
   const [coverError, setCoverError] = useState(false);
@@ -6420,7 +6469,7 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onTo
     return (
       <>
         <div
-          onClick={onSelect}
+          onClick={() => onSelect(song.id)}
           className={`relative p-2 rounded-lg border transition cursor-pointer overflow-hidden ${
             isSelected ? 'border-amber-500 bg-amber-500/15' : 'border-gray-600 bg-gray-750 hover:bg-gray-700'
           }`}
@@ -6430,13 +6479,13 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onTo
           </div>
           <div className="flex items-start justify-between gap-1 mb-1">
             <button
-              onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
+              onClick={(e) => { e.stopPropagation(); onToggleFavorite(song.id); }}
               className="hover:opacity-75 transition flex-shrink-0"
             >
               <Star className={`w-3.5 h-3.5 ${song.isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-500'}`} />
             </button>
             <button
-              onClick={(e) => { e.stopPropagation(); onToggleSetlist(); }}
+              onClick={(e) => { e.stopPropagation(); onToggleSetlist(song.id); }}
               className="hover:opacity-75 transition flex-shrink-0"
               title="Sélectionner pour une soirée"
             >
@@ -6449,7 +6498,7 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onTo
               <Edit2 className="w-3 h-3 text-amber-400" />
             </button>
             <button
-              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              onClick={(e) => { e.stopPropagation(); onDelete(song.id); }}
               className="p-0.5 hover:bg-red-900 rounded transition flex-shrink-0"
             >
               <Trash2 className="w-3 h-3 text-red-400" />
@@ -6486,15 +6535,15 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onTo
     return (
       <>
       <div className={`flex items-center gap-2 px-3 py-2 rounded transition ${isSelected ? 'bg-amber-600 text-white' : 'bg-gray-700 hover:bg-gray-650 text-gray-100'}`}>
-        <button onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }} className="hover:opacity-75">
+        <button onClick={(e) => { e.stopPropagation(); onToggleFavorite(song.id); }} className="hover:opacity-75">
           <Star className={`w-4 h-4 ${song.isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-400'}`} />
         </button>
-        <button onClick={(e) => { e.stopPropagation(); onToggleSetlist(); }} className="hover:opacity-75" title="Sélectionner pour une soirée">
+        <button onClick={(e) => { e.stopPropagation(); onToggleSetlist(song.id); }} className="hover:opacity-75" title="Sélectionner pour une soirée">
           <span className={song.isSetlist ? 'opacity-100' : 'opacity-30 grayscale'}>🎉</span>
         </button>
         <CoverThumb size="sm" />
         <DifficultyPick difficulty={song.difficulty} size={14} onChange={(d) => onUpdate({ ...song, difficulty: d })} />
-        <div className="flex-1 min-w-0 cursor-pointer" onClick={onSelect}>
+        <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onSelect(song.id)}>
           <div className="text-sm font-semibold truncate">{song.title}</div>
           <div className="text-xs text-gray-300 truncate">{song.artist}</div>
         </div>
@@ -6507,7 +6556,7 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onTo
         <button onClick={(e) => { e.stopPropagation(); setIsEditing(true); }} className="p-1 hover:bg-gray-600 rounded text-xs">
           ✏️
         </button>
-        <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-1 hover:bg-red-600 rounded text-xs">
+        <button onClick={(e) => { e.stopPropagation(); onDelete(song.id); }} className="p-1 hover:bg-red-600 rounded text-xs">
           🗑️
         </button>
       </div>
@@ -6528,7 +6577,7 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onTo
   return (
     <>
       <div
-        onClick={onSelect}
+        onClick={() => onSelect(song.id)}
         className={`p-4 rounded-lg border-2 transition cursor-pointer ${
           isSelected ? 'border-amber-500 bg-amber-500/10' : 'border-gray-600 bg-gray-750 hover:bg-gray-700'
         }`}
@@ -6541,14 +6590,14 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onTo
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    onToggleFavorite();
+                    onToggleFavorite(song.id);
                   }}
                   className="hover:opacity-75 transition flex-shrink-0"
                 >
                   <Star className={`w-4 h-4 ${song.isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-500'}`} />
                 </button>
                 <button
-                  onClick={(e) => { e.stopPropagation(); onToggleSetlist(); }}
+                  onClick={(e) => { e.stopPropagation(); onToggleSetlist(song.id); }}
                   className="hover:opacity-75 transition flex-shrink-0"
                   title="Sélectionner pour une soirée"
                 >
@@ -6573,7 +6622,7 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onTo
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onDelete();
+                onDelete(song.id);
               }}
               className="p-2 hover:bg-red-900 rounded transition"
             >
@@ -6630,7 +6679,7 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onTo
       )}
     </>
   );
-}
+});
 
 // Suggère des mots-clés à partir des informations du morceau (aide "IA" locale, sans réseau)
 function suggestKeywords(song) {
@@ -6654,10 +6703,221 @@ function suggestKeywords(song) {
   return out.filter(t => !(song.tags || []).includes(t)).slice(0, 8);
 }
 
+// ============================================
+// 🎵 EXTRACTION & PRÉVISUALISATION YOUTUBE
+// ============================================
+
+/**
+ * Extrait les métadonnées d'un titre YouTube
+ * Patterns courants :
+ *   "Artist - Title [Tutorial]"
+ *   "Title - Artist"
+ *   "Title | Artist"
+ *   "Title by Artist"
+ */
+const extractYouTubeMetadata = (title) => {
+  if (!title || typeof title !== 'string') {
+    return { title: '', artist: '', language: 'FR', style: '', bpm: 120 };
+  }
+
+  const normalizeText = (str) => str?.trim?.() || '';
+  let extracted = { title: '', artist: '', language: 'FR', style: '', bpm: 120 };
+
+  // Patterns à tester (ordre d'importance)
+  const patterns = [
+    { regex: /^(.+?)\s*[-–—]\s*(.+?)\s*(?:\[.+?\])*$/i, groups: ['artist', 'title'] },
+    { regex: /^(.+?)\s*\|\s*(.+?)$/i, groups: ['title', 'artist'] },
+    { regex: /^(.+?)\s+by\s+(.+?)$/i, groups: ['title', 'artist'] },
+    { regex: /^(.+?)\s*\(\s*(.+?)\s*\)$/i, groups: ['title', 'artist'] },
+  ];
+
+  let matched = false;
+  for (const { regex, groups } of patterns) {
+    const match = title.match(regex);
+    if (match) {
+      extracted.artist = normalizeText(match[groups.indexOf('artist') + 1] || '');
+      extracted.title = normalizeText(match[groups.indexOf('title') + 1] || '');
+      matched = true;
+      break;
+    }
+  }
+
+  // Fallback : utilise tout le titre
+  if (!matched) {
+    extracted.title = normalizeText(title);
+  }
+
+  // Nettoie les artéfacts YouTube
+  ['[Tutorial]', '[Guitar Tutorial]', '[Lesson]', '[Guitare]', '[Tuto]', '[Cover]', '[Live]'].forEach(artifact => {
+    extracted.title = extracted.title.replace(new RegExp(artifact, 'gi'), '').trim();
+    extracted.artist = extracted.artist.replace(new RegExp(artifact, 'gi'), '').trim();
+  });
+
+  // 🔍 Détection langue
+  if (/[àâäéèêëïîôùûüœç]/i.test(extracted.title + extracted.artist)) {
+    extracted.language = 'FR';
+  } else {
+    extracted.language = 'EN';
+  }
+
+  // 🎸 Détection style (mots-clés courants)
+  const styleKeywords = ['rock', 'blues', 'jazz', 'pop', 'folk', 'country', 'metal', 'funk', 'latin', 'reggae'];
+  const lowerTitle = (extracted.title + ' ' + extracted.artist).toLowerCase();
+  for (const keyword of styleKeywords) {
+    if (lowerTitle.includes(keyword)) {
+      extracted.style = keyword.charAt(0).toUpperCase() + keyword.slice(1);
+      break;
+    }
+  }
+
+  // 🎯 Recherche BPM (120 par défaut)
+  const bpmMatch = title.match(/(\d{2,3})\s*bpm/i);
+  if (bpmMatch) {
+    extracted.bpm = Math.max(40, Math.min(300, parseInt(bpmMatch[1]) || 120));
+  }
+
+  return extracted;
+};
+
+/**
+ * Modale de review/confirmation après extraction YouTube
+ * Permet à l'utilisateur de corriger les données extraites
+ */
+function YouTubeImportReviewModal({
+  metadata,
+  youtubeUrl,
+  onConfirm,
+  onCancel,
+}) {
+  const [reviewed, setReviewed] = useState(metadata);
+
+  const handleConfirm = () => {
+    if (!reviewed.title.trim()) {
+      alert('⚠️ Le titre ne peut pas être vide');
+      return;
+    }
+    onConfirm({ ...reviewed, youtubeUrl });
+  };
+
+  const inputCls = 'w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500 text-white';
+  const labelCls = 'text-xs text-gray-400 block mb-1';
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-800 rounded-lg max-w-sm w-full border border-gray-700 shadow-2xl">
+        {/* Header */}
+        <div className="p-4 border-b border-gray-700 flex justify-between items-center">
+          <h3 className="font-bold text-amber-400">🔗 Importer depuis YouTube</h3>
+          <button onClick={onCancel} className="p-1 hover:bg-gray-700 rounded text-sm">✕</button>
+        </div>
+
+        {/* Body */}
+        <div className="p-4 space-y-3 max-h-[60vh] overflow-y-auto">
+          {/* Aperçu URL */}
+          <div className="bg-gray-750 px-3 py-2 rounded border border-gray-600 text-xs text-gray-300 break-all">
+            🎬 {youtubeUrl}
+          </div>
+
+          {/* Titre */}
+          <div>
+            <label className={labelCls}>Titre *</label>
+            <input
+              type="text"
+              value={reviewed.title}
+              onChange={(e) => setReviewed({ ...reviewed, title: e.target.value })}
+              className={inputCls}
+              placeholder="ex. Wonderwall"
+              autoFocus
+            />
+          </div>
+
+          {/* Artiste */}
+          <div>
+            <label className={labelCls}>Artiste</label>
+            <input
+              type="text"
+              value={reviewed.artist}
+              onChange={(e) => setReviewed({ ...reviewed, artist: e.target.value })}
+              className={inputCls}
+              placeholder="ex. Oasis"
+            />
+          </div>
+
+          {/* Grille 2 colonnes : Langue & Style */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className={labelCls}>Langue</label>
+              <select
+                value={reviewed.language}
+                onChange={(e) => setReviewed({ ...reviewed, language: e.target.value })}
+                className={inputCls}
+              >
+                <option value="FR">🇫🇷 FR</option>
+                <option value="EN">🇬🇧 EN</option>
+                <option value="ES">🇪🇸 ES</option>
+                <option value="Instrumental">🎵 Instrumental</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Style</label>
+              <input
+                type="text"
+                value={reviewed.style}
+                onChange={(e) => setReviewed({ ...reviewed, style: e.target.value })}
+                className={inputCls}
+                placeholder="ex. Rock"
+              />
+            </div>
+          </div>
+
+          {/* BPM */}
+          <div>
+            <label className={labelCls}>BPM</label>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                value={reviewed.bpm}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value) || 120;
+                  setReviewed({ ...reviewed, bpm: Math.max(40, Math.min(300, val)) });
+                }}
+                className={inputCls}
+                min="40"
+                max="300"
+                step="5"
+              />
+              <div className="text-xs text-gray-400 flex items-center">BPM</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="p-3 border-t border-gray-700 flex gap-2">
+          <button
+            onClick={onCancel}
+            className="flex-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm font-semibold transition"
+          >
+            Annuler
+          </button>
+          <button
+            onClick={handleConfirm}
+            className="flex-1 px-3 py-2 bg-amber-600 hover:bg-amber-500 rounded text-sm font-semibold transition text-white"
+          >
+            ✅ Importer
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions = [], onAddClassificationOption, title = '✏️ Éditer' }) {
   const [newTag, setNewTag] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [newClassification, setNewClassification] = useState('');
+  const [youtubeImportUrl, setYoutubeImportUrl] = useState('');
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [pendingImportMetadata, setPendingImportMetadata] = useState(null);
 
   const tags = song.tags || [];
   const classifications = song.classifications || [];
@@ -6700,6 +6960,43 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
   const addLink = () => onChange({ ...song, youtubeUrls: [...links, { id: newId(), url: '' }] });
   const removeLink = (id) => onChange({ ...song, youtubeUrls: links.filter(l => l.id !== id) });
 
+  // Handlers pour l'import YouTube
+  const handleYouTubeImport = () => {
+    if (!youtubeImportUrl.trim()) {
+      alert('⚠️ Veuillez entrer une URL YouTube valide');
+      return;
+    }
+    // Si c'est une URL, on extrait le titre de la barre de titre du navigateur (pas possible sans API)
+    // Sinon, on utilise le texte entré comme titre vidéo
+    const metadata = extractYouTubeMetadata(youtubeImportUrl);
+    setPendingImportMetadata(metadata);
+    setReviewOpen(true);
+  };
+
+  const handleImportConfirm = (importedData) => {
+    const { youtubeUrl, title, artist, language, style, bpm } = importedData;
+    
+    // Mise à jour de la chanson avec les données extraites
+    onChange({
+      ...song,
+      title: title || song.title,
+      artist: artist || song.artist,
+      language: language || song.language,
+      style: style || song.style,
+      youtubeUrls: youtubeUrl 
+        ? [...links.filter(l => l.url !== youtubeUrl), { id: newId(), url: youtubeUrl }]
+        : links,
+      versions: song.versions.map((v, i) => 
+        i === 0 ? { ...v, bpm: bpm || v.bpm } : v
+      ),
+    });
+    
+    // Réinitialise l'import et ferme la modale
+    setYoutubeImportUrl('');
+    setReviewOpen(false);
+    setPendingImportMetadata(null);
+  };
+
   const inputCls = 'w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500';
 
   return (
@@ -6727,6 +7024,27 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
                   {DIFFICULTY_META[d].label}
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Import YouTube */}
+          <div className="bg-gray-750 px-3 py-2 rounded border border-amber-700/50">
+            <label className="text-xs text-gray-400 block mb-2">🔗 Importer depuis YouTube</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={youtubeImportUrl}
+                onChange={(e) => setYoutubeImportUrl(e.target.value)}
+                placeholder="ex. Oasis - Wonderwall [Tutorial]"
+                className={`${inputCls} flex-1`}
+                onKeyPress={(e) => e.key === 'Enter' && handleYouTubeImport()}
+              />
+              <button
+                onClick={handleYouTubeImport}
+                className="px-3 py-2 bg-amber-600 hover:bg-amber-500 rounded text-sm font-semibold transition text-white whitespace-nowrap"
+              >
+                📥 Importer
+              </button>
             </div>
           </div>
 
@@ -6977,6 +7295,19 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
         </div>
       </div>
     </div>
+
+    {/* Modale de review YouTube */}
+    {reviewOpen && pendingImportMetadata && (
+      <YouTubeImportReviewModal
+        metadata={pendingImportMetadata}
+        youtubeUrl={youtubeImportUrl}
+        onConfirm={handleImportConfirm}
+        onCancel={() => {
+          setReviewOpen(false);
+          setPendingImportMetadata(null);
+        }}
+      />
+    )}
   );
 }
 
