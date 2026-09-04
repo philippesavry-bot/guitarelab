@@ -28,14 +28,19 @@
     <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/lucide@0.470.0/dist/umd/lucide.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js" crossorigin></script>
-    <script src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
-    <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+    <!-- Moteur audio et lecteur PDF : chargés en différé (defer) car utilisés seulement
+         à la demande (métronome, import de grilles) — ils ne retardent plus l'affichage. -->
+    <script defer src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
+    <script defer src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script>
       // Worker pdf.js chargé depuis le même CDN, nécessaire pour l'extraction de texte/rendu de pages
-      if (window['pdfjsLib']) {
-        window['pdfjsLib'].GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-      }
+      window.addEventListener('DOMContentLoaded', function () {
+        if (window['pdfjsLib']) {
+          window['pdfjsLib'].GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+        }
+      });
     </script>
+
     <style>
       html, body, #root { height: 100%; }
       body { margin: 0; background: #111827; color: #fff; -webkit-text-size-adjust: 100%; }
