@@ -4114,15 +4114,7 @@ function DebugPanel() {
       setIsOnline(false);
       addLog("🔴 Offline mode", "warning");
     });
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.ready.then(reg => {
-        setSwStatus("✅ Actif");
-        addLog("Service Worker enregistré", "success");
-      }).catch(err => {
-        setSwStatus("❌ Erreur");
-        addLog(`SW error: ${err.message}`, "error");
-      });
-    }
+    setSwStatus("— désactivé");
     addLog("🎸 Guitar Lab démarré", "info");
   }, []);
   return /*#__PURE__*/React.createElement("div", {
