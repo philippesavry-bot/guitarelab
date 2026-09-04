@@ -10233,3 +10233,7 @@ function RightPanel({ song, version, updateVersion, onUpdateSong, onPlayVideo })
 }
 
       
+
+      const bootEl = document.getElementById("boot");
+      if (bootEl) bootEl.remove();
+      ReactDOM.createRoot(document.getElementById("root")).render(<GuitarApp />);
