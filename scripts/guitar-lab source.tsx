@@ -117,6 +117,9 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
   const [resumeChoice, setResumeChoice] = useState(bookmarks.length > 0 ? null : 'start');
   const [apiReady, setApiReady] = useState(false);
   const [apiFailed, setApiFailed] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [curTime, setCurTime] = useState(0);
+  const [duration, setDuration] = useState(0);
   const [newBookmarkMode, setNewBookmarkMode] = useState(false); // true = en train de créer un nouveau
   const [bookmarkName, setBookmarkName] = useState('');
   const [savedFlash, setSavedFlash] = useState(null); // null | 'save' | 'delete'
@@ -267,8 +270,25 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
         playerRef.current = new YT.Player(containerRef.current, {
           videoId,
           host: 'https://www.youtube-nocookie.com',
-          playerVars: { rel: 0, playsinline: 1, modestbranding: 1, start: resumeChoice === 'resume' ? firstBookmark : 0 },
-          events: { onReady: () => !cancelled && setApiReady(true) },
+          playerVars: {
+            rel: 0, playsinline: 1, modestbranding: 1,
+            controls: 0, iv_load_policy: 3, fs: 0, disablekb: 1, cc_load_policy: 0,
+            start: resumeChoice === 'resume' ? firstBookmark : 0,
+          },
+          events: {
+            onReady: () => {
+              if (cancelled) return;
+              setApiReady(true);
+              try { setDuration(playerRef.current?.getDuration?.() || 0); } catch (_) {}
+            },
+            onStateChange: (e) => {
+              if (cancelled) return;
+              setIsPlaying(e.data === 1); // 1 = YT.PlayerState.PLAYING
+              if (e.data === 1 || e.data === 2) {
+                try { setDuration(playerRef.current?.getDuration?.() || 0); } catch (_) {}
+              }
+            },
+          },
         });
       })
       .catch(() => !cancelled && setApiFailed(true));
@@ -278,6 +298,18 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
       playerRef.current = null;
     };
   }, [videoId, resumeChoice]);
+
+  // Suit la position de lecture pour notre propre barre de défilement (l'API ne la pousse pas toute seule)
+  useEffect(() => {
+    if (!apiReady) return;
+    const id = setInterval(() => {
+      try {
+        const t = playerRef.current?.getCurrentTime?.();
+        if (typeof t === 'number') setCurTime(t);
+      } catch (_) {}
+    }, 400);
+    return () => clearInterval(id);
+  }, [apiReady]);
 
   if (!videoId) return null;
 
@@ -745,10 +777,10 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
 
       <div
         ref={videoWrapperRef}
-        className={nativeFullscreen ? 'fixed inset-0 z-[9999] bg-black flex items-center justify-center' : 'flex-shrink-0'}
+        className={nativeFullscreen ? 'fixed inset-0 z-[9999] bg-black flex flex-col' : 'flex-shrink-0'}
       >
         {apiFailed ? (
-          <div className={nativeFullscreen ? 'relative w-full h-full' : 'relative w-full bg-black'} style={nativeFullscreen ? undefined : { paddingTop: '56.25%' }}>
+          <div className={nativeFullscreen ? 'relative flex-1 min-h-0' : 'relative w-full bg-black'} style={nativeFullscreen ? undefined : { paddingTop: '56.25%' }}>
             <iframe
               key={videoId}
               src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0&playsinline=1&modestbranding=1&start=${resumeChoice === 'resume' ? firstBookmark : 0}`}
@@ -761,10 +793,60 @@ function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
             />
           </div>
         ) : (
-          <div className={nativeFullscreen ? 'relative w-full h-full' : 'relative w-full bg-black'} style={nativeFullscreen ? undefined : { paddingTop: '56.25%' }}>
+          <div className={nativeFullscreen ? 'relative flex-1 min-h-0' : 'relative w-full bg-black'} style={nativeFullscreen ? undefined : { paddingTop: '56.25%' }}>
             <div ref={containerRef} className="absolute inset-0 w-full h-full" />
           </div>
         )}
+
+        {/* Notre propre barre de lecture — sous la vidéo, jamais par-dessus l'image (les commandes YouTube sont masquées) */}
+        {apiReady && !apiFailed && (
+          <div className="flex items-center gap-1.5 px-2 py-1.5 bg-gray-900 border-t border-gray-700 flex-shrink-0">
+            <button
+              onClick={() => { try { playerRef.current?.seekTo(Math.max(0, curTime - 5), true); } catch (_) {} }}
+              className="p-1.5 hover:bg-gray-700 rounded flex-shrink-0"
+              title="Reculer de 5s"
+            >
+              ⏪
+            </button>
+            <button
+              onClick={() => {
+                try {
+                  if (isPlaying) playerRef.current?.pauseVideo();
+                  else playerRef.current?.playVideo();
+                } catch (_) {}
+              }}
+              className="p-1.5 bg-gray-700 hover:bg-gray-600 rounded flex-shrink-0"
+              title={isPlaying ? 'Mettre en pause' : 'Lecture'}
+            >
+              {isPlaying ? '⏸️' : '▶️'}
+            </button>
+            <button
+              onClick={() => { try { playerRef.current?.seekTo(Math.min(duration || curTime, curTime + 5), true); } catch (_) {} }}
+              className="p-1.5 hover:bg-gray-700 rounded flex-shrink-0"
+              title="Avancer de 5s"
+            >
+              ⏩
+            </button>
+            <input
+              type="range"
+              min="0"
+              max={duration || 0}
+              step="0.1"
+              value={Math.min(curTime, duration || curTime)}
+              onChange={(e) => {
+                const t = parseFloat(e.target.value);
+                setCurTime(t);
+                try { playerRef.current?.seekTo(t, true); } catch (_) {}
+              }}
+              className="flex-1 accent-amber-500"
+              style={{ touchAction: 'none' }}
+            />
+            <span className="text-[10px] text-gray-400 font-mono flex-shrink-0 whitespace-nowrap">
+              {formatBookmarkTime(Math.floor(curTime))} / {formatBookmarkTime(Math.floor(duration))}
+            </span>
+          </div>
+        )}
+
         {nativeFullscreen && (
           <button
             onClick={exitCleanFullscreen}
@@ -4000,6 +4082,140 @@ function newId() {
   return Date.now().toString() + Math.random().toString(36).slice(2);
 }
 
+// ============================================================================
+// IMPORT PDF / TEXTE : analyse une fiche accords/paroles (chords au-dessus des
+// paroles) pour en déduire une structure (Intro / Couplet / Refrain...) et les
+// accords de chaque ligne. Reconnaît automatiquement les refrains qui se
+// répètent (même texte de paroles) pour les nommer "Refrain".
+// ============================================================================
+const CHORD_TOKEN_RE = /^\(?[A-G](#|b)?(maj7|m7b5|m7|maj|sus2|sus4|dim7|dim|aug|add\d|6|9|11|13|7|m)?(\/[A-G](#|b)?)?\)?$/;
+
+function isChordToken(tok) {
+  const t = (tok || '').trim();
+  if (!t || t === '|' || t === '-' || t === '_') return false;
+  return CHORD_TOKEN_RE.test(t);
+}
+
+function isLikelyChordLine(line) {
+  const tokens = line.replace(/\|/g, ' ').split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return false;
+  const chordish = tokens.filter(isChordToken).length;
+  return chordish / tokens.length >= 0.8;
+}
+
+function extractChordsFromLine(line) {
+  const tokens = line.replace(/\|/g, ' ').split(/\s+/).filter(Boolean);
+  return tokens.filter(isChordToken);
+}
+
+function normalizeLyricSignature(s) {
+  return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+// Lignes de bruit habituelles des sites de fiches d'accords, à ignorer si rencontrées
+const PDF_NOISE_PATTERNS = [
+  /la bo[iî]te [aà] chansons/i,
+  /^paroles et musique/i,
+  /^accords de guitare/i,
+  /ce document est r[ée]serv[ée]/i,
+  /^\d+\/\d+$/,
+  /^https?:\/\//i,
+];
+
+function isNoiseLine(line) {
+  const clean = line.trim();
+  if (!clean) return false;
+  return PDF_NOISE_PATTERNS.some(re => re.test(clean));
+}
+
+function parseChordSheetItems(items) {
+  const kept = [];
+  for (const it of items) {
+    const t = it.text || '';
+    if (/^accords de guitare/i.test(t.trim())) break;
+    if (isNoiseLine(t)) continue;
+    kept.push(it);
+  }
+
+  const blocks = [];
+  let current = [];
+  for (const it of kept) {
+    if (!(it.text || '').trim()) {
+      if (current.length) { blocks.push(current); current = []; }
+    } else {
+      current.push(it);
+    }
+  }
+  if (current.length) blocks.push(current);
+
+  const parsed = blocks.map(blockItems => {
+    const chords = [];
+    const lyricLines = [];
+    blockItems.forEach(it => {
+      const t = it.text;
+      if (isLikelyChordLine(t)) chords.push(...extractChordsFromLine(t));
+      else if (t.trim()) lyricLines.push(t.trim());
+    });
+    return { chords, lyricSig: normalizeLyricSignature(lyricLines[0] || ''), hasLyrics: lyricLines.length > 0, items: blockItems };
+  }).filter(b => b.chords.length > 0);
+
+  if (parsed.length === 0) return [];
+
+  const sigCounts = {};
+  parsed.forEach(b => { if (b.lyricSig) sigCounts[b.lyricSig] = (sigCounts[b.lyricSig] || 0) + 1; });
+
+  const refrainNames = {};
+  let refrainN = 0;
+  let coupletN = 0;
+  return parsed.map((b, i) => {
+    let name;
+    if (!b.hasLyrics && i === 0) {
+      name = 'Intro';
+    } else if (b.lyricSig && sigCounts[b.lyricSig] >= 2) {
+      if (!refrainNames[b.lyricSig]) {
+        refrainN += 1;
+        refrainNames[b.lyricSig] = refrainN === 1 ? 'Refrain' : `Refrain ${refrainN}`;
+      }
+      name = refrainNames[b.lyricSig];
+    } else {
+      coupletN += 1;
+      name = `Couplet ${coupletN}`;
+    }
+    return { name, chords: b.chords.slice(0, 64), items: b.items };
+  }).slice(0, 30);
+}
+
+// Version texte simple (pour le collage manuel, sans info de position pour l'image)
+function parseChordSheetLines(rawLines) {
+  return parseChordSheetItems(rawLines.map(text => ({ text }))).map(({ name, chords }) => ({ name, chords }));
+}
+
+// Convertit les sections détectées ({name, chords}) au format attendu par version.structure
+function chordSectionsToStructure(sections, colsPerRow = 4) {
+  return sections.map((sec, idx) => {
+    const cols = Math.min(colsPerRow, Math.max(1, sec.chords.length));
+    const cells = sec.chords.length > 0
+      ? sec.chords.map((chord, i) => ({ id: `${Date.now()}-${idx}-${i}`, split: false, chord, top: '', bottom: '' }))
+      : [{ id: `${Date.now()}-${idx}-0`, split: false, chord: '', top: '', bottom: '' }];
+    // Complète la dernière ligne avec des cases vides pour obtenir une grille rectangulaire
+    const remainder = cells.length % cols;
+    if (remainder !== 0) {
+      for (let i = 0; i < cols - remainder; i++) {
+        cells.push({ id: `${Date.now()}-${idx}-pad${i}`, split: false, chord: '', top: '', bottom: '' });
+      }
+    }
+    return {
+      id: `${Date.now()}-${idx}`,
+      section: sec.name,
+      cols,
+      rows: Math.ceil(cells.length / cols),
+      collapsed: false,
+      rhythm: [],
+      cells,
+    };
+  });
+}
+
 function SaveStatusBadge({ status, onForceSave }) {
   const [flashing, setFlashing] = useState(false);
   if (status === 'idle') return null;
@@ -4252,7 +4468,7 @@ function GuitarApp() {
   const [tileSize, setTileSize] = useState('medium');
   const [sortBy, setSortBy] = useState('favorite');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const DEFAULT_SIDEBAR_SECTIONS = { sort: true, filters: false, display: false, roadmap: false, storage: false };
+  const DEFAULT_SIDEBAR_SECTIONS = { sort: true, filters: false, display: false, roadmap: false, journal: false, storage: false };
   const [sidebarSections, setSidebarSections] = useState(DEFAULT_SIDEBAR_SECTIONS);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [prefsSaved, setPrefsSaved] = useState(false);
@@ -4408,8 +4624,28 @@ function GuitarApp() {
     if (selectedSongId === id) setSelectedSongId(null);
   };
 
+  const [progressHistory, setProgressHistory] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await window.storage.get('guitar-lab:progress-history', false);
+        if (r?.value) setProgressHistory(JSON.parse(r.value));
+      } catch (err) { /* pas d'historique enregistré */ }
+    })();
+  }, []);
+
   const updateSong = (updatedSong) => {
+    const prev = songs.find(s => s.id === updatedSong.id);
     setSongs(songs.map(s => s.id === updatedSong.id ? { ...updatedSong, updatedAt: new Date().toISOString() } : s));
+    // Trace discrètement l'évolution de la maîtrise dans le temps, pour le futur graphe de tendance du Journal
+    if (prev && (prev.progress || 0) !== (updatedSong.progress || 0)) {
+      const entry = { songId: updatedSong.id, date: new Date().toISOString(), progress: updatedSong.progress || 0 };
+      setProgressHistory(hist => {
+        const next = [...hist, entry].slice(-3000);
+        window.storage.set('guitar-lab:progress-history', JSON.stringify(next), false).catch(() => {});
+        return next;
+      });
+    }
   };
 
   const toggleFavorite = (id) => {
@@ -4445,6 +4681,7 @@ function GuitarApp() {
   // Session du jour : enchaîne automatiquement les morceaux à revoir, avec chrono auto-démarré
   const [sessionSetupOpen, setSessionSetupOpen] = useState(false);
   const [roadmapOpen, setRoadmapOpen] = useState(false);
+  const [journalOpen, setJournalOpen] = useState(false);
   const [sessionQueue, setSessionQueue] = useState(null); // tableau d'ids, ou null si aucune session en cours
   const [sessionIndex, setSessionIndex] = useState(0);
 
@@ -4754,6 +4991,22 @@ function GuitarApp() {
                   </SidebarSection>
 
                   <SidebarSection
+                    title="Journal"
+                    icon="📊"
+                    isOpen={sidebarSections.journal}
+                    onToggle={() => toggleSidebarSection('journal')}
+                  >
+                    <p className="text-xs text-gray-400">Ton carnet de suivi : temps passé, styles joués, tendances dans le temps.</p>
+                    <button
+                      onClick={() => setJournalOpen(true)}
+                      className="w-full px-2 py-2 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold transition"
+                      title="Ouvrir le journal en grand"
+                    >
+                      Voir en grand →
+                    </button>
+                  </SidebarSection>
+
+                  <SidebarSection
                     title="Stockage"
                     icon="💾"
                     isOpen={sidebarSections.storage}
@@ -4988,13 +5241,31 @@ function GuitarApp() {
       {roadmapOpen && (
         <RoadmapModal
           songs={songs}
+          practiceSessions={practiceSessions}
           onSelectSong={(id) => {
             setSelectedSongId(id);
             const song = songs.find(s => s.id === id);
             setSelectedVersionId(song?.versions[0]?.id);
             setAppMode('editor');
           }}
+          onToggleSetlist={toggleSetlist}
           onClose={() => setRoadmapOpen(false)}
+        />
+      )}
+      {journalOpen && (
+        <JournalModal
+          songs={songs}
+          practiceSessions={practiceSessions}
+          progressHistory={progressHistory}
+          weeklyGoalMinutes={weeklyGoalMinutes}
+          onUpdateWeeklyGoal={updateWeeklyGoal}
+          onSelectSong={(id) => {
+            setSelectedSongId(id);
+            const song = songs.find(s => s.id === id);
+            setSelectedVersionId(song?.versions[0]?.id);
+            setAppMode('editor');
+          }}
+          onClose={() => setJournalOpen(false)}
         />
       )}
     </div>
@@ -5028,9 +5299,80 @@ function progressToRoadmapFill(pct) {
   return `rgba(${r}, ${g}, ${b}, 0.35)`;
 }
 
-function RoadmapModal({ songs, onSelectSong, onClose }) {
+// Formate une durée en secondes en texte compact ("45 min", "2h15")
+function formatDuration(totalSec) {
+  const totalMin = Math.round((totalSec || 0) / 60);
+  if (totalMin < 1) return '< 1 min';
+  if (totalMin < 60) return `${totalMin} min`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return m > 0 ? `${h}h${m.toString().padStart(2, '0')}` : `${h}h`;
+}
+
+function daysSince(dateStr) {
+  if (!dateStr) return null;
+  return Math.floor((Date.now() - new Date(dateStr).getTime()) / (24 * 60 * 60 * 1000));
+}
+
+// Petit visuel selon le style musical déclaré (reconnaissance par mots-clés simples)
+function styleIcon(style) {
+  const s = (style || '').toLowerCase();
+  if (/rock|metal|punk/.test(s)) return '🤘';
+  if (/pop/.test(s)) return '🎧';
+  if (/folk|chanson|variété|acoustique/.test(s)) return '🪕';
+  if (/blues/.test(s)) return '🎷';
+  if (/jazz|swing/.test(s)) return '🎺';
+  if (/classi/.test(s)) return '🎻';
+  if (/reggae/.test(s)) return '🌴';
+  if (/latin|salsa/.test(s)) return '💃';
+  if (/soul|motown|r&b|rnb/.test(s)) return '🎙️';
+  return null;
+}
+
+// Petit ascenseur flottant : accès rapide au haut / bas d'une longue liste (pratique pour le glisser-déposer)
+function QuickScrollButtons({ scrollRef }) {
+  const scrollTo = (pos) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: pos === 'top' ? 0 : el.scrollHeight, behavior: 'smooth' });
+  };
+  return (
+    <div className="absolute bottom-3 right-3 z-20 flex flex-col gap-1.5">
+      <button
+        onClick={() => scrollTo('top')}
+        className="w-8 h-8 rounded-full bg-gray-700/90 hover:bg-gray-600 border border-gray-600 shadow-lg flex items-center justify-center text-gray-300"
+        title="Aller tout en haut"
+      >
+        <ArrowUp className="w-4 h-4" />
+      </button>
+      <button
+        onClick={() => scrollTo('bottom')}
+        className="w-8 h-8 rounded-full bg-gray-700/90 hover:bg-gray-600 border border-gray-600 shadow-lg flex items-center justify-center text-gray-300"
+        title="Aller tout en bas"
+      >
+        <ArrowDown className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
+function RoadmapModal({ songs, practiceSessions = [], onSelectSong, onToggleSetlist, onClose }) {
+  const scrollRef = useRef(null);
   const now = new Date();
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  // Statistiques de pratique par morceau (temps total, nb de sessions, dernière session), à partir du vrai journal
+  const statsBySong = useMemo(() => {
+    const map = {};
+    (practiceSessions || []).forEach(entry => {
+      if (!map[entry.songId]) map[entry.songId] = { totalSec: 0, count: 0, lastDate: null };
+      const st = map[entry.songId];
+      st.totalSec += entry.durationSec || 0;
+      st.count += 1;
+      if (!st.lastDate || new Date(entry.date) > new Date(st.lastDate)) st.lastDate = entry.date;
+    });
+    return map;
+  }, [practiceSessions]);
 
   // Déplacements manuels vers une autre catégorie (prioritaires sur le classement automatique) et ordre au sein
   // de chaque section, mémorisés d'une session à l'autre. Tant que l'utilisateur n'interagit pas, rien ne change
@@ -5065,7 +5407,7 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
   const computeAutoSection = (s) => {
     if (!s.lastPracticedAt) return 'challenges';
     const diff = getDifficulty(s);
-    const sessionCount = (s.practiceSessions || []).length;
+    const sessionCount = statsBySong[s.id]?.count || 0;
     if (diff === 'hard' || sessionCount >= 5) return 'mastered';
     const isRecent = new Date(s.lastPracticedAt) >= sevenDaysAgo;
     if (isRecent) return 'progress';
@@ -5096,6 +5438,44 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
     mastered: applyOrder('mastered', bySection.mastered),
     challenges: applyOrder('challenges', bySection.challenges),
   };
+  const { progress: inProgress, mastered, challenges: nextChallenges } = listsBySection;
+
+  // Statistiques globales : de quoi transformer la page en vrai tableau de bord du parcours
+  const totalPracticeSec = (practiceSessions || []).reduce((sum, e) => sum + (e.durationSec || 0), 0);
+  const weekAgoTs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const weekPracticeSec = (practiceSessions || [])
+    .filter(e => new Date(e.date).getTime() >= weekAgoTs)
+    .reduce((sum, e) => sum + (e.durationSec || 0), 0);
+  const mostNeglected = songs
+    .filter(s => s.lastPracticedAt)
+    .sort((a, b) => new Date(a.lastPracticedAt) - new Date(b.lastPracticedAt))[0];
+  const neverPracticedCount = songs.filter(s => !s.lastPracticedAt).length;
+
+  // Carnet d'idées : morceaux qui donnent envie, pas encore dans la bibliothèque
+  const IDEAS_KEY = 'guitar-lab:roadmap-ideas';
+  const [ideas, setIdeas] = useState([]);
+  const [newIdea, setNewIdea] = useState('');
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await window.storage.get(IDEAS_KEY, false);
+        if (r?.value) setIdeas(JSON.parse(r.value));
+      } catch (err) { /* pas d'idée enregistrée */ }
+    })();
+  }, []);
+  const saveIdeas = (next) => {
+    setIdeas(next);
+    window.storage.set(IDEAS_KEY, JSON.stringify(next), false).catch(() => {});
+  };
+  const addIdea = () => {
+    const clean = newIdea.trim();
+    if (!clean) return;
+    saveIdeas([{ id: newId(), text: clean }, ...ideas]);
+    setNewIdea('');
+  };
+  const removeIdea = (id) => saveIdeas(ideas.filter(i => i.id !== id));
+
+  const setlistSongs = songs.filter(s => s.isSetlist);
 
   const moveInSection = (section, songId, dir) => {
     const ids = listsBySection[section].map(s => s.id);
@@ -5120,11 +5500,6 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
     const next = { ...overrides };
     delete next[songId];
     saveOverrides(next);
-  };
-
-  const diffColor = (diff) => {
-    const colors = { easy: 'text-green-400', medium: 'text-amber-400', hard: 'text-red-400' };
-    return colors[diff] || 'text-gray-400';
   };
 
   const SongRow = ({ song, section }) => {
@@ -5178,6 +5553,8 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
     };
 
     const fillPct = Math.max(0, Math.min(100, song.progress || 0));
+    const stat = statsBySong[song.id];
+    const sIcon = styleIcon(song.style);
 
     return (
       <div
@@ -5211,14 +5588,19 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
 
           <button onClick={() => { onSelectSong?.(song.id); onClose?.(); }} className="flex-1 min-w-0 text-left">
             <p className="font-semibold text-sm truncate flex items-center gap-1.5">
+              <PickIcon difficulty={song.difficulty} size={13} className="flex-shrink-0" />
               <span className="truncate">{song.title}</span>
-              {section === 'challenges' && (
-                <span className={`text-[10px] font-bold flex-shrink-0 ${diffColor(getDifficulty(song))}`}>
-                  {getDifficulty(song)[0].toUpperCase()}
-                </span>
+              <span className="flex-shrink-0 text-xs" title={song.songType === 'instrumental' ? 'Instrumental' : 'Chanté'}>
+                {song.songType === 'instrumental' ? '🎸' : '🎤'}
+              </span>
+              {sIcon && (
+                <span className="flex-shrink-0 text-xs" title={song.style}>{sIcon}</span>
               )}
             </p>
-            <p className="text-xs text-gray-300 truncate">{song.artist} • {song.progress || 0}% maîtrisé</p>
+            <p className="text-xs text-gray-300 truncate">
+              {song.artist} • {song.progress || 0}% maîtrisé
+              {stat?.totalSec ? <> • ⏱️ {formatDuration(stat.totalSec)}</> : <span className="text-gray-500"> • jamais pratiqué</span>}
+            </p>
           </button>
 
           <div className="flex items-center gap-0.5 flex-shrink-0">
@@ -5250,12 +5632,11 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
     );
   };
 
-  const { progress: inProgress, mastered, challenges: nextChallenges } = listsBySection;
-
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-gray-700 shadow-2xl">
-        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-start gap-2">
+      <div className="relative bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] border border-gray-700 shadow-2xl flex flex-col">
+      <div ref={scrollRef} className="overflow-y-auto rounded-lg">
+        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-start gap-2 z-10">
           <div>
             <h2 className="font-bold text-amber-400 text-lg">🗺️ Feuille de route</h2>
             <p className="text-[11px] text-gray-500 mt-0.5">⠿ glisse pour réordonner • ↑↓ pas à pas • le menu déplace vers une autre catégorie • ↺ revient à l'automatique</p>
@@ -5265,7 +5646,61 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
           </button>
         </div>
 
+        {/* Tableau de bord : vue d'ensemble du parcours */}
+        <div className="p-4 pb-0 grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+            <div className="text-[10px] text-gray-400">📚 Morceaux</div>
+            <div className="text-lg font-bold text-amber-400">{songs.length}</div>
+          </div>
+          <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+            <div className="text-[10px] text-gray-400">✓ Maîtrisés</div>
+            <div className="text-lg font-bold text-green-400">{mastered.length}</div>
+          </div>
+          <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+            <div className="text-[10px] text-gray-400">⏱️ Temps total</div>
+            <div className="text-lg font-bold text-sky-400">{formatDuration(totalPracticeSec)}</div>
+          </div>
+          <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+            <div className="text-[10px] text-gray-400">🔥 Cette semaine</div>
+            <div className="text-lg font-bold text-purple-400">{formatDuration(weekPracticeSec)}</div>
+          </div>
+        </div>
+
+        {mostNeglected && (
+          <button
+            onClick={() => { onSelectSong?.(mostNeglected.id); onClose?.(); }}
+            className="mx-4 mt-3 block w-[calc(100%-2rem)] text-left px-3 py-2 bg-gray-750 hover:bg-gray-700 border border-dashed border-gray-600 rounded-lg text-xs text-gray-400 transition"
+          >
+            🕰️ À ne pas oublier : <span className="text-gray-200 font-semibold">{mostNeglected.title}</span> — pas pratiqué depuis {daysSince(mostNeglected.lastPracticedAt)} jour{daysSince(mostNeglected.lastPracticedAt) > 1 ? 's' : ''}
+            {neverPracticedCount > 0 && <span className="text-gray-500"> • {neverPracticedCount} morceau{neverPracticedCount > 1 ? 'x' : ''} jamais pratiqué{neverPracticedCount > 1 ? 's' : ''}</span>}
+          </button>
+        )}
+
         <div className="p-4 space-y-4">
+          {setlistSongs.length > 0 && (
+            <section>
+              <h3 className="font-semibold mb-2 text-pink-400">🎉 Prêt pour la scène</h3>
+              <div className="space-y-1.5">
+                {setlistSongs.map(s => (
+                  <div key={s.id} className="flex items-center gap-2 bg-gray-750 rounded-lg px-3 py-2 border-l-4" style={{ borderColor: progressToRoadmapColor(s.progress) }}>
+                    <PickIcon difficulty={s.difficulty} size={13} className="flex-shrink-0" />
+                    <button onClick={() => { onSelectSong?.(s.id); onClose?.(); }} className="flex-1 min-w-0 text-left">
+                      <p className="text-sm font-semibold truncate">{s.title}</p>
+                      <p className="text-xs text-gray-400 truncate">{s.artist} • {s.progress || 0}% maîtrisé</p>
+                    </button>
+                    <button
+                      onClick={() => onToggleSetlist?.(s.id)}
+                      className="flex-shrink-0 p-1.5 hover:bg-gray-600/60 rounded text-gray-400 hover:text-pink-400"
+                      title="Retirer de la sélection soirée"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
           {inProgress.length > 0 && (
             <section>
               <h3 className={`font-semibold mb-2 ${ROADMAP_SECTION_META.progress.titleColor}`}>{ROADMAP_SECTION_META.progress.label}</h3>
@@ -5296,13 +5731,335 @@ function RoadmapModal({ songs, onSelectSong, onClose }) {
           {inProgress.length === 0 && mastered.length === 0 && nextChallenges.length === 0 && (
             <p className="text-center text-gray-500 py-8">Ajoute des morceaux pour voir ta feuille de route</p>
           )}
+
+          <section className="pt-2 border-t border-gray-700">
+            <h3 className="font-semibold mb-2 text-sky-400">💡 Idées de morceaux à apprendre</h3>
+            <div className="flex gap-1 mb-2">
+              <input
+                value={newIdea}
+                onChange={(e) => setNewIdea(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addIdea()}
+                placeholder="Un morceau qui te tente..."
+                className="flex-1 px-2 py-1.5 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
+              />
+              <button onClick={addIdea} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 rounded text-sm font-semibold transition">+</button>
+            </div>
+            {ideas.length === 0 ? (
+              <p className="text-xs text-gray-500 italic">Pas encore d'idée notée.</p>
+            ) : (
+              <div className="space-y-1">
+                {ideas.map(idea => (
+                  <div key={idea.id} className="flex items-center justify-between gap-2 bg-gray-750 rounded px-3 py-1.5">
+                    <span className="text-sm truncate">{idea.text}</span>
+                    <button onClick={() => removeIdea(idea.id)} className="text-gray-500 hover:text-red-400 flex-shrink-0" title="Retirer">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         </div>
+      </div>
+      <QuickScrollButtons scrollRef={scrollRef} />
       </div>
     </div>
   );
 }
 
 // Modal de préparation de la session du jour : reprend la file de révision, réordonnable avant de lancer
+// Journal global : carnet de suivi (temps, styles, tendances) — pas un outil de planification
+const JOURNAL_WINDOWS = [
+  { key: '7', label: '7 jours', days: 7 },
+  { key: '30', label: '30 jours', days: 30 },
+  { key: 'all', label: 'Tout', days: null },
+];
+
+function JournalModal({ songs, practiceSessions = [], progressHistory = [], weeklyGoalMinutes = 120, onUpdateWeeklyGoal, onSelectSong, onClose }) {
+  const scrollRef = useRef(null);
+  const [windowKey, setWindowKey] = useState('7');
+  const win = JOURNAL_WINDOWS.find(w => w.key === windowKey);
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+  const cutoff = win.days ? now - win.days * DAY : 0;
+
+  const sessionsInWindow = useMemo(
+    () => practiceSessions.filter(e => new Date(e.date).getTime() >= cutoff),
+    [practiceSessions, cutoff]
+  );
+
+  const songById = useMemo(() => {
+    const map = {};
+    songs.forEach(s => { map[s.id] = s; });
+    return map;
+  }, [songs]);
+
+  const totalSec = sessionsInWindow.reduce((sum, e) => sum + (e.durationSec || 0), 0);
+  const sessionCount = sessionsInWindow.length;
+  const distinctSongsCount = new Set(sessionsInWindow.map(e => e.songId)).size;
+
+  // Série actuelle (jours consécutifs avec au moins une session), sur tout l'historique
+  const streak = useMemo(() => {
+    const daysWithSession = new Set(practiceSessions.map(e => new Date(e.date).toDateString()));
+    let count = 0;
+    let cursor = new Date();
+    if (!daysWithSession.has(cursor.toDateString())) cursor = new Date(cursor.getTime() - DAY);
+    while (daysWithSession.has(cursor.toDateString())) {
+      count++;
+      cursor = new Date(cursor.getTime() - DAY);
+    }
+    return count;
+  }, [practiceSessions]);
+
+  // Barres de temps par période (jour ou semaine selon la fenêtre choisie)
+  const barBuckets = useMemo(() => {
+    if (windowKey === 'all') {
+      if (practiceSessions.length === 0) return [];
+      const weekMs = 7 * DAY;
+      const oldest = Math.min(...practiceSessions.map(e => new Date(e.date).getTime()));
+      const weeksSpan = Math.min(12, Math.max(1, Math.ceil((now - oldest) / weekMs) + 1));
+      return Array.from({ length: weeksSpan }, (_, i) => {
+        const end = now - (weeksSpan - 1 - i) * weekMs;
+        const start = end - weekMs;
+        const sec = practiceSessions
+          .filter(e => { const t = new Date(e.date).getTime(); return t >= start && t < end; })
+          .reduce((sum, e) => sum + (e.durationSec || 0), 0);
+        return { minutes: Math.round(sec / 60) };
+      });
+    }
+    const days = win.days;
+    return Array.from({ length: days }, (_, i) => {
+      const d = new Date(now - (days - 1 - i) * DAY);
+      const sec = practiceSessions
+        .filter(e => new Date(e.date).toDateString() === d.toDateString())
+        .reduce((sum, e) => sum + (e.durationSec || 0), 0);
+      return { label: d.toLocaleDateString('fr-FR', { weekday: 'short' }), minutes: Math.round(sec / 60) };
+    });
+  }, [windowKey, practiceSessions, now]);
+  const maxBar = Math.max(...barBuckets.map(b => b.minutes), 1);
+
+  // Répartition par style / technique (temps cumulé sur la fenêtre choisie)
+  const rankBy = (keyFn) => {
+    const map = {};
+    sessionsInWindow.forEach(e => {
+      const song = songById[e.songId];
+      const key = song ? keyFn(song) : null;
+      if (!key) return;
+      map[key] = (map[key] || 0) + (e.durationSec || 0);
+    });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  };
+  const styleRanking = rankBy(s => s.style && s.style.trim());
+  const techniqueRanking = rankBy(s => s.technique);
+  const maxRankSec = Math.max(...styleRanking.map(([, v]) => v), ...techniqueRanking.map(([, v]) => v), 1);
+
+  // Top morceaux pratiqués sur la fenêtre
+  const songTimeMap = {};
+  sessionsInWindow.forEach(e => { songTimeMap[e.songId] = (songTimeMap[e.songId] || 0) + (e.durationSec || 0); });
+  const topSongs = Object.entries(songTimeMap)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([songId, sec]) => ({ song: songById[songId], sec }))
+    .filter(x => x.song);
+  const maxSongSec = Math.max(...topSongs.map(x => x.sec), 1);
+
+  // Tendance de progression : moyenne des mises à jour de maîtrise par semaine, si assez de recul
+  const progressWeeks = useMemo(() => {
+    if (progressHistory.length === 0) return [];
+    const weekMs = 7 * DAY;
+    const oldest = Math.min(...progressHistory.map(e => new Date(e.date).getTime()));
+    const span = Math.min(10, Math.max(1, Math.ceil((now - oldest) / weekMs) + 1));
+    return Array.from({ length: span }, (_, i) => {
+      const end = now - (span - 1 - i) * weekMs;
+      const start = end - weekMs;
+      const vals = progressHistory.filter(e => { const t = new Date(e.date).getTime(); return t >= start && t < end; }).map(e => e.progress);
+      return { avg: vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null };
+    });
+  }, [progressHistory, now]);
+  const hasEnoughProgressHistory = progressWeeks.filter(w => w.avg !== null).length >= 2;
+
+  const techniqueLabel = (t) => ({ fingerstyle: 'Fingerstyle', rythmique: 'Rythmique', 'les deux': 'Les deux' }[t] || t);
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="relative bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] border border-gray-700 shadow-2xl flex flex-col">
+      <div ref={scrollRef} className="overflow-y-auto rounded-lg">
+        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-start gap-2 z-10">
+          <div>
+            <h2 className="font-bold text-amber-400 text-lg">📊 Journal</h2>
+            <p className="text-[11px] text-gray-500 mt-0.5">Ton carnet de suivi — temps passé, styles joués, tendances. Pas un planning, juste ta progression au fil de l'envie.</p>
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded flex-shrink-0">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-5">
+          <div className="flex gap-1">
+            {JOURNAL_WINDOWS.map(w => (
+              <button
+                key={w.key}
+                onClick={() => setWindowKey(w.key)}
+                className={`flex-1 px-2 py-1.5 rounded text-xs font-semibold transition ${windowKey === w.key ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+              >
+                {w.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+              <div className="text-[10px] text-gray-400">⏱️ Temps</div>
+              <div className="text-lg font-bold text-sky-400">{formatDuration(totalSec)}</div>
+            </div>
+            <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+              <div className="text-[10px] text-gray-400">🎯 Sessions</div>
+              <div className="text-lg font-bold text-amber-400">{sessionCount}</div>
+            </div>
+            <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+              <div className="text-[10px] text-gray-400">🎸 Morceaux</div>
+              <div className="text-lg font-bold text-green-400">{distinctSongsCount}</div>
+            </div>
+            <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+              <div className="text-[10px] text-gray-400">🔥 Série</div>
+              <div className="text-lg font-bold text-purple-400">{streak} j</div>
+            </div>
+          </div>
+
+          {windowKey === '7' && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-gray-400">Objectif hebdomadaire</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={1}
+                    max={2000}
+                    value={weeklyGoalMinutes}
+                    onChange={(e) => onUpdateWeeklyGoal?.(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    className="w-16 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs text-right focus:outline-none focus:border-amber-500"
+                  />
+                  <span className="text-xs text-gray-400">min</span>
+                </div>
+              </div>
+              <div className="w-full bg-gray-700 rounded-full h-2">
+                <div className="bg-amber-500 h-full rounded-full transition-all" style={{ width: `${Math.min(100, Math.round((totalSec / 60) / Math.max(1, weeklyGoalMinutes) * 100))}%` }} />
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1">{Math.round(totalSec / 60)} / {weeklyGoalMinutes} min cette semaine</p>
+            </div>
+          )}
+
+          {barBuckets.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-400 mb-2">
+                {windowKey === 'all' ? 'Minutes par semaine' : windowKey === '30' ? 'Minutes par jour (30 derniers jours)' : 'Minutes par jour (7 derniers jours)'}
+              </p>
+              <div className="flex items-end gap-0.5 h-20">
+                {barBuckets.map((b, i) => (
+                  <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1 min-w-0">
+                    <div
+                      className="w-full bg-amber-600 rounded-t"
+                      style={{ height: `${Math.max(2, (b.minutes / maxBar) * 100)}%` }}
+                      title={`${b.minutes} min`}
+                    />
+                    {barBuckets.length <= 12 && <span className="text-[8px] text-gray-500 truncate w-full text-center">{b.label}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <p className="text-xs text-gray-400 mb-2">📈 Évolution de la maîtrise</p>
+            {hasEnoughProgressHistory ? (
+              <div className="flex items-end gap-1 h-16">
+                {progressWeeks.map((w, i) => (
+                  <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1">
+                    <div
+                      className="w-full rounded-t"
+                      style={{
+                        height: w.avg !== null ? `${Math.max(4, w.avg)}%` : '2%',
+                        backgroundColor: w.avg !== null ? progressToRoadmapColor(w.avg) : '#374151',
+                      }}
+                      title={w.avg !== null ? `${w.avg}% en moyenne cette semaine-là` : 'Pas de mise à jour cette semaine-là'}
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500 italic bg-gray-750 rounded-lg p-3 border border-gray-700">
+                Le suivi vient de démarrer — chaque fois que tu ajustes la maîtrise d'un morceau, ça s'enregistre ici. Reviens dans quelques semaines pour voir la tendance se dessiner. 🌱
+              </p>
+            )}
+          </div>
+
+          {styleRanking.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-400 mb-2">🎨 Styles les plus joués</p>
+              <div className="space-y-1.5">
+                {styleRanking.map(([style, sec]) => (
+                  <div key={style} className="flex items-center gap-2">
+                    <span className="text-xs w-24 truncate flex-shrink-0">{styleIcon(style) || '🎵'} {style}</span>
+                    <div className="flex-1 bg-gray-700 rounded-full h-2.5 overflow-hidden">
+                      <div className="bg-sky-500 h-full rounded-full" style={{ width: `${(sec / maxRankSec) * 100}%` }} />
+                    </div>
+                    <span className="text-[10px] text-gray-400 w-12 text-right flex-shrink-0">{formatDuration(sec)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {techniqueRanking.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-400 mb-2">✋ Techniques pratiquées</p>
+              <div className="space-y-1.5">
+                {techniqueRanking.map(([tech, sec]) => (
+                  <div key={tech} className="flex items-center gap-2">
+                    <span className="text-xs w-24 truncate flex-shrink-0">{techniqueLabel(tech)}</span>
+                    <div className="flex-1 bg-gray-700 rounded-full h-2.5 overflow-hidden">
+                      <div className="bg-purple-500 h-full rounded-full" style={{ width: `${(sec / maxRankSec) * 100}%` }} />
+                    </div>
+                    <span className="text-[10px] text-gray-400 w-12 text-right flex-shrink-0">{formatDuration(sec)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {topSongs.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-400 mb-2">🏆 Morceaux les plus pratiqués</p>
+              <div className="space-y-1.5">
+                {topSongs.map(({ song, sec }) => (
+                  <button
+                    key={song.id}
+                    onClick={() => { onSelectSong?.(song.id); onClose?.(); }}
+                    className="w-full flex items-center gap-2 bg-gray-750 hover:bg-gray-700 rounded-lg px-2.5 py-1.5 transition text-left"
+                  >
+                    <PickIcon difficulty={song.difficulty} size={12} className="flex-shrink-0" />
+                    <span className="text-xs flex-1 min-w-0 truncate">{song.title}</span>
+                    <div className="w-16 bg-gray-700 rounded-full h-1.5 flex-shrink-0">
+                      <div className="bg-amber-500 h-full rounded-full" style={{ width: `${(sec / maxSongSec) * 100}%` }} />
+                    </div>
+                    <span className="text-[10px] text-gray-400 w-12 text-right flex-shrink-0">{formatDuration(sec)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {sessionCount === 0 && (
+            <p className="text-center text-gray-500 py-6 text-sm">Aucune session de pratique sur cette période.</p>
+          )}
+        </div>
+      </div>
+      <QuickScrollButtons scrollRef={scrollRef} />
+      </div>
+    </div>
+  );
+}
+
 function SessionSetupModal({ songs, onStart, onCancel }) {
   const [order, setOrder] = useState(() => songs.map(s => s.id));
   const orderedSongs = order.map(id => songs.find(s => s.id === id)).filter(Boolean);
@@ -7260,6 +8017,7 @@ function StructureSummary({ structure }) {
 function LeftPanel({ version, updateVersion }) {
   const SUMMARY_MODE_KEY = 'guitar-lab:structure-summary-mode';
   const [summaryMode, setSummaryMode] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -7313,6 +8071,9 @@ function LeftPanel({ version, updateVersion }) {
             <button onClick={addSection} className="w-full px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold transition mb-2">
               + Section
             </button>
+            <button onClick={() => setImportOpen(true)} className="w-full px-2 py-1 bg-sky-700 hover:bg-sky-600 rounded text-xs font-semibold transition mb-2" title="Importer un PDF de fiche accords/paroles pour pré-remplir la structure">
+              📄 Importer un PDF
+            </button>
             {version.structure.length > 1 && (
               <div className="flex gap-1">
                 <button onClick={() => setAllCollapsed(false)} className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[11px] transition">
@@ -7326,6 +8087,9 @@ function LeftPanel({ version, updateVersion }) {
           </>
         )}
       </div>
+      <datalist id="section-name-suggestions">
+        {SECTION_NAME_SUGGESTIONS.map(s => <option key={s} value={s} />)}
+      </datalist>
       <div className="flex-1 overflow-y-auto space-y-2 p-3">
         {summaryMode ? (
           <StructureSummary structure={version.structure} />
@@ -7335,6 +8099,13 @@ function LeftPanel({ version, updateVersion }) {
           ))
         )}
       </div>
+      {importOpen && (
+        <PdfImportModal
+          version={version}
+          updateVersion={updateVersion}
+          onClose={() => setImportOpen(false)}
+        />
+      )}
     </>
   );
 }
@@ -7418,15 +8189,13 @@ function SectionBuilder({ section, index, version, updateVersion }) {
         >
           {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
         </button>
-        <select
+        <input
+          type="text"
+          list="section-name-suggestions"
           value={section.section}
           onChange={(e) => updateSection({ section: e.target.value })}
           className={`w-24 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-[11px] font-semibold focus:outline-none focus:border-amber-500 ${style.text}`}
-        >
-          {SECTION_NAME_SUGGESTIONS.map((name) => (
-            <option key={name} value={name}>{name}</option>
-          ))}
-        </select>
+        />
         <div className="flex items-center gap-0.5">
           <span className="text-gray-400 text-[9px] font-semibold">L</span>
           <button
@@ -7876,6 +8645,24 @@ function CenterPanel({ version, updateVersion }) {
   const [imgHeight, setImgHeight] = useState('md');
   const HEIGHTS = { sm: 'max-h-64', md: 'max-h-96', full: 'max-h-none' };
 
+  // Numéro de chaque image : discret, à gauche, affichable/masquable selon préférence
+  const [showImgNumbers, setShowImgNumbers] = useState(true);
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await window.storage.get('guitar-lab:gallery-show-numbers', false);
+        if (result?.value != null) setShowImgNumbers(JSON.parse(result.value));
+      } catch (err) { /* préférence par défaut : affiché */ }
+    })();
+  }, []);
+  const toggleShowImgNumbers = () => {
+    setShowImgNumbers(prev => {
+      const next = !prev;
+      window.storage.set('guitar-lab:gallery-show-numbers', JSON.stringify(next), false).catch(() => {});
+      return next;
+    });
+  };
+
   const addImages = (dataUrls) => {
     if (!dataUrls.length) return;
     const added = dataUrls.map(src => ({ id: newId(), src, x: 0, y: 0, scale: 1 }));
@@ -7992,6 +8779,14 @@ function CenterPanel({ version, updateVersion }) {
         </div>
 
         <button
+          onClick={toggleShowImgNumbers}
+          className={`px-1.5 py-1 rounded text-xs font-semibold ${showImgNumbers ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+          title={showImgNumbers ? 'Masquer le numéro des images' : 'Afficher le numéro des images'}
+        >
+          # {showImgNumbers ? 'affiché' : 'masqué'}
+        </button>
+
+        <button
           onClick={() => setIsAutoScrolling(!isAutoScrolling)}
           className={`px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 ${isAutoScrolling ? 'bg-amber-600 text-white' : 'bg-gray-700'}`}
         >
@@ -8006,33 +8801,37 @@ function CenterPanel({ version, updateVersion }) {
         <Metronome bpm={bpm} onBpmChange={(v) => { setBpm(v); updateVersion({ bpm: v }); }} />
       </div>
 
-      <div ref={galleryRef} className="flex-1 overflow-y-auto bg-gray-900 p-4 space-y-4" style={{ touchAction: 'pan-y' }} onPaste={handlePaste}>
+      <div ref={galleryRef} className="flex-1 overflow-y-auto bg-gray-900 p-4 space-y-px" style={{ touchAction: 'pan-y' }} onPaste={handlePaste}>
         {images.length > 0 ? (
           images.map((img, idx) => (
-            <div key={img.id} className="relative group" style={{ touchAction: 'pan-y' }}>
-              <img
-                src={img.src}
-                alt={`Tablature ${idx + 1}`}
-                draggable={false}
-                className={`w-full ${HEIGHTS[imgHeight]} object-contain bg-black rounded border border-gray-700 select-none`}
-                style={{ touchAction: 'pan-y' }}
-              />
-              <span className="absolute top-2 left-2 bg-black/70 text-gray-300 text-[10px] px-1.5 py-0.5 rounded">
-                {idx + 1}/{images.length}
-              </span>
-              <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition">
-                <button onClick={() => moveImage(img.id, -1)} disabled={idx === 0} className="bg-gray-800/90 hover:bg-gray-700 disabled:opacity-30 rounded-full p-2" title="Monter">
-                  <ArrowUp className="w-4 h-4" />
-                </button>
-                <button onClick={() => moveImage(img.id, 1)} disabled={idx === images.length - 1} className="bg-gray-800/90 hover:bg-gray-700 disabled:opacity-30 rounded-full p-2" title="Descendre">
-                  <ArrowDown className="w-4 h-4" />
-                </button>
-                <button onClick={() => setEditingImageId(img.id)} className="bg-amber-700 hover:bg-amber-600 rounded-full p-2" title="Éditer cette image">
-                  <Edit2 className="w-4 h-4" />
-                </button>
-                <button onClick={() => deleteImage(img.id)} className="bg-red-900 hover:bg-red-800 rounded-full p-2" title="Supprimer">
-                  <Trash2 className="w-4 h-4" />
-                </button>
+            <div key={img.id} className="flex items-start gap-1.5">
+              {showImgNumbers && (
+                <span className="w-4 flex-shrink-0 text-right text-[9px] leading-none text-gray-600 pt-1.5 select-none">
+                  {idx + 1}
+                </span>
+              )}
+              <div className="relative group flex-1 min-w-0" style={{ touchAction: 'pan-y' }}>
+                <img
+                  src={img.src}
+                  alt={`Tablature ${idx + 1}`}
+                  draggable={false}
+                  className={`w-full ${HEIGHTS[imgHeight]} object-contain bg-black rounded border border-gray-700 select-none`}
+                  style={{ touchAction: 'pan-y' }}
+                />
+                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition">
+                  <button onClick={() => moveImage(img.id, -1)} disabled={idx === 0} className="bg-gray-800/90 hover:bg-gray-700 disabled:opacity-30 rounded-full p-2" title="Monter">
+                    <ArrowUp className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => moveImage(img.id, 1)} disabled={idx === images.length - 1} className="bg-gray-800/90 hover:bg-gray-700 disabled:opacity-30 rounded-full p-2" title="Descendre">
+                    <ArrowDown className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => setEditingImageId(img.id)} className="bg-amber-700 hover:bg-amber-600 rounded-full p-2" title="Éditer cette image">
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => deleteImage(img.id)} className="bg-red-900 hover:bg-red-800 rounded-full p-2" title="Supprimer">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           ))
@@ -8359,6 +9158,268 @@ function ImageEditorModal({ src, onSave, onClose }) {
           <button onClick={onClose} className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold">Annuler</button>
           <button onClick={() => onSave(canvasRef.current.toDataURL('image/jpeg', 0.7))} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold">💾 Enregistrer (JPEG 70%)</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Reconstruit les lignes de texte d'une page PDF à partir des items positionnés,
+// en conservant leur position (pour pouvoir ensuite découper une image par section)
+async function extractPageLines(page, viewport) {
+  const textContent = await page.getTextContent();
+  const items = textContent.items.filter(it => (it.str || '').trim() !== '' || it.hasEOL);
+
+  // Regroupe les items par ligne (même ordonnée, à une petite tolérance près)
+  const rows = [];
+  items.forEach(it => {
+    const y = it.transform[5];
+    let row = rows.find(r => Math.abs(r.y - y) < 3);
+    if (!row) { row = { y, items: [] }; rows.push(row); }
+    row.items.push(it);
+  });
+  rows.sort((a, b) => b.y - a.y); // haut de page en premier (PDF: y croît vers le haut)
+
+  return rows.map(row => {
+    const sorted = row.items.slice().sort((a, b) => a.transform[4] - b.transform[4]);
+    let text = '';
+    let lastEndX = null;
+    const points = [];
+    sorted.forEach(it => {
+      const x = it.transform[4];
+      if (lastEndX !== null && x - lastEndX > 3) text += ' ';
+      text += it.str;
+      lastEndX = x + (it.width || 0);
+      try {
+        const p1 = viewport.convertToViewportPoint(x, it.transform[5]);
+        const p2 = viewport.convertToViewportPoint(x + (it.width || 0), it.transform[5] + (it.height || 10));
+        points.push(p1, p2);
+      } catch (err) { /* ignore un item si la conversion échoue */ }
+    });
+    const xs = points.map(p => p[0]);
+    const ys = points.map(p => p[1]);
+    return {
+      text,
+      minX: xs.length ? Math.min(...xs) : 0,
+      maxX: xs.length ? Math.max(...xs) : 0,
+      minY: ys.length ? Math.min(...ys) : 0,
+      maxY: ys.length ? Math.max(...ys) : 0,
+    };
+  });
+}
+
+// Découpe une image nette (sans marge superflue) à partir du canvas de la page, pour une section donnée
+function cropSectionImage(canvas, blockItems, padding = 10) {
+  try {
+    const valid = blockItems.filter(it => it.maxY > it.minY);
+    if (!valid.length) return null;
+    const minX = Math.max(0, Math.min(...valid.map(it => it.minX)) - padding);
+    const maxX = Math.min(canvas.width, Math.max(...valid.map(it => it.maxX)) + padding);
+    const minY = Math.max(0, Math.min(...valid.map(it => it.minY)) - padding);
+    const maxY = Math.min(canvas.height, Math.max(...valid.map(it => it.maxY)) + padding);
+    const w = Math.round(maxX - minX);
+    const h = Math.round(maxY - minY);
+    if (w < 10 || h < 10) return null;
+    const out = document.createElement('canvas');
+    out.width = w;
+    out.height = h;
+    out.getContext('2d').drawImage(canvas, minX, minY, w, h, 0, 0, w, h);
+    return out.toDataURL('image/png');
+  } catch (err) {
+    return null;
+  }
+}
+
+// Modale d'import PDF (ou collage de texte) : analyse une fiche accords/paroles et
+// propose une structure pré-remplie, à valider avant intégration dans la fiche.
+function PdfImportModal({ version, updateVersion, onClose }) {
+  const [status, setStatus] = useState('start'); // start | loading | preview | error
+  const [errorMsg, setErrorMsg] = useState('');
+  const [sections, setSections] = useState([]); // [{ id, name, chords, image, include }]
+  const [manualText, setManualText] = useState('');
+  const [showManual, setShowManual] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const buildSectionsFromParsed = (parsed) => parsed.map((p, i) => ({
+    id: `pdfimp-${i}`,
+    name: p.name,
+    chords: p.chords,
+    image: p.image || null,
+    include: true,
+  }));
+
+  const handlePdfFile = async (file) => {
+    if (!file) return;
+    setStatus('loading');
+    setErrorMsg('');
+    try {
+      if (!window.pdfjsLib) throw new Error('pdfjsLib absent');
+      const buf = await file.arrayBuffer();
+      const doc = await window.pdfjsLib.getDocument({ data: buf }).promise;
+      const allItems = [];
+      const pageBlanks = []; // marqueur de saut de page (ligne vide) entre les pages
+
+      for (let p = 1; p <= doc.numPages; p++) {
+        const page = await doc.getPage(p);
+        const viewport = page.getViewport({ scale: 2 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        try {
+          await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+        } catch (err) { /* le rendu image est facultatif : on continue sans capture si ça échoue */ }
+
+        const lines = await extractPageLines(page, viewport);
+        lines.forEach(l => allItems.push({ ...l, canvas }));
+        if (p < doc.numPages) allItems.push({ text: '', canvas: null }); // sépare les pages comme une ligne vide
+      }
+
+      const parsed = parseChordSheetItems(allItems);
+
+      if (parsed.length === 0) {
+        setStatus('error');
+        setErrorMsg("Aucun accord n'a pu être lu dans ce PDF — il s'agit probablement d'une fiche protégée où le texte est en réalité une image (fréquent sur les sites de paroles/accords). Colle le texte à la main ci-dessous à la place.");
+        setShowManual(true);
+        return;
+      }
+
+      const withImages = parsed.map(sec => {
+        const withCanvas = sec.items.filter(it => it.canvas);
+        const canvas = withCanvas[0]?.canvas;
+        const image = canvas ? cropSectionImage(canvas, withCanvas) : null;
+        return { name: sec.name, chords: sec.chords, image };
+      });
+
+      setSections(buildSectionsFromParsed(withImages));
+      setStatus('preview');
+    } catch (err) {
+      setStatus('error');
+      setErrorMsg("Impossible de lire ce PDF (" + (err?.message || err) + "). Colle le texte à la main ci-dessous à la place.");
+      setShowManual(true);
+    }
+  };
+
+  const handleManualParse = () => {
+    const parsed = parseChordSheetLines(manualText.split('\n'));
+    if (parsed.length === 0) {
+      setErrorMsg("Aucun accord détecté dans ce texte. Vérifie qu'il contient bien une ligne d'accords au-dessus de chaque ligne de paroles.");
+      return;
+    }
+    setErrorMsg('');
+    setSections(buildSectionsFromParsed(parsed));
+    setStatus('preview');
+  };
+
+  const updateSectionField = (id, updates) => {
+    setSections(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
+  };
+
+  const confirmImport = () => {
+    const chosen = sections.filter(s => s.include);
+    if (chosen.length === 0) { onClose?.(); return; }
+    const newStructure = chordSectionsToStructure(chosen);
+    const newImages = chosen.filter(s => s.image).map(s => ({ id: newId(), src: s.image, x: 0, y: 0, scale: 1 }));
+    updateVersion({
+      structure: [...version.structure, ...newStructure],
+      images: [...(version.images || []), ...newImages],
+    });
+    onClose?.();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-800 rounded-lg max-w-lg w-full max-h-[85vh] overflow-y-auto border border-gray-700 shadow-2xl">
+        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-center z-10">
+          <h3 className="font-bold text-sky-400">📄 Importer une fiche accords/paroles</h3>
+          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded"><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="p-4 space-y-3">
+          {status === 'start' && (
+            <>
+              <p className="text-xs text-gray-400">
+                Choisis un PDF de fiche accords/paroles (accords au-dessus des paroles). J'essaie d'en déduire automatiquement la structure (Intro, Couplet, Refrain...) et les accords de chaque ligne — vérifie et corrige ensuite si besoin.
+              </p>
+              <label className="block w-full text-center px-3 py-3 bg-sky-700 hover:bg-sky-600 rounded cursor-pointer font-semibold text-sm">
+                Choisir un fichier PDF
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/pdf"
+                  className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) handlePdfFile(f); }}
+                />
+              </label>
+              <button onClick={() => setShowManual(!showManual)} className="text-xs text-gray-400 hover:text-gray-200 underline">
+                {showManual ? 'Masquer' : "Ou coller le texte à la main"}
+              </button>
+            </>
+          )}
+
+          {status === 'loading' && (
+            <p className="text-sm text-gray-400 text-center py-6">Lecture du PDF en cours...</p>
+          )}
+
+          {status === 'error' && (
+            <p className="text-xs text-amber-400 bg-amber-900/20 border border-amber-700/40 rounded-lg p-3">{errorMsg}</p>
+          )}
+
+          {(showManual || status === 'error') && status !== 'preview' && (
+            <div className="space-y-2">
+              <textarea
+                value={manualText}
+                onChange={(e) => setManualText(e.target.value)}
+                placeholder={"Colle ici le texte, accords au-dessus des paroles, ex:\nC        G        Am\nLet's dance in style..."}
+                rows={8}
+                className="w-full px-2 py-2 bg-gray-900 border border-gray-600 rounded text-xs font-mono text-gray-200 focus:outline-none focus:border-sky-500"
+              />
+              <button onClick={handleManualParse} className="w-full px-3 py-2 bg-sky-700 hover:bg-sky-600 rounded text-sm font-semibold">
+                Analyser ce texte
+              </button>
+            </div>
+          )}
+
+          {status === 'preview' && (
+            <>
+              <p className="text-xs text-gray-400">{sections.length} section(s) détectée(s) — décoche celles à ignorer, corrige les noms si besoin.</p>
+              <div className="space-y-2">
+                {sections.map(sec => (
+                  <div key={sec.id} className={`rounded-lg border p-2 flex gap-2 ${sec.include ? 'border-sky-600 bg-sky-900/10' : 'border-gray-700 bg-gray-900/30 opacity-60'}`}>
+                    <input
+                      type="checkbox"
+                      checked={sec.include}
+                      onChange={(e) => updateSectionField(sec.id, { include: e.target.checked })}
+                      className="mt-1 flex-shrink-0"
+                    />
+                    {sec.image && (
+                      <img src={sec.image} alt="" className="w-14 h-14 object-cover rounded border border-gray-600 flex-shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <input
+                        type="text"
+                        list="section-name-suggestions"
+                        value={sec.name}
+                        onChange={(e) => updateSectionField(sec.id, { name: e.target.value })}
+                        className="w-full px-1.5 py-0.5 bg-gray-800 border border-gray-600 rounded text-xs font-semibold text-amber-300 mb-1 focus:outline-none focus:border-sky-500"
+                      />
+                      <p className="text-[11px] text-gray-400 font-mono truncate">{sec.chords.join(' - ') || '—'}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        {status === 'preview' && (
+          <div className="p-4 border-t border-gray-700 flex gap-2 sticky bottom-0 bg-gray-800">
+            <button onClick={confirmImport} className="flex-1 px-3 py-2 bg-sky-600 hover:bg-sky-500 rounded font-semibold text-sm">
+              ✓ Importer {sections.filter(s => s.include).length} section(s)
+            </button>
+            <button onClick={onClose} className="flex-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded font-semibold text-sm">
+              ✕ Annuler
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
