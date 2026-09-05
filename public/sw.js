@@ -1,18 +1,16 @@
-// Service Worker minimal — permet de démarrer l'app même sans cache complet
-const CACHE_NAME = 'guitar-lab-cache-v1';
+// Service Worker "auto-destruction" : les anciennes installations (écran d'accueil iPad)
+// re-téléchargent ce fichier ; il vide tous les caches et se désenregistre pour que
+// l'app ne soit plus jamais servie depuis une copie figée. Les données (IndexedDB) ne sont pas touchées.
+self.addEventListener('install', () => self.skipWaiting());
 
-self.addEventListener('install', (e) => {
-  self.skipWaiting();
-});
-
-self.addEventListener('activate', (e) => {
-  e.waitUntil(clients.claim());
-});
-
-self.addEventListener('fetch', (e) => {
-  // Cache first, fallback to network
-  e.respondWith(
-    caches.match(e.request).then(cached => cached || fetch(e.request))
-      .catch(() => caches.match('/'))
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    (async () => {
+      const names = await caches.keys();
+      await Promise.all(names.map((n) => caches.delete(n)));
+      await self.registration.unregister();
+      const list = await self.clients.matchAll({ type: 'window' });
+      list.forEach((client) => client.navigate(client.url));
+    })(),
   );
 });
