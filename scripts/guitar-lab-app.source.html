@@ -7117,6 +7117,8 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
   const [youtubeImportUrl, setYoutubeImportUrl] = useState('');
   const [reviewOpen, setReviewOpen] = useState(false);
   const [pendingImportMetadata, setPendingImportMetadata] = useState(null);
+  const [importing, setImporting] = useState(false);
+
 
   const tags = song.tags || [];
   const classifications = song.classifications || [];
