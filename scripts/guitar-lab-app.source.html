@@ -6990,6 +6990,48 @@ const extractYouTubeMetadata = (title) => {
   return extracted;
 };
 
+// Récupère les infos publiques d'une vidéo YouTube (titre, chaîne, miniature) sans clé API.
+// On tente plusieurs services compatibles navigateur ; en cas d'échec on retombe sur l'analyse du texte saisi.
+async function fetchYoutubeMetadata(rawUrl) {
+  const videoId = extractYoutubeId(rawUrl);
+  if (!videoId) return null;
+  const canonical = `https://www.youtube.com/watch?v=${videoId}`;
+  const endpoints = [
+    `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(canonical)}`,
+    `https://noembed.com/embed?url=${encodeURIComponent(canonical)}`,
+  ];
+  for (const endpoint of endpoints) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(endpoint, { signal: controller.signal });
+      clearTimeout(timer);
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (!data || data.error || !data.title) continue;
+      return {
+        videoTitle: data.title,
+        channel: (data.author_name || '').replace(/\s*-\s*Topic$/i, '').trim(),
+        thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+        url: canonical,
+      };
+    } catch (e) { /* on essaie l'endpoint suivant */ }
+  }
+  return { videoTitle: '', channel: '', thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`, url: canonical };
+}
+
+// Combine les infos récupérées sur YouTube et l'analyse du titre pour pré-remplir la fiche
+function buildMetadataFromYoutube(remote, fallbackText) {
+  const source = (remote && remote.videoTitle) || fallbackText || '';
+  const parsed = extractYouTubeMetadata(source);
+  if (!parsed.artist && remote?.channel) parsed.artist = remote.channel;
+  if (!parsed.title && remote?.channel) parsed.title = source;
+  parsed.imageUrl = remote?.thumbnail || '';
+  return parsed;
+}
+
+
+
 // Modale de review YouTube
 function YouTubeImportReviewModal({ metadata, youtubeUrl, onConfirm, onCancel }) {
   const [reviewed, setReviewed] = useState(metadata);
@@ -7013,6 +7055,21 @@ function YouTubeImportReviewModal({ metadata, youtubeUrl, onConfirm, onCancel })
           <div className="bg-gray-750 px-3 py-2 rounded border border-gray-600 text-xs text-gray-300 break-all">
             🎬 {youtubeUrl}
           </div>
+          {reviewed.imageUrl && (
+            <div className="flex items-center gap-2">
+              <img src={reviewed.imageUrl} alt="" className="w-24 h-14 object-cover rounded border border-gray-600" />
+              <label className="text-xs text-gray-300 flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={reviewed.useImage !== false}
+                  onChange={(e) => setReviewed({ ...reviewed, useImage: e.target.checked })}
+                  className="accent-amber-500"
+                />
+                Utiliser cette image comme pochette
+              </label>
+            </div>
+          )}
+
           <div>
             <label className={labelCls}>Titre *</label>
             <input type="text" value={reviewed.title} onChange={(e) => setReviewed({ ...reviewed, title: e.target.value })} className={inputCls} placeholder="ex. Wonderwall" autoFocus />
@@ -7060,6 +7117,8 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
   const [youtubeImportUrl, setYoutubeImportUrl] = useState('');
   const [reviewOpen, setReviewOpen] = useState(false);
   const [pendingImportMetadata, setPendingImportMetadata] = useState(null);
+  const [importing, setImporting] = useState(false);
+
 
   const tags = song.tags || [];
   const classifications = song.classifications || [];
@@ -7102,32 +7161,43 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
   const addLink = () => onChange({ ...song, youtubeUrls: [...links, { id: newId(), url: '' }] });
   const removeLink = (id) => onChange({ ...song, youtubeUrls: links.filter(l => l.id !== id) });
 
-  // Handlers pour l'import YouTube
-  const handleYouTubeImport = () => {
-    if (!youtubeImportUrl.trim()) {
-      alert('⚠️ Veuillez entrer une URL ou titre YouTube valide');
+  // Handlers pour l'import YouTube (lien de vidéo → pré-remplissage des champs)
+  const handleYouTubeImport = async () => {
+    const entry = youtubeImportUrl.trim();
+    if (!entry) {
+      alert('⚠️ Collez le lien de la vidéo YouTube (ou son titre)');
       return;
     }
-    const metadata = extractYouTubeMetadata(youtubeImportUrl);
-    setPendingImportMetadata(metadata);
+    setImporting(true);
+    let remote = null;
+    try {
+      remote = await fetchYoutubeMetadata(entry);
+    } catch (e) {
+      remote = null;
+    }
+    setImporting(false);
+    const metadata = buildMetadataFromYoutube(remote, entry);
+    setPendingImportMetadata({ ...metadata, useImage: !!metadata.imageUrl, sourceUrl: remote?.url || (extractYoutubeId(entry) ? entry : '') });
     setReviewOpen(true);
   };
 
   const handleImportConfirm = (importedData) => {
-    const { youtubeUrl, title, artist, language, style, bpm } = importedData;
+    const { youtubeUrl, title, artist, language, style, bpm, imageUrl, useImage } = importedData;
     onChange({
       ...song,
       title: title || song.title,
       artist: artist || song.artist,
       language: language || song.language,
       style: style || song.style,
-      youtubeUrls: youtubeUrl ? [...links.filter(l => l.url !== youtubeUrl), { id: newId(), url: youtubeUrl }] : links,
+      imageUrl: useImage !== false && imageUrl ? imageUrl : song.imageUrl,
+      youtubeUrls: extractYoutubeId(youtubeUrl || '') ? [...links.filter(l => l.url && l.url !== youtubeUrl), { id: newId(), url: youtubeUrl }] : links,
       versions: song.versions.map((v, i) => (i === 0 ? { ...v, bpm: bpm || v.bpm } : v)),
     });
     setYoutubeImportUrl('');
     setReviewOpen(false);
     setPendingImportMetadata(null);
   };
+
 
   const inputCls = 'w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500';
 
@@ -7161,24 +7231,27 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
 
           {/* Import YouTube */}
           <div className="bg-gray-750 px-3 py-2 rounded border border-amber-700/50">
-            <label className="text-xs text-gray-400 block mb-2">🔗 Importer depuis YouTube</label>
+            <label className="text-xs text-gray-400 block mb-2">🔗 Pré-remplir depuis un lien YouTube</label>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={youtubeImportUrl}
                 onChange={(e) => setYoutubeImportUrl(e.target.value)}
-                placeholder="ex. Oasis - Wonderwall [Tutorial]"
+                placeholder="Collez ici https://youtu.be/…"
                 className={`${inputCls} flex-1`}
-                onKeyPress={(e) => e.key === 'Enter' && handleYouTubeImport()}
+                onKeyPress={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleYouTubeImport(); } }}
               />
               <button
                 onClick={handleYouTubeImport}
-                className="px-3 py-2 bg-amber-600 hover:bg-amber-500 rounded text-sm font-semibold transition text-white whitespace-nowrap"
+                disabled={importing}
+                className="px-3 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-60 rounded text-sm font-semibold transition text-white whitespace-nowrap"
               >
-                📥 Importer
+                {importing ? '⏳ Lecture…' : '📥 Remplir'}
               </button>
             </div>
+            <p className="text-[11px] text-gray-500 mt-1">Titre, artiste, langue, style, tempo et pochette sont proposés automatiquement.</p>
           </div>
+
 
           <div>
             <label className="text-xs text-gray-400 block mb-1">Titre</label>
@@ -7431,7 +7504,7 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
       {reviewOpen && pendingImportMetadata && (
         <YouTubeImportReviewModal
           metadata={pendingImportMetadata}
-          youtubeUrl={youtubeImportUrl}
+          youtubeUrl={pendingImportMetadata.sourceUrl || youtubeImportUrl}
           onConfirm={handleImportConfirm}
           onCancel={() => {
             setReviewOpen(false);
