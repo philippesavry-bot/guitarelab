@@ -7161,32 +7161,43 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
   const addLink = () => onChange({ ...song, youtubeUrls: [...links, { id: newId(), url: '' }] });
   const removeLink = (id) => onChange({ ...song, youtubeUrls: links.filter(l => l.id !== id) });
 
-  // Handlers pour l'import YouTube
-  const handleYouTubeImport = () => {
-    if (!youtubeImportUrl.trim()) {
-      alert('⚠️ Veuillez entrer une URL ou titre YouTube valide');
+  // Handlers pour l'import YouTube (lien de vidéo → pré-remplissage des champs)
+  const handleYouTubeImport = async () => {
+    const entry = youtubeImportUrl.trim();
+    if (!entry) {
+      alert('⚠️ Collez le lien de la vidéo YouTube (ou son titre)');
       return;
     }
-    const metadata = extractYouTubeMetadata(youtubeImportUrl);
-    setPendingImportMetadata(metadata);
+    setImporting(true);
+    let remote = null;
+    try {
+      remote = await fetchYoutubeMetadata(entry);
+    } catch (e) {
+      remote = null;
+    }
+    setImporting(false);
+    const metadata = buildMetadataFromYoutube(remote, entry);
+    setPendingImportMetadata({ ...metadata, useImage: !!metadata.imageUrl, sourceUrl: remote?.url || (extractYoutubeId(entry) ? entry : '') });
     setReviewOpen(true);
   };
 
   const handleImportConfirm = (importedData) => {
-    const { youtubeUrl, title, artist, language, style, bpm } = importedData;
+    const { youtubeUrl, title, artist, language, style, bpm, imageUrl, useImage } = importedData;
     onChange({
       ...song,
       title: title || song.title,
       artist: artist || song.artist,
       language: language || song.language,
       style: style || song.style,
-      youtubeUrls: youtubeUrl ? [...links.filter(l => l.url !== youtubeUrl), { id: newId(), url: youtubeUrl }] : links,
+      imageUrl: useImage !== false && imageUrl ? imageUrl : song.imageUrl,
+      youtubeUrls: youtubeUrl ? [...links.filter(l => l.url && l.url !== youtubeUrl), { id: newId(), url: youtubeUrl }] : links,
       versions: song.versions.map((v, i) => (i === 0 ? { ...v, bpm: bpm || v.bpm } : v)),
     });
     setYoutubeImportUrl('');
     setReviewOpen(false);
     setPendingImportMetadata(null);
   };
+
 
   const inputCls = 'w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500';
 
