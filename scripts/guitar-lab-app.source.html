@@ -97,10 +97,14 @@
       function openDb() {
         if (_dbPromise) return _dbPromise;
         _dbPromise = new Promise(function (resolve, reject) {
+          // iOS peut bloquer indéfiniment sur indexedDB.open() : on force un abandon au bout de 3s
+          var timeout = setTimeout(function () {
+            reject(new Error('DB_TIMEOUT'));
+          }, 3000);
           var req = indexedDB.open(DB_NAME, 1);
           req.onupgradeneeded = function () { req.result.createObjectStore(STORE_NAME); };
-          req.onsuccess = function () { resolve(req.result); };
-          req.onerror = function () { reject(req.error); };
+          req.onsuccess = function () { clearTimeout(timeout); resolve(req.result); };
+          req.onerror = function () { clearTimeout(timeout); reject(req.error); };
         });
         return _dbPromise;
       }
