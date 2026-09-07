@@ -7231,24 +7231,27 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
 
           {/* Import YouTube */}
           <div className="bg-gray-750 px-3 py-2 rounded border border-amber-700/50">
-            <label className="text-xs text-gray-400 block mb-2">🔗 Importer depuis YouTube</label>
+            <label className="text-xs text-gray-400 block mb-2">🔗 Pré-remplir depuis un lien YouTube</label>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={youtubeImportUrl}
                 onChange={(e) => setYoutubeImportUrl(e.target.value)}
-                placeholder="ex. Oasis - Wonderwall [Tutorial]"
+                placeholder="Collez ici https://youtu.be/…"
                 className={`${inputCls} flex-1`}
-                onKeyPress={(e) => e.key === 'Enter' && handleYouTubeImport()}
+                onKeyPress={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleYouTubeImport(); } }}
               />
               <button
                 onClick={handleYouTubeImport}
-                className="px-3 py-2 bg-amber-600 hover:bg-amber-500 rounded text-sm font-semibold transition text-white whitespace-nowrap"
+                disabled={importing}
+                className="px-3 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-60 rounded text-sm font-semibold transition text-white whitespace-nowrap"
               >
-                📥 Importer
+                {importing ? '⏳ Lecture…' : '📥 Remplir'}
               </button>
             </div>
+            <p className="text-[11px] text-gray-500 mt-1">Titre, artiste, langue, style, tempo et pochette sont proposés automatiquement.</p>
           </div>
+
 
           <div>
             <label className="text-xs text-gray-400 block mb-1">Titre</label>
