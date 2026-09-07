@@ -7055,6 +7055,21 @@ function YouTubeImportReviewModal({ metadata, youtubeUrl, onConfirm, onCancel })
           <div className="bg-gray-750 px-3 py-2 rounded border border-gray-600 text-xs text-gray-300 break-all">
             🎬 {youtubeUrl}
           </div>
+          {reviewed.imageUrl && (
+            <div className="flex items-center gap-2">
+              <img src={reviewed.imageUrl} alt="" className="w-24 h-14 object-cover rounded border border-gray-600" />
+              <label className="text-xs text-gray-300 flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={reviewed.useImage !== false}
+                  onChange={(e) => setReviewed({ ...reviewed, useImage: e.target.checked })}
+                  className="accent-amber-500"
+                />
+                Utiliser cette image comme pochette
+              </label>
+            </div>
+          )}
+
           <div>
             <label className={labelCls}>Titre *</label>
             <input type="text" value={reviewed.title} onChange={(e) => setReviewed({ ...reviewed, title: e.target.value })} className={inputCls} placeholder="ex. Wonderwall" autoFocus />
