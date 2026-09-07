@@ -7504,7 +7504,7 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
       {reviewOpen && pendingImportMetadata && (
         <YouTubeImportReviewModal
           metadata={pendingImportMetadata}
-          youtubeUrl={youtubeImportUrl}
+          youtubeUrl={pendingImportMetadata.sourceUrl || youtubeImportUrl}
           onConfirm={handleImportConfirm}
           onCancel={() => {
             setReviewOpen(false);
