@@ -52,19 +52,32 @@
     <div id="root"></div>
 
     <script>
+      // Failsafe visuel d'urgence : en cas d'erreur bloquante ou de chargement très long,
+      // on cache l'écran de démarrage pour éviter un écran figé.
+      window.onerror = function () {
+        var b = document.getElementById('boot');
+        if (b) b.style.display = 'none';
+      };
+      window.addEventListener('load', function () {
+        setTimeout(function () {
+          var b = document.getElementById('boot');
+          if (b) b.remove();
+        }, 100);
+      });
+
       // Ancien cache hors-ligne retiré : il servait une version périmée de l'app
       // installée sur l'écran d'accueil. On désenregistre ce qui traîne encore.
       if ('serviceWorker' in navigator) {
-        setTimeout(() => {
+        setTimeout(function () {
           navigator.serviceWorker.getRegistrations()
-            .then((regs) => regs.forEach((r) => r.unregister()))
-            .catch(() => {});
+            .then(function (regs) { regs.forEach(function (r) { r.unregister(); }); })
+            .catch(function () {});
         }, 100);
       }
 
       // Failsafe ultime : s'assure que le message de chargement disparaît après 5s max
-      setTimeout(() => {
-        const bootEl = document.getElementById('boot');
+      setTimeout(function () {
+        var bootEl = document.getElementById('boot');
         if (bootEl) {
           bootEl.style.display = 'none';
           console.warn('⚠️ Démarrage long, le message de chargement a été masqué');
