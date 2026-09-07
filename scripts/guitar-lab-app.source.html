@@ -7190,7 +7190,7 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
       language: language || song.language,
       style: style || song.style,
       imageUrl: useImage !== false && imageUrl ? imageUrl : song.imageUrl,
-      youtubeUrls: youtubeUrl ? [...links.filter(l => l.url && l.url !== youtubeUrl), { id: newId(), url: youtubeUrl }] : links,
+      youtubeUrls: extractYoutubeId(youtubeUrl || '') ? [...links.filter(l => l.url && l.url !== youtubeUrl), { id: newId(), url: youtubeUrl }] : links,
       versions: song.versions.map((v, i) => (i === 0 ? { ...v, bpm: bpm || v.bpm } : v)),
     });
     setYoutubeImportUrl('');
