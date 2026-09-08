@@ -7032,7 +7032,6 @@ function buildMetadataFromYoutube(remote, fallbackText) {
   }
   if (!parsed.artist && remote?.channel) parsed.artist = remote.channel;
   if (!parsed.title && source) parsed.title = source;
-  parsed.imageUrl = remote?.thumbnail || '';
   return parsed;
 }
 
@@ -7062,21 +7061,6 @@ function YouTubeImportReviewModal({ metadata, youtubeUrl, onConfirm, onCancel })
           <div className="bg-gray-750 px-3 py-2 rounded border border-gray-600 text-xs text-gray-300 break-all">
             🎬 {youtubeUrl}
           </div>
-          {reviewed.imageUrl && (
-            <div className="flex items-center gap-2">
-              <img src={reviewed.imageUrl} alt="" className="w-24 h-14 object-cover rounded border border-gray-600" />
-              <label className="text-xs text-gray-300 flex items-center gap-1">
-                <input
-                  type="checkbox"
-                  checked={reviewed.useImage !== false}
-                  onChange={(e) => setReviewed({ ...reviewed, useImage: e.target.checked })}
-                  className="accent-amber-500"
-                />
-                Utiliser cette image comme pochette
-              </label>
-            </div>
-          )}
-
           <div>
             <label className={labelCls}>Titre *</label>
             <input type="text" value={reviewed.title} onChange={(e) => setReviewed({ ...reviewed, title: e.target.value })} className={inputCls} placeholder="ex. Wonderwall" autoFocus />
@@ -7184,19 +7168,15 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
     }
     setImporting(false);
     const metadata = buildMetadataFromYoutube(remote, entry);
-    setPendingImportMetadata({ ...metadata, useImage: !!metadata.imageUrl, sourceUrl: remote?.url || (extractYoutubeId(entry) ? entry : '') });
-    setReviewOpen(true);
-  };
-
-  const handleImportConfirm = (importedData) => {
-    const { youtubeUrl, title, artist, language, style, bpm, imageUrl, useImage } = importedData;
+    setPendingImportMetadata({ ...metadata, sourceUrl: remote?.url || (extractYoutubeId(entry) ? entry : '') });
+...
+    const { youtubeUrl, title, artist, language, style, bpm } = importedData;
     onChange({
       ...song,
       title: title || song.title,
       artist: artist || song.artist,
       language: language || song.language,
       style: style || song.style,
-      imageUrl: useImage !== false && imageUrl ? imageUrl : song.imageUrl,
       youtubeUrls: extractYoutubeId(youtubeUrl || '') ? [...links.filter(l => l.url && l.url !== youtubeUrl), { id: newId(), url: youtubeUrl }] : links,
       versions: song.versions.map((v, i) => (i === 0 ? { ...v, bpm: bpm || v.bpm } : v)),
     });
