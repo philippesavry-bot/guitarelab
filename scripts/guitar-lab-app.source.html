@@ -7169,7 +7169,10 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
     setImporting(false);
     const metadata = buildMetadataFromYoutube(remote, entry);
     setPendingImportMetadata({ ...metadata, sourceUrl: remote?.url || (extractYoutubeId(entry) ? entry : '') });
-...
+    setReviewOpen(true);
+  };
+
+  const handleImportConfirm = (importedData) => {
     const { youtubeUrl, title, artist, language, style, bpm } = importedData;
     onChange({
       ...song,
