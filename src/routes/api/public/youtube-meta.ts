@@ -17,7 +17,7 @@ function extractId(raw: string): string | null {
   ]
   for (const p of patterns) {
     const m = raw.match(p)
-    if (m) return m[1]
+    if (m && m[1]) return m[1]
   }
   return null
 }
