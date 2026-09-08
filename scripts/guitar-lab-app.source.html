@@ -6990,45 +6990,52 @@ const extractYouTubeMetadata = (title) => {
   return extracted;
 };
 
-// Récupère les infos publiques d'une vidéo YouTube (titre, chaîne, miniature) sans clé API.
-// On tente plusieurs services compatibles navigateur ; en cas d'échec on retombe sur l'analyse du texte saisi.
+// Récupère les infos publiques d'une vidéo YouTube (titre, chaîne, miniature).
+// On passe par notre propre service serveur : il lit la vidéo puis fait analyser
+// le titre par l'IA pour séparer proprement le morceau et l'artiste.
 async function fetchYoutubeMetadata(rawUrl) {
   const videoId = extractYoutubeId(rawUrl);
   if (!videoId) return null;
   const canonical = `https://www.youtube.com/watch?v=${videoId}`;
-  const endpoints = [
-    `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(canonical)}`,
-    `https://noembed.com/embed?url=${encodeURIComponent(canonical)}`,
-  ];
-  for (const endpoint of endpoints) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 8000);
-      const res = await fetch(endpoint, { signal: controller.signal });
-      clearTimeout(timer);
-      if (!res.ok) continue;
-      const data = await res.json();
-      if (!data || data.error || !data.title) continue;
-      return {
-        videoTitle: data.title,
-        channel: (data.author_name || '').replace(/\s*-\s*Topic$/i, '').trim(),
-        thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-        url: canonical,
-      };
-    } catch (e) { /* on essaie l'endpoint suivant */ }
+  const fallback = { videoTitle: '', channel: '', thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`, url: canonical, ai: null };
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 25000);
+    const res = await fetch(`/api/public/youtube-meta?url=${encodeURIComponent(canonical)}`, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return fallback;
+    const data = await res.json();
+    if (!data || data.error) return fallback;
+    return {
+      videoTitle: data.videoTitle || '',
+      channel: data.channel || '',
+      thumbnail: data.thumbnail || fallback.thumbnail,
+      url: data.url || canonical,
+      ai: data.ai || null,
+    };
+  } catch (e) {
+    return fallback;
   }
-  return { videoTitle: '', channel: '', thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`, url: canonical };
 }
 
 // Combine les infos récupérées sur YouTube et l'analyse du titre pour pré-remplir la fiche
 function buildMetadataFromYoutube(remote, fallbackText) {
-  const source = (remote && remote.videoTitle) || fallbackText || '';
-  const parsed = extractYouTubeMetadata(source);
+  const source = (remote && remote.videoTitle) || '';
+  const parsed = extractYouTubeMetadata(source || (extractYoutubeId(fallbackText) ? '' : fallbackText || ''));
+  const ai = remote?.ai;
+  if (ai) {
+    if (ai.title) parsed.title = ai.title;
+    if (ai.artist) parsed.artist = ai.artist;
+    if (ai.language) parsed.language = ai.language;
+    if (ai.style) parsed.style = ai.style;
+    if (ai.bpm) parsed.bpm = ai.bpm;
+  }
   if (!parsed.artist && remote?.channel) parsed.artist = remote.channel;
-  if (!parsed.title && remote?.channel) parsed.title = source;
+  if (!parsed.title && source) parsed.title = source;
   parsed.imageUrl = remote?.thumbnail || '';
   return parsed;
 }
+
 
 
 

@@ -10,33 +10,43 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiPublicYoutubeMetaRouteImport } from './routes/api/public/youtube-meta'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicYoutubeMetaRoute = ApiPublicYoutubeMetaRouteImport.update({
+  id: '/api/public/youtube-meta',
+  path: '/api/public/youtube-meta',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/api/public/youtube-meta': typeof ApiPublicYoutubeMetaRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/public/youtube-meta': typeof ApiPublicYoutubeMetaRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/api/public/youtube-meta': typeof ApiPublicYoutubeMetaRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/api/public/youtube-meta'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/api/public/youtube-meta'
+  id: '__root__' | '/' | '/api/public/youtube-meta'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApiPublicYoutubeMetaRoute: typeof ApiPublicYoutubeMetaRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +58,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/youtube-meta': {
+      id: '/api/public/youtube-meta'
+      path: '/api/public/youtube-meta'
+      fullPath: '/api/public/youtube-meta'
+      preLoaderRoute: typeof ApiPublicYoutubeMetaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApiPublicYoutubeMetaRoute: ApiPublicYoutubeMetaRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
