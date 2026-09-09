@@ -6944,12 +6944,15 @@ function suggestKeywords(song) {
 // ============================================
 // 🎵 EXTRACTION YOUTUBE METADATA
 // ============================================
+// Liste de styles normalisée : utilisée pour la liste déroulante et par l'analyse IA
+const STYLE_OPTIONS = ['Rock', 'Pop', 'Folk', 'Blues', 'Chanson française', 'Variété', 'Country', 'Jazz', 'Soul', 'Funk', 'Reggae', 'Latin', 'Metal', 'Classique', 'Instrumental'];
+
 const extractYouTubeMetadata = (title) => {
   if (!title || typeof title !== 'string') {
-    return { title: '', artist: '', language: 'FR', style: '', bpm: 120 };
+    return { title: '', artist: '', language: 'FR', style: '', bpm: null };
   }
   const normalizeText = (str) => str?.trim?.() || '';
-  let extracted = { title: '', artist: '', language: 'FR', style: '', bpm: 120 };
+  let extracted = { title: '', artist: '', language: 'FR', style: '', bpm: null };
   const patterns = [
     { regex: /^(.+?)\s*[-–—]\s*(.+?)\s*(?:\[.+?\])*$/i, groups: ['artist', 'title'] },
     { regex: /^(.+?)\s*\|\s*(.+?)$/i, groups: ['title', 'artist'] },
@@ -6979,7 +6982,8 @@ const extractYouTubeMetadata = (title) => {
   const lowerTitle = (extracted.title + ' ' + extracted.artist).toLowerCase();
   for (const keyword of styleKeywords) {
     if (lowerTitle.includes(keyword)) {
-      extracted.style = keyword.charAt(0).toUpperCase() + keyword.slice(1);
+      const match = STYLE_OPTIONS.find(o => o.toLowerCase().startsWith(keyword));
+      extracted.style = match || (keyword.charAt(0).toUpperCase() + keyword.slice(1));
       break;
     }
   }
@@ -7012,6 +7016,7 @@ async function fetchYoutubeMetadata(rawUrl) {
       thumbnail: data.thumbnail || fallback.thumbnail,
       url: data.url || canonical,
       ai: data.ai || null,
+      isTutorial: !!(data.ai && data.ai.isTutorial),
     };
   } catch (e) {
     return fallback;
@@ -7028,10 +7033,13 @@ function buildMetadataFromYoutube(remote, fallbackText) {
     if (ai.artist) parsed.artist = ai.artist;
     if (ai.language) parsed.language = ai.language;
     if (ai.style) parsed.style = ai.style;
-    if (ai.bpm) parsed.bpm = ai.bpm;
+    parsed.bpm = ai.bpm || parsed.bpm || null;
   }
   if (!parsed.artist && remote?.channel) parsed.artist = remote.channel;
   if (!parsed.title && source) parsed.title = source;
+  parsed.isTutorial = !!remote?.isTutorial;
+  parsed.thumbnail = remote?.thumbnail || '';
+  parsed.videoTitle = remote?.videoTitle || '';
   return parsed;
 }
 
@@ -7058,9 +7066,22 @@ function YouTubeImportReviewModal({ metadata, youtubeUrl, onConfirm, onCancel })
           <button onClick={onCancel} className="p-1 hover:bg-gray-700 rounded text-sm">✕</button>
         </div>
         <div className="p-4 space-y-3 max-h-[60vh] overflow-y-auto">
+          {reviewed.thumbnail && (
+            <div className="rounded overflow-hidden border border-gray-600">
+              <img src={reviewed.thumbnail} alt="Aperçu de la vidéo" className="w-full object-cover" />
+              {reviewed.videoTitle && (
+                <div className="px-2 py-1 bg-gray-750 text-[11px] text-gray-300 truncate">{reviewed.videoTitle}</div>
+              )}
+            </div>
+          )}
           <div className="bg-gray-750 px-3 py-2 rounded border border-gray-600 text-xs text-gray-300 break-all">
             🎬 {youtubeUrl}
           </div>
+          {reviewed.isTutorial && (
+            <div className="px-3 py-2 rounded bg-amber-900/40 border border-amber-700 text-xs text-amber-200">
+              ⚠️ Cette vidéo semble être un tutoriel ou une reprise : vérifiez que le titre et l'artiste sont bien ceux du morceau d'origine.
+            </div>
+          )}
           <div>
             <label className={labelCls}>Titre *</label>
             <input type="text" value={reviewed.title} onChange={(e) => setReviewed({ ...reviewed, title: e.target.value })} className={inputCls} placeholder="ex. Wonderwall" autoFocus />
@@ -7081,15 +7102,21 @@ function YouTubeImportReviewModal({ metadata, youtubeUrl, onConfirm, onCancel })
             </div>
             <div>
               <label className={labelCls}>Style</label>
-              <input type="text" value={reviewed.style} onChange={(e) => setReviewed({ ...reviewed, style: e.target.value })} className={inputCls} placeholder="ex. Rock" />
+              <select value={STYLE_OPTIONS.includes(reviewed.style) ? reviewed.style : ''} onChange={(e) => setReviewed({ ...reviewed, style: e.target.value })} className={inputCls}>
+                <option value="">— non défini —</option>
+                {STYLE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
             </div>
           </div>
           <div>
-            <label className={labelCls}>BPM</label>
-            <div className="flex gap-2">
-              <input type="number" value={reviewed.bpm} onChange={(e) => { const val = parseInt(e.target.value) || 120; setReviewed({ ...reviewed, bpm: Math.max(40, Math.min(300, val)) }); }} className={inputCls} min="40" max="300" step="5" />
-              <div className="text-xs text-gray-400 flex items-center">BPM</div>
+            <label className={labelCls}>Tempo (laissé vide si non détecté)</label>
+            <div className="flex gap-2 items-center">
+              <input type="number" value={reviewed.bpm ?? ''} placeholder="?" onChange={(e) => { const val = parseInt(e.target.value); setReviewed({ ...reviewed, bpm: Number.isFinite(val) ? Math.max(40, Math.min(300, val)) : null }); }} className={inputCls} min="40" max="300" step="5" />
+              <div className="text-xs text-gray-400">BPM</div>
             </div>
+            {!reviewed.bpm && (
+              <div className="text-[11px] text-gray-500 mt-1">Tempo non détecté : il restera tel quel et pourra être réglé au métronome.</div>
+            )}
           </div>
         </div>
         <div className="p-3 border-t border-gray-700 flex gap-2">
@@ -7285,13 +7312,24 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
             </div>
             <div>
               <label className="text-xs text-gray-400 block mb-1">Style</label>
-              <input
-                type="text"
-                value={song.style || ''}
-                placeholder="Rock français, Pop, Blues…"
-                onChange={(e) => onChange({ ...song, style: e.target.value })}
+              <select
+                value={STYLE_OPTIONS.includes(song.style) ? song.style : (song.style ? '__other' : '')}
+                onChange={(e) => onChange({ ...song, style: e.target.value === '__other' ? (song.style || '') : e.target.value })}
                 className={inputCls}
-              />
+              >
+                <option value="">— non défini —</option>
+                {STYLE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                <option value="__other">Autre (préciser)…</option>
+              </select>
+              {!STYLE_OPTIONS.includes(song.style) && (
+                <input
+                  type="text"
+                  value={song.style || ''}
+                  placeholder="Style personnalisé"
+                  onChange={(e) => onChange({ ...song, style: e.target.value })}
+                  className={inputCls + ' mt-1'}
+                />
+              )}
             </div>
           </div>
 
