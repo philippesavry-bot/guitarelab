@@ -32,7 +32,7 @@ async function fetchOembed(videoId: string) {
     const data = (await res.json()) as { title?: string; author_name?: string }
     if (!data?.title) return null
     return {
-      videoTitle: String(data.title),
+      videoTitle: String(data.title || ''),
       channel: String(data.author_name || '').replace(/\s*-\s*Topic$/i, '').trim(),
     }
   } catch {
@@ -40,20 +40,39 @@ async function fetchOembed(videoId: string) {
   }
 }
 
+const STYLE_OPTIONS = [
+  'Rock',
+  'Pop',
+  'Folk',
+  'Blues',
+  'Chanson française',
+  'Variété',
+  'Country',
+  'Jazz',
+  'Soul',
+  'Funk',
+  'Reggae',
+  'Latin',
+  'Metal',
+  'Classique',
+  'Instrumental',
+]
+
 async function analyseWithAi(videoTitle: string, channel: string) {
   const key = process.env['LOVABLE_API_KEY']
   if (!key || !videoTitle) return null
-  const prompt = `Voici le titre d'une vidéo YouTube et le nom de la chaîne. Identifie le morceau de musique.
+  const prompt = `Voici le titre d'une vidéo YouTube et le nom de la chaîne. Identifie le morceau de musique original.
 
 Titre de la vidéo: ${videoTitle}
 Chaîne: ${channel || '(inconnue)'}
 
 Réponds uniquement en JSON avec ces clés:
 {"title": "titre du morceau seul, sans mention de tuto/cover/lyrics/live/officiel/HD",
- "artist": "artiste ou groupe d'origine du morceau (pas la chaîne si c'est un tutoriel)",
+ "artist": "artiste ou groupe d'origine du morceau (jamais la chaîne si c'est un tutoriel ou une reprise)",
  "language": "FR, EN, ES ou Instrumental",
- "style": "style musical principal en français (ex: Rock, Pop, Folk, Blues, Chanson, Variété)",
- "bpm": tempo approximatif du morceau original en nombre entier}`
+ "style": "un seul style choisi STRICTEMENT dans cette liste: ${STYLE_OPTIONS.join(', ')}",
+ "bpm": tempo du morceau original en nombre entier SEULEMENT si tu le connais réellement, sinon null (n'invente jamais de tempo),
+ "isTutorial": true si la vidéo est un tutoriel/leçon/cover et non la version originale, sinon false}`
 
   try {
     const res = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -79,14 +98,18 @@ Réponds uniquement en JSON avec ces clés:
     const cleaned = raw.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
     const parsed = JSON.parse(cleaned) as Record<string, unknown>
     const bpm = Number(parsed['bpm'])
+    const rawStyle = String(parsed['style'] || '').trim()
+    const style =
+      STYLE_OPTIONS.find((s) => s.toLowerCase() === rawStyle.toLowerCase()) || ''
     return {
       title: String(parsed['title'] || '').trim(),
       artist: String(parsed['artist'] || '').trim(),
       language: ['FR', 'EN', 'ES', 'Instrumental'].includes(String(parsed['language']))
         ? String(parsed['language'])
         : 'FR',
-      style: String(parsed['style'] || '').trim(),
-      bpm: Number.isFinite(bpm) ? Math.max(40, Math.min(300, Math.round(bpm))) : 120,
+      style,
+      bpm: Number.isFinite(bpm) && bpm > 0 ? Math.max(40, Math.min(300, Math.round(bpm))) : null,
+      isTutorial: parsed['isTutorial'] === true,
     }
   } catch {
     return null
