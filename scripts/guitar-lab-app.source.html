@@ -8235,6 +8235,19 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
         />
       )}
 
+      {feedbackSeconds !== null && (
+        <SessionFeedbackModal
+          song={song}
+          durationSec={feedbackSeconds}
+          onClose={() => setFeedbackSeconds(null)}
+          onApply={(newProgress) => {
+            setFeedbackSeconds(null);
+            const clamped = Math.max(0, Math.min(100, Math.round(newProgress)));
+            if (clamped !== (song.progress || 0)) onUpdateSong({ ...song, progress: clamped });
+          }}
+        />
+      )}
+
 
       <div className="flex-1 flex overflow-hidden gap-0.5 bg-gray-900 p-0.5 relative">
         {isCompact && !leftCollapsed && (
