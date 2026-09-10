@@ -7876,9 +7876,14 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
     const s = (sec % 60).toString().padStart(2, '0');
     return `${m}:${s}`;
   };
-  const stopAndLogTimer = () => {
+  // Bilan de fin de séance : ressenti de progression, proposé quand on arrête le chrono
+  const [feedbackSeconds, setFeedbackSeconds] = useState(null);
+  const stopAndLogTimer = (askFeedback = false) => {
     setTimerRunning(false);
-    if (timerSeconds > 0) onLogPracticeSession?.(song.id, song.title, timerSeconds);
+    if (timerSeconds > 0) {
+      onLogPracticeSession?.(song.id, song.title, timerSeconds);
+      if (askFeedback) setFeedbackSeconds(timerSeconds);
+    }
     setTimerSeconds(0);
   };
 
