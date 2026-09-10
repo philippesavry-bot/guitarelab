@@ -7133,6 +7133,7 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
   const [suggestions, setSuggestions] = useState([]);
   const [newClassification, setNewClassification] = useState('');
   const [youtubeImportUrl, setYoutubeImportUrl] = useState('');
+  const [styleOther, setStyleOther] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [pendingImportMetadata, setPendingImportMetadata] = useState(null);
   const [importing, setImporting] = useState(false);
