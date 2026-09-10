@@ -8140,7 +8140,7 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
             )}
             {timerSeconds > 0 && (
               <button
-                onClick={stopAndLogTimer}
+                onClick={() => stopAndLogTimer(true)}
                 className="p-1.5 bg-red-700 hover:bg-red-600 rounded transition"
                 title="Arrêter et enregistrer la session"
               >
