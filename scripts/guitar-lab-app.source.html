@@ -7314,15 +7314,18 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
             <div>
               <label className="text-xs text-gray-400 block mb-1">Style</label>
               <select
-                value={STYLE_OPTIONS.includes(song.style) ? song.style : (song.style ? '__other' : '')}
-                onChange={(e) => onChange({ ...song, style: e.target.value === '__other' ? (song.style || '') : e.target.value })}
+                value={STYLE_OPTIONS.includes(song.style) ? song.style : ((song.style || styleOther) ? '__other' : '')}
+                onChange={(e) => {
+                  if (e.target.value === '__other') { setStyleOther(true); onChange({ ...song, style: '' }); }
+                  else { setStyleOther(false); onChange({ ...song, style: e.target.value }); }
+                }}
                 className={inputCls}
               >
                 <option value="">— non défini —</option>
                 {STYLE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
                 <option value="__other">Autre (préciser)…</option>
               </select>
-              {!STYLE_OPTIONS.includes(song.style) && (
+              {(styleOther || (song.style && !STYLE_OPTIONS.includes(song.style))) && (
                 <input
                   type="text"
                   value={song.style || ''}
