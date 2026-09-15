@@ -1,12 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react';
-import {
-  ChevronDown, ChevronRight, ChevronLeft, Plus, Music, X, Star, Menu, Edit2,
-  Trash2, Play, Pause, BookOpen, Maximize2, Minimize2, ArrowDown, ArrowUp, Volume2, VolumeX,
-  TrendingUp, Calendar, Zap, Search
-} from 'lucide-react';
+const { useState, useRef, useEffect, useMemo, useCallback } = React;
+      const {
+        ChevronDown, ChevronRight, ChevronLeft, Plus, Music, X, Star, Menu, Edit2,
+        Trash2, Play, Pause, BookOpen, Maximize2, Minimize2, ArrowDown, ArrowUp, Volume2, VolumeX,
+        TrendingUp, Calendar, Zap, Search, GripVertical,
+      } = window.Icons;
 
 // Suggestions de noms de section (structure du morceau)
-const SECTION_NAME_SUGGESTIONS = ['Intro', 'Couplet', 'Refrain', 'Pont', 'Outro'];
+const SECTION_NAME_SUGGESTIONS = ['Intro', 'Couplet', 'Pré-refrain', 'Refrain', 'Pont', 'Interlude', 'Solo', 'Outro', 'Coda', 'Finale'];
 
 // Couleurs associées aux types de section usuels, pour les distinguer visuellement d'un coup d'œil
 const SECTION_COLOR_MAP = {
@@ -46,12 +46,835 @@ const DIFFICULTY_META = {
   medium: { label: 'Moyen', color: '#f59e0b', group: '🟠 Moyen' },
   hard: { label: 'Difficile', color: '#ef4444', group: '🔴 Difficile' },
 };
+
+// Styles musicaux prédéfinis
+const STYLE_OPTIONS = [
+  'Rock', 'Pop', 'Folk', 'Blues', 'Jazz', 'Reggae', 'Metal', 'Punk',
+  'Country', 'Électro', 'Soul', 'Funk', 'Indie', 'Alternative', 'Classique',
+  'Acoustique', 'Bossa Nova', 'Flamenco', 'Latino', 'Autre (préciser)…'
+];
+
 function getDifficulty(song) {
   return DIFFICULTY_ORDER.includes(song?.difficulty) ? song.difficulty : 'medium';
 }
 function nextDifficulty(current) {
   const i = DIFFICULTY_ORDER.indexOf(getDifficulty({ difficulty: current }));
   return DIFFICULTY_ORDER[(i + 1) % DIFFICULTY_ORDER.length];
+}
+
+// Révision espacée : intervalle de rappel selon le niveau de maîtrise (progress)
+const DEFAULT_REVIEW_INTERVALS = { low: 2, mid: 5, high: 12 };
+function reviewIntervalDays(progress, intervals = DEFAULT_REVIEW_INTERVALS) {
+  if (progress >= 71) return intervals.high;
+  if (progress >= 34) return intervals.mid;
+  return intervals.low;
+}
+
+// Calcule les morceaux "à revoir" aujourd'hui : jamais pratiqués, ou dont l'intervalle est dépassé.
+// Trie par retard décroissant (le plus en retard d'abord) et retourne les `limit` premiers.
+function computeReviewQueue(songs, limit = 3, intervals = DEFAULT_REVIEW_INTERVALS) {
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+  const withDelay = songs.map(s => {
+    const last = s.lastPracticedAt ? new Date(s.lastPracticedAt).getTime() : null;
+    const interval = reviewIntervalDays(s.progress || 0, intervals) * DAY;
+    const overdueMs = last === null ? Infinity : (now - last - interval);
+    return { song: s, overdueMs };
+  }).filter(x => x.overdueMs > 0);
+  withDelay.sort((a, b) => b.overdueMs - a.overdueMs);
+  return withDelay.slice(0, limit).map(x => x.song);
+}
+
+// Extrait l'identifiant d'une vidéo YouTube depuis différents formats d'URL
+function extractYoutubeId(url) {
+  if (!url) return null;
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=)([\w-]{11})/,
+    /(?:youtu\.be\/)([\w-]{11})/,
+    /(?:youtube\.com\/embed\/)([\w-]{11})/,
+    /(?:youtube\.com\/shorts\/)([\w-]{11})/,
+  ];
+  for (const re of patterns) {
+    const m = url.match(re);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+// Charge une seule fois l'API YouTube IFrame (nécessaire pour lire/contrôler la position de lecture)
+let _ytApiPromise = null;
+function loadYoutubeIframeApi() {
+  if (window.YT && window.YT.Player) return Promise.resolve(window.YT);
+  if (_ytApiPromise) return _ytApiPromise;
+  _ytApiPromise = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('YouTube API timeout')), 6000);
+    window.onYouTubeIframeAPIReady = () => { clearTimeout(timeout); resolve(window.YT); };
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    tag.onerror = () => { clearTimeout(timeout); reject(new Error('YouTube API load error')); };
+    document.head.appendChild(tag);
+  });
+  return _ytApiPromise;
+}
+
+function formatBookmarkTime(sec) {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+// Petite fenêtre flottante de visionnage YouTube, superposée à l'écran de travail.
+// Si un repère existe pour ce lien, propose de reprendre à cet instant ou de repartir du début.
+function YoutubeMiniPlayer({ link, onClose, onSaveBookmark, onAddImages }) {
+  const videoId = link?.videoId;
+  const bookmarks = link?.bookmarks || []; // Liste de { id, seconds, name }
+  const firstBookmark = bookmarks.length > 0 ? bookmarks[0].seconds : 0;
+  const [resumeChoice, setResumeChoice] = useState(bookmarks.length > 0 ? null : 'start');
+  const [apiReady, setApiReady] = useState(false);
+  const [apiFailed, setApiFailed] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [curTime, setCurTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [newBookmarkMode, setNewBookmarkMode] = useState(false); // true = en train de créer un nouveau
+  const [bookmarkName, setBookmarkName] = useState('');
+  const [savedFlash, setSavedFlash] = useState(null); // null | 'save' | 'delete'
+  const containerRef = useRef(null);
+  const playerRef = useRef(null);
+
+  // --- Fenêtre redimensionnable (glisser le coin haut-gauche) ---
+  const YT_SIZE_KEY = 'guitar-lab:yt-player-size';
+  const DEFAULT_PLAYER_SIZE = { width: 420, height: 560 };
+  const [playerSize, setPlayerSize] = useState(DEFAULT_PLAYER_SIZE);
+  const resizeStartRef = useRef(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await window.storage.get(YT_SIZE_KEY, false);
+        if (result?.value) {
+          const p = JSON.parse(result.value);
+          if (p?.width && p?.height) setPlayerSize(p);
+        }
+      } catch (err) { /* taille par défaut */ }
+    })();
+  }, []);
+
+  const startPlayerResize = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const pointer = e.touches ? e.touches[0] : e;
+    const startX = pointer.clientX, startY = pointer.clientY;
+    const orig = { ...playerSize };
+    const minW = 280, minH = 320;
+
+    const onMove = (ev) => {
+      const p = ev.touches ? ev.touches[0] : ev;
+      const dx = startX - p.clientX; // on tire vers la gauche → agrandit
+      const dy = startY - p.clientY; // on tire vers le haut → agrandit
+      const maxW = window.innerWidth - 32;
+      const maxH = window.innerHeight - 32;
+      const width = Math.max(minW, Math.min(maxW, orig.width + dx));
+      const height = Math.max(minH, Math.min(maxH, orig.height + dy));
+      setPlayerSize({ width, height });
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+      setPlayerSize(current => {
+        window.storage.set(YT_SIZE_KEY, JSON.stringify(current), false).catch(() => {});
+        return current;
+      });
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onUp);
+  };
+
+  const resetPlayerSize = () => {
+    setPlayerSize(DEFAULT_PLAYER_SIZE);
+    window.storage.set(YT_SIZE_KEY, JSON.stringify(DEFAULT_PLAYER_SIZE), false).catch(() => {});
+  };
+
+  // --- Mode plein écran "propre" : n'affiche QUE la vidéo, aucun bouton de l'app par-dessus (idéal pour capture d'écran) ---
+  // Priorité à l'API Fullscreen native du navigateur (rien d'autre à l'écran que la vidéo) ;
+  // repli sur un simple fond noir si l'API est indisponible (ex. certains contextes PWA installés).
+  const videoWrapperRef = useRef(null);
+  const [nativeFullscreen, setNativeFullscreen] = useState(false);
+  const [focusBackdrop, setFocusBackdrop] = useState(false);
+
+  const enterCleanFullscreen = async () => {
+    const el = videoWrapperRef.current;
+    const request = el && (el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen);
+    if (!request) {
+      setFocusBackdrop(true);
+      setPlayerSize({ width: Math.min(window.innerWidth - 32, 820), height: Math.min(window.innerHeight - 32, 760) });
+      glLog('📸 Plein écran natif indisponible — repli sur le mode fond noir', 'warning');
+      return;
+    }
+    try {
+      await request.call(el);
+    } catch (err) {
+      setFocusBackdrop(true);
+      glLog('📸 Échec du plein écran natif — repli sur le mode fond noir : ' + (err?.message || err), 'warning');
+    }
+  };
+
+  const exitCleanFullscreen = () => {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+    if (document.fullscreenElement || document.webkitFullscreenElement) exit?.call(document);
+    setFocusBackdrop(false);
+  };
+
+  useEffect(() => {
+    const onFsChange = () => {
+      const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+      setNativeFullscreen(!!fsEl && fsEl === videoWrapperRef.current);
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange);
+      document.removeEventListener('webkitfullscreenchange', onFsChange);
+    };
+  }, []);
+
+  // --- Capture d'accords depuis une capture d'écran de la vidéo (cadre verrouillable) ---
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const [capImgSrc, setCapImgSrc] = useState(null);
+  const [capHasImage, setCapHasImage] = useState(false);
+  const [capFrameLocked, setCapFrameLocked] = useState(false);
+  const [capNormSel, setCapNormSel] = useState({ x: 0.12, y: 0.72, w: 0.76, h: 0.2 });
+  const [capCaptures, setCapCaptures] = useState([]); // [{ id, src }]
+  const [capMessage, setCapMessage] = useState('');
+  const capStageRef = useRef(null);
+  const capImgElRef = useRef(null);
+  const capFileInputRef = useRef(null);
+
+  const showCapMessage = (msg) => {
+    setCapMessage(msg);
+    setTimeout(() => setCapMessage(''), 4000);
+  };
+
+  const resetCapture = () => {
+    setCapImgSrc(null);
+    setCapHasImage(false);
+    setCapFrameLocked(false);
+    setCapCaptures([]);
+    setCapNormSel({ x: 0.12, y: 0.72, w: 0.76, h: 0.2 });
+    setCapMessage('');
+  };
+
+  useEffect(() => {
+    setResumeChoice(bookmarks.length > 0 ? null : 'start');
+    setApiReady(false);
+    setApiFailed(false);
+    setNewBookmarkMode(false);
+    setCaptureOpen(false);
+    resetCapture();
+  }, [videoId]);
+
+  useEffect(() => {
+    if (resumeChoice === null || !videoId) return;
+    let cancelled = false;
+    loadYoutubeIframeApi()
+      .then((YT) => {
+        if (cancelled || !containerRef.current) return;
+        playerRef.current = new YT.Player(containerRef.current, {
+          videoId,
+          host: 'https://www.youtube-nocookie.com',
+          playerVars: {
+            rel: 0, playsinline: 1, modestbranding: 1,
+            controls: 0, iv_load_policy: 3, fs: 0, disablekb: 1, cc_load_policy: 0,
+            start: resumeChoice === 'resume' ? firstBookmark : 0,
+          },
+          events: {
+            onReady: () => {
+              if (cancelled) return;
+              setApiReady(true);
+              try { setDuration(playerRef.current?.getDuration?.() || 0); } catch (_) {}
+            },
+            onStateChange: (e) => {
+              if (cancelled) return;
+              setIsPlaying(e.data === 1); // 1 = YT.PlayerState.PLAYING
+              if (e.data === 1 || e.data === 2) {
+                try { setDuration(playerRef.current?.getDuration?.() || 0); } catch (_) {}
+              }
+            },
+          },
+        });
+      })
+      .catch(() => !cancelled && setApiFailed(true));
+    return () => {
+      cancelled = true;
+      try { playerRef.current?.destroy(); } catch (_) {}
+      playerRef.current = null;
+    };
+  }, [videoId, resumeChoice]);
+
+  // Suit la position de lecture pour notre propre barre de défilement (l'API ne la pousse pas toute seule)
+  useEffect(() => {
+    if (!apiReady) return;
+    const id = setInterval(() => {
+      try {
+        const t = playerRef.current?.getCurrentTime?.();
+        if (typeof t === 'number') setCurTime(t);
+      } catch (_) {}
+    }, 400);
+    return () => clearInterval(id);
+  }, [apiReady]);
+
+  if (!videoId) return null;
+
+  const markPositionNamed = () => {
+    const t = playerRef.current?.getCurrentTime?.();
+    if (typeof t === 'number' && t > 0) {
+      const seconds = Math.floor(t);
+      const name = bookmarkName.trim() || `Point ${bookmarks.length + 1}`;
+      onSaveBookmark?.(link.id, { seconds, name });
+      setBookmarkName('');
+      setNewBookmarkMode(false);
+      setSavedFlash('save');
+      setTimeout(() => setSavedFlash(null), 1500);
+    }
+  };
+
+  const deleteBookmark = (bookmarkId) => {
+    onSaveBookmark?.(link.id, { delete: bookmarkId });
+    setSavedFlash('delete');
+    setTimeout(() => setSavedFlash(null), 1500);
+  };
+
+  const jumpToBookmark = (seconds) => {
+    if (playerRef.current?.seekTo) playerRef.current.seekTo(seconds);
+  };
+
+  // Découpe l'image collée selon le cadre normalisé (0..1) et ajoute la capture à la liste
+  const doCapture = (imgEl, normSel) => {
+    if (!imgEl || !imgEl.naturalWidth) return;
+    const nw = imgEl.naturalWidth, nh = imgEl.naturalHeight;
+    const sx = Math.round(normSel.x * nw);
+    const sy = Math.round(normSel.y * nh);
+    const sw = Math.max(1, Math.round(normSel.w * nw));
+    const sh = Math.max(1, Math.round(normSel.h * nh));
+    const c = document.createElement('canvas');
+    c.width = sw;
+    c.height = sh;
+    c.getContext('2d').drawImage(imgEl, sx, sy, sw, sh, 0, 0, sw, sh);
+    const src = c.toDataURL('image/jpeg', 0.88);
+    setCapCaptures(prev => [...prev, { id: newId(), src }]);
+    setCapFrameLocked(true);
+    showCapMessage('Capture ajoutée — colle la suivante, ou ajuste le cadre');
+  };
+
+  const loadCaptureFile = (file, wasLocked) => {
+    if (!file || !file.type?.startsWith('image/')) {
+      showCapMessage('Fichier non reconnu comme image');
+      glLog('📸 Capture: fichier reçu non-image (' + (file?.type || 'type inconnu') + ')', 'warning');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setCapImgSrc(ev.target.result);
+      setCapHasImage(true);
+      if (!wasLocked) showCapMessage('Image chargée — ajuste le cadre puis tape « Capturer »');
+      glLog('📸 Capture: image chargée (' + file.type + ', ' + Math.round(file.size / 1024) + ' Ko)', 'success');
+    };
+    reader.onerror = () => {
+      showCapMessage('Image illisible — réessaie');
+      glLog('📸 Capture: FileReader erreur au chargement', 'error');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Une fois l'image (re)chargée dans le <img>, si le cadre est verrouillé on capture aussitôt
+  const handleCapImgLoad = (e) => {
+    if (capFrameLocked) doCapture(e.target, capNormSel);
+  };
+
+  // Extrait un fichier image d'un événement paste, quelle que soit sa provenance (items ou files)
+  const extractImageFromClipboardEvent = (e) => {
+    const items = Array.from(e.clipboardData?.items || []);
+    const files = Array.from(e.clipboardData?.files || []);
+    glLog(`📸 Capture: événement paste reçu — items: [${items.map(i => i.type).join(', ') || 'aucun'}], files: [${files.map(f => f.type).join(', ') || 'aucun'}]`, 'info');
+    const item = items.find(i => i.type?.startsWith('image/'));
+    if (item) return item.getAsFile();
+    return files.find(f => f.type?.startsWith('image/')) || null;
+  };
+
+  const handleCapturePasteEvent = (e) => {
+    const file = extractImageFromClipboardEvent(e);
+    if (!file) {
+      showCapMessage('Aucune image détectée dans le collage — essaie « 📁 Importer »');
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    loadCaptureFile(file, capFrameLocked);
+  };
+
+  // ⚠️ Important : tant que ce panneau de capture est ouvert, on intercepte le collage en PHASE DE CAPTURE
+  // au niveau du document, avant qu'il n'atteigne l'écouteur de la galerie principale (CenterPanel).
+  // Sans ça, coller une image ici l'envoyait directement dans la galerie du morceau au lieu d'apparaître
+  // dans l'aperçu de cadrage ci-dessous — c'est ce qui rendait le cadre de sélection invisible.
+  useEffect(() => {
+    if (!captureOpen) return;
+    const onGlobalCapturePaste = (e) => {
+      const file = extractImageFromClipboardEvent(e);
+      if (!file) return; // pas d'image : on laisse le collage suivre son cours normal ailleurs dans l'app
+      e.preventDefault();
+      e.stopPropagation();
+      loadCaptureFile(file, capFrameLocked);
+    };
+    document.addEventListener('paste', onGlobalCapturePaste, true);
+    return () => document.removeEventListener('paste', onGlobalCapturePaste, true);
+  }, [captureOpen, capFrameLocked]);
+
+  // Bouton "Coller" explicite : lit directement le presse-papiers.
+  // ⚠️ Sur iPad, en app installée depuis l'écran d'accueil, iOS bloque parfois cette lecture directe :
+  // dans ce cas utilise le geste natif juste en dessous, ou « 📁 Importer » (toujours fiable).
+  const captureFromClipboardButton = async () => {
+    if (!navigator.clipboard?.read) {
+      showCapMessage("Collage direct indisponible ici (app installée) — utilise « Importer »");
+      glLog('📸 Capture: navigator.clipboard.read absent', 'warning');
+      return;
+    }
+    try {
+      const items = await navigator.clipboard.read();
+      glLog(`📸 Capture: clipboard.read() → ${items.length} élément(s)`, 'info');
+      for (const item of items) {
+        const imgType = item.types.find(t => t.startsWith('image/'));
+        if (imgType) {
+          const blob = await item.getType(imgType);
+          loadCaptureFile(new File([blob], `collé.${imgType.split('/')[1] || 'png'}`, { type: imgType }), capFrameLocked);
+          return;
+        }
+      }
+      showCapMessage('Aucune image dans le presse-papiers — essaie « 📁 Importer »');
+    } catch (err) {
+      showCapMessage("Collage indisponible ici — utilise « Importer » (photo prise juste avant)");
+      glLog('📸 Capture: clipboard.read() a échoué — ' + (err?.name || '') + ': ' + (err?.message || err), 'error');
+    }
+  };
+
+  const handleCaptureFileInput = (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (f) loadCaptureFile(f, capFrameLocked);
+  };
+
+  // Glisser pour déplacer ou redimensionner (coins) le cadre de sélection, souris et tactile
+  const startCaptureDrag = (kind, corner) => (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = capStageRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const pointer = e.touches ? e.touches[0] : e;
+    const startX = pointer.clientX, startY = pointer.clientY;
+    const orig = { ...capNormSel };
+    const rw = rect.width, rh = rect.height;
+    const MIN = 0.04;
+
+    const onMove = (ev) => {
+      const p = ev.touches ? ev.touches[0] : ev;
+      const dx = (p.clientX - startX) / rw;
+      const dy = (p.clientY - startY) / rh;
+      let next = { ...orig };
+      if (kind === 'move') {
+        next.x = orig.x + dx;
+        next.y = orig.y + dy;
+      } else {
+        if (corner === 'br') { next.w = orig.w + dx; next.h = orig.h + dy; }
+        else if (corner === 'bl') { next.x = orig.x + dx; next.w = orig.w - dx; next.h = orig.h + dy; }
+        else if (corner === 'tr') { next.y = orig.y + dy; next.w = orig.w + dx; next.h = orig.h - dy; }
+        else if (corner === 'tl') { next.x = orig.x + dx; next.y = orig.y + dy; next.w = orig.w - dx; next.h = orig.h - dy; }
+      }
+      next.w = Math.max(MIN, Math.min(1, next.w));
+      next.h = Math.max(MIN, Math.min(1, next.h));
+      next.x = Math.max(0, Math.min(1 - next.w, next.x));
+      next.y = Math.max(0, Math.min(1 - next.h, next.y));
+      setCapNormSel(next);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onUp);
+  };
+
+  const unlockCaptureFrame = () => {
+    setCapFrameLocked(false);
+    showCapMessage('Ajuste le cadre puis tape « Capturer »');
+  };
+
+  const removeCapture = (id) => setCapCaptures(prev => prev.filter(c => c.id !== id));
+
+  const applyCaptures = () => {
+    if (capCaptures.length === 0) {
+      showCapMessage('Aucune capture à ajouter');
+      return;
+    }
+    onAddImages?.(capCaptures.map(c => c.src));
+    showCapMessage(`${capCaptures.length} image(s) ajoutée(s) à la fiche`);
+    resetCapture();
+    setCaptureOpen(false);
+  };
+
+  return (
+    <>
+      {focusBackdrop && (
+        <div className="fixed inset-0 bg-black z-40" onClick={() => setFocusBackdrop(false)} />
+      )}
+    <div
+      className="fixed bottom-4 right-4 z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-2xl overflow-hidden flex flex-col"
+      style={{ width: playerSize.width, height: playerSize.height, maxWidth: 'calc(100vw - 32px)', maxHeight: 'calc(100vh - 32px)' }}
+    >
+      <div
+        onMouseDown={startPlayerResize}
+        onTouchStart={startPlayerResize}
+        onDoubleClick={resetPlayerSize}
+        className="absolute top-0 left-0 w-6 h-6 z-10 flex items-center justify-center"
+        style={{ cursor: 'nwse-resize', touchAction: 'none' }}
+        title="Glisser pour redimensionner — double-tap pour réinitialiser"
+      >
+        <span className="block w-2.5 h-2.5 border-t-2 border-l-2 border-gray-500 rounded-tl-sm" />
+      </div>
+
+      <div className="flex items-center justify-between px-2 py-1.5 bg-gray-900 border-b border-gray-700 flex-shrink-0 flex-wrap gap-1 pl-6">
+        <span className="text-xs font-semibold text-gray-300 flex items-center gap-1">▶️ Vidéo</span>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={enterCleanFullscreen}
+            className={`text-[10px] px-1.5 py-0.5 rounded transition ${(nativeFullscreen || focusBackdrop) ? 'bg-sky-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
+            title="Plein écran SANS aucun bouton par-dessus — pour une capture d'écran bien nette"
+          >
+            ⛶ Plein écran net
+          </button>
+          <button
+            onClick={() => {
+              const next = !captureOpen;
+              setCaptureOpen(next);
+              if (next) glLog(`📸 Capture: panneau ouvert (clipboard.read ${navigator.clipboard?.read ? 'disponible' : 'ABSENT'}, contexte sécurisé: ${window.isSecureContext})`, 'info');
+            }}
+            className={`text-[10px] px-1.5 py-0.5 rounded transition ${captureOpen ? 'bg-purple-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
+            title="Capturer un accord affiché à l'écran (via capture d'écran iPad)"
+          >
+            📸 Capture
+          </button>
+          {apiReady && (
+            <button
+              onClick={() => setNewBookmarkMode(!newBookmarkMode)}
+              className={`text-[10px] px-1.5 py-0.5 rounded transition ${newBookmarkMode ? 'bg-amber-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
+              title="Créer un point de repère nommé"
+            >
+              📌 Point
+            </button>
+          )}
+          <a
+            href={`https://www.youtube.com/watch?v=${videoId}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[10px] px-1.5 py-0.5 bg-gray-700 hover:bg-gray-600 rounded transition text-gray-300"
+            title="Ouvrir sur YouTube si la vidéo ne s'affiche pas"
+          >
+            Ouvrir sur YouTube ↗
+          </a>
+          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded transition" title="Fermer">
+            <X className="w-3.5 h-3.5 text-gray-400" />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        {captureOpen && (
+          <div className="p-3 bg-gray-850 border-b border-gray-700 space-y-2">
+            <p className="text-[10px] text-gray-400 leading-relaxed">
+              1. Tape « ⛶ Plein écran net » puis mets la vidéo en pause sur l'accord voulu &nbsp;•&nbsp;
+              2. Capture d'écran iPad &nbsp;•&nbsp; 3. Colle-la ci-dessous (n'importe où sur cet écran)
+            </p>
+
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <label className="px-2 py-1 bg-purple-700 hover:bg-purple-600 rounded text-[10px] font-semibold cursor-pointer flex items-center gap-1">
+                📁 Importer la capture
+                <input ref={capFileInputRef} type="file" accept="image/*" onChange={handleCaptureFileInput} className="hidden" />
+              </label>
+              <button
+                onClick={captureFromClipboardButton}
+                className="px-2 py-1 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded text-[10px] font-semibold"
+              >
+                📋 Coller depuis le presse-papiers
+              </button>
+              {capHasImage && (
+                <span className={`ml-auto text-[10px] px-1.5 py-0.5 rounded ${capFrameLocked ? 'bg-purple-500/20 text-purple-300' : 'bg-amber-500/20 text-amber-300'}`}>
+                  {capFrameLocked ? '🔒 verrouillé — coller/importer = capture auto' : '🔓 ajuste le cadre'}
+                </span>
+              )}
+            </div>
+
+            {/* Zone de collage tactile — contentEditable pour que le geste natif "Coller" d'iOS apparaisse.
+                Le collage fonctionne en réalité n'importe où sur cet écran tant que ce panneau est ouvert
+                (voir l'écouteur global plus haut) : cette zone sert surtout à faire apparaître le bouton
+                natif "Coller" d'iOS au appui long. */}
+            <div
+              contentEditable
+              suppressContentEditableWarning
+              inputMode="none"
+              onPaste={handleCapturePasteEvent}
+              onInput={(e) => { e.currentTarget.textContent = ''; }}
+              className="w-full px-2 py-3 bg-gray-900 border border-dashed border-gray-600 rounded text-center text-[10px] text-gray-500 focus:outline-none focus:border-purple-500"
+            >
+              Appuie ici puis « Coller », ou colle directement où tu veux sur cet écran
+            </div>
+
+            {capHasImage && (
+              <div ref={capStageRef} className="relative w-full bg-black rounded border border-gray-600 overflow-hidden">
+                <img
+                  ref={capImgElRef}
+                  src={capImgSrc}
+                  alt="Capture d'écran collée"
+                  onLoad={handleCapImgLoad}
+                  draggable={false}
+                  className="w-full h-auto select-none pointer-events-none"
+                />
+                <div
+                  onMouseDown={startCaptureDrag('move')}
+                  onTouchStart={startCaptureDrag('move')}
+                  className="absolute border-2 border-purple-400 bg-purple-400/10"
+                  style={{
+                    left: `${capNormSel.x * 100}%`,
+                    top: `${capNormSel.y * 100}%`,
+                    width: `${capNormSel.w * 100}%`,
+                    height: `${capNormSel.h * 100}%`,
+                    boxShadow: '0 0 0 2000px rgba(0,0,0,0.45)',
+                    cursor: 'move',
+                  }}
+                >
+                  <span className="absolute -top-5 left-0 bg-purple-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap">
+                    {capImgElRef.current ? `${Math.round(capNormSel.w * capImgElRef.current.naturalWidth)} × ${Math.round(capNormSel.h * capImgElRef.current.naturalHeight)} px` : '…'}
+                  </span>
+                  {['tl', 'tr', 'bl', 'br'].map(corner => (
+                    <div
+                      key={corner}
+                      onMouseDown={startCaptureDrag('resize', corner)}
+                      onTouchStart={startCaptureDrag('resize', corner)}
+                      className="absolute w-5 h-5 bg-purple-400 border border-white rounded-full"
+                      style={{
+                        top: corner.startsWith('t') ? -10 : undefined,
+                        bottom: corner.startsWith('b') ? -10 : undefined,
+                        left: corner.endsWith('l') ? -10 : undefined,
+                        right: corner.endsWith('r') ? -10 : undefined,
+                        cursor: (corner === 'tl' || corner === 'br') ? 'nwse-resize' : 'nesw-resize',
+                        touchAction: 'none',
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {capHasImage && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => doCapture(capImgElRef.current, capNormSel)}
+                  className="flex-1 px-2 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-[10px] font-semibold"
+                >
+                  📷 Capturer
+                </button>
+                {capFrameLocked && (
+                  <button onClick={unlockCaptureFrame} className="px-2 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-[10px] font-semibold">
+                    🔓 Réajuster
+                  </button>
+                )}
+              </div>
+            )}
+
+            {capCaptures.length > 0 && (
+              <div className="flex gap-1.5 overflow-x-auto pb-1">
+                {capCaptures.map((c, i) => (
+                  <div key={c.id} className="relative flex-shrink-0">
+                    <img src={c.src} alt="" className="h-14 rounded border border-gray-600 bg-black" />
+                    <button
+                      onClick={() => removeCapture(c.id)}
+                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-700 hover:bg-red-600 rounded-full flex items-center justify-center text-[9px] leading-none"
+                      title="Retirer"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {capMessage && <p className="text-center text-[10px] text-green-400 font-semibold">{capMessage}</p>}
+
+            <button
+              onClick={applyCaptures}
+              disabled={capCaptures.length === 0}
+              className="w-full px-2 py-1.5 bg-green-700 hover:bg-green-600 disabled:opacity-40 rounded text-[10px] font-semibold"
+            >
+              ✓ Ajouter {capCaptures.length > 0 ? `(${capCaptures.length})` : ''} à la fiche
+            </button>
+          </div>
+        )}
+
+        {resumeChoice === null && bookmarks.length > 0 ? (
+          <div className="p-4 flex flex-col items-center gap-2 text-center bg-gray-900 border-b border-gray-700">
+            <p className="text-xs text-gray-300">
+              📍 Tu t'étais arrêté à <span className="text-amber-400 font-semibold">{formatBookmarkTime(firstBookmark)}</span>
+            </p>
+            <div className="flex gap-2 w-full">
+              <button onClick={() => setResumeChoice('resume')} className="flex-1 px-2 py-1.5 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold transition">
+                Reprendre là
+              </button>
+              <button onClick={() => setResumeChoice('start')} className="flex-1 px-2 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold transition">
+                Depuis le début
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {newBookmarkMode && apiReady && (
+          <div className="p-3 bg-gray-750 border-b border-gray-700">
+            <p className="text-[10px] text-gray-400 mb-1.5">Nom du point :</p>
+            <div className="flex gap-1">
+              <input
+                autoFocus
+                type="text"
+                value={bookmarkName}
+                onChange={(e) => setBookmarkName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') markPositionNamed(); }}
+                placeholder="ex: Intro, Couplet 1..."
+                className="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1 text-[10px] text-white focus:outline-none focus:border-amber-500"
+              />
+              <button onClick={markPositionNamed} className="px-2 py-1 bg-green-700 hover:bg-green-600 rounded text-[10px] font-semibold transition">Créer</button>
+              <button onClick={() => { setNewBookmarkMode(false); setBookmarkName(''); }} className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[10px] font-semibold transition">✕</button>
+            </div>
+          </div>
+        )}
+
+        {bookmarks.length > 0 && (
+          <div className="p-2 space-y-1 bg-gray-750">
+            {bookmarks.map((bm, i) => (
+              <div key={bm.id} className="flex items-center gap-1 bg-gray-700 rounded p-1.5">
+                <button
+                  onClick={() => jumpToBookmark(bm.seconds)}
+                  className="flex-1 text-left px-1.5 py-0.5 hover:bg-gray-600 rounded transition text-[10px]"
+                  title="Cliquer pour aller à cette position"
+                >
+                  <span className="text-amber-400 font-semibold">{formatBookmarkTime(bm.seconds)}</span>
+                  <span className="text-gray-300 ml-1">{bm.name}</span>
+                </button>
+                <button
+                  onClick={() => deleteBookmark(bm.id)}
+                  className="p-0.5 hover:bg-red-700/50 rounded transition text-gray-400 hover:text-red-400"
+                  title="Supprimer ce point"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {savedFlash && (
+          <div className={`p-2 text-center text-[10px] font-semibold ${savedFlash === 'save' ? 'bg-green-700 text-white' : 'bg-red-700 text-white'}`}>
+            {savedFlash === 'save' ? '✓ Point créé' : '✓ Point supprimé'}
+          </div>
+        )}
+      </div>
+
+      <div
+        ref={videoWrapperRef}
+        className={nativeFullscreen ? 'fixed inset-0 z-[9999] bg-black flex flex-col' : 'flex-shrink-0'}
+      >
+        {apiFailed ? (
+          <div className={nativeFullscreen ? 'relative flex-1 min-h-0' : 'relative w-full bg-black'} style={nativeFullscreen ? undefined : { paddingTop: '56.25%' }}>
+            <iframe
+              key={videoId}
+              src={`https://www.youtube-nocookie.com/embed/${videoId}?rel=0&playsinline=1&modestbranding=1&start=${resumeChoice === 'resume' ? firstBookmark : 0}`}
+              title="YouTube video player"
+              className="absolute inset-0 w-full h-full"
+              style={{ border: 0 }}
+              referrerPolicy="strict-origin-when-cross-origin"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+            />
+          </div>
+        ) : (
+          <div className={nativeFullscreen ? 'relative flex-1 min-h-0' : 'relative w-full bg-black'} style={nativeFullscreen ? undefined : { paddingTop: '56.25%' }}>
+            <div ref={containerRef} className="absolute inset-0 w-full h-full" />
+          </div>
+        )}
+
+        {/* Notre propre barre de lecture — sous la vidéo, jamais par-dessus l'image (les commandes YouTube sont masquées) */}
+        {apiReady && !apiFailed && (
+          <div className="flex items-center gap-1.5 px-2 py-1.5 bg-gray-900 border-t border-gray-700 flex-shrink-0">
+            <button
+              onClick={() => { try { playerRef.current?.seekTo(Math.max(0, curTime - 5), true); } catch (_) {} }}
+              className="p-1.5 hover:bg-gray-700 rounded flex-shrink-0"
+              title="Reculer de 5s"
+            >
+              ⏪
+            </button>
+            <button
+              onClick={() => {
+                try {
+                  if (isPlaying) playerRef.current?.pauseVideo();
+                  else playerRef.current?.playVideo();
+                } catch (_) {}
+              }}
+              className="p-1.5 bg-gray-700 hover:bg-gray-600 rounded flex-shrink-0"
+              title={isPlaying ? 'Mettre en pause' : 'Lecture'}
+            >
+              {isPlaying ? '⏸️' : '▶️'}
+            </button>
+            <button
+              onClick={() => { try { playerRef.current?.seekTo(Math.min(duration || curTime, curTime + 5), true); } catch (_) {} }}
+              className="p-1.5 hover:bg-gray-700 rounded flex-shrink-0"
+              title="Avancer de 5s"
+            >
+              ⏩
+            </button>
+            <input
+              type="range"
+              min="0"
+              max={duration || 0}
+              step="0.1"
+              value={Math.min(curTime, duration || curTime)}
+              onChange={(e) => {
+                const t = parseFloat(e.target.value);
+                setCurTime(t);
+                try { playerRef.current?.seekTo(t, true); } catch (_) {}
+              }}
+              className="flex-1 accent-amber-500"
+              style={{ touchAction: 'none' }}
+            />
+            <span className="text-[10px] text-gray-400 font-mono flex-shrink-0 whitespace-nowrap">
+              {formatBookmarkTime(Math.floor(curTime))} / {formatBookmarkTime(Math.floor(duration))}
+            </span>
+          </div>
+        )}
+
+        {nativeFullscreen && (
+          <button
+            onClick={exitCleanFullscreen}
+            className="absolute top-3 right-3 z-10 w-9 h-9 rounded-full bg-black/50 hover:bg-black/70 text-white flex items-center justify-center text-base"
+            title="Quitter le plein écran"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+    </div>
+    </>
+  );
 }
 
 // Médiator de guitare : triangle arrondi, pointe vers le bas
@@ -3249,6 +4072,11 @@ const DEFAULT_SONGS = REPERTOIRE.map(s => ({ ...s, createdAt: LIBRARY_SEED_DATE,
 const SONGS_STORAGE_KEY = 'guitar-lab:songs:v2';
 const CLASSIFICATIONS_STORAGE_KEY = 'guitar-lab:classifications';
 const PREFS_STORAGE_KEY = 'guitar-lab:display-prefs';
+const TILE_GRID_CLASSES = {
+  small: 'grid-cols-3 sm:grid-cols-4 lg:grid-cols-6',
+  medium: 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4',
+  large: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3',
+};
 
 // Lit plusieurs fichiers image en parallèle et renvoie leurs data-URL dans l'ordre choisi
 function readFilesAsDataUrls(files) {
@@ -3269,7 +4097,142 @@ function newId() {
   return Date.now().toString() + Math.random().toString(36).slice(2);
 }
 
-function SaveStatusBadge({ status }) {
+// ============================================================================
+// IMPORT PDF / TEXTE : analyse une fiche accords/paroles (chords au-dessus des
+// paroles) pour en déduire une structure (Intro / Couplet / Refrain...) et les
+// accords de chaque ligne. Reconnaît automatiquement les refrains qui se
+// répètent (même texte de paroles) pour les nommer "Refrain".
+// ============================================================================
+const CHORD_TOKEN_RE = /^\(?[A-G](#|b)?(maj7|m7b5|m7|maj|sus2|sus4|dim7|dim|aug|add\d|6|9|11|13|7|m)?(\/[A-G](#|b)?)?\)?$/;
+
+function isChordToken(tok) {
+  const t = (tok || '').trim();
+  if (!t || t === '|' || t === '-' || t === '_') return false;
+  return CHORD_TOKEN_RE.test(t);
+}
+
+function isLikelyChordLine(line) {
+  const tokens = line.replace(/\|/g, ' ').split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return false;
+  const chordish = tokens.filter(isChordToken).length;
+  return chordish / tokens.length >= 0.8;
+}
+
+function extractChordsFromLine(line) {
+  const tokens = line.replace(/\|/g, ' ').split(/\s+/).filter(Boolean);
+  return tokens.filter(isChordToken);
+}
+
+function normalizeLyricSignature(s) {
+  return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+// Lignes de bruit habituelles des sites de fiches d'accords, à ignorer si rencontrées
+const PDF_NOISE_PATTERNS = [
+  /la bo[iî]te [aà] chansons/i,
+  /^paroles et musique/i,
+  /^accords de guitare/i,
+  /ce document est r[ée]serv[ée]/i,
+  /^\d+\/\d+$/,
+  /^https?:\/\//i,
+];
+
+function isNoiseLine(line) {
+  const clean = line.trim();
+  if (!clean) return false;
+  return PDF_NOISE_PATTERNS.some(re => re.test(clean));
+}
+
+function parseChordSheetItems(items) {
+  const kept = [];
+  for (const it of items) {
+    const t = it.text || '';
+    if (/^accords de guitare/i.test(t.trim())) break;
+    if (isNoiseLine(t)) continue;
+    kept.push(it);
+  }
+
+  const blocks = [];
+  let current = [];
+  for (const it of kept) {
+    if (!(it.text || '').trim()) {
+      if (current.length) { blocks.push(current); current = []; }
+    } else {
+      current.push(it);
+    }
+  }
+  if (current.length) blocks.push(current);
+
+  const parsed = blocks.map(blockItems => {
+    const chords = [];
+    const lyricLines = [];
+    blockItems.forEach(it => {
+      const t = it.text;
+      if (isLikelyChordLine(t)) chords.push(...extractChordsFromLine(t));
+      else if (t.trim()) lyricLines.push(t.trim());
+    });
+    return { chords, lyricSig: normalizeLyricSignature(lyricLines[0] || ''), hasLyrics: lyricLines.length > 0, items: blockItems };
+  }).filter(b => b.chords.length > 0);
+
+  if (parsed.length === 0) return [];
+
+  const sigCounts = {};
+  parsed.forEach(b => { if (b.lyricSig) sigCounts[b.lyricSig] = (sigCounts[b.lyricSig] || 0) + 1; });
+
+  const refrainNames = {};
+  let refrainN = 0;
+  let coupletN = 0;
+  return parsed.map((b, i) => {
+    let name;
+    if (!b.hasLyrics && i === 0) {
+      name = 'Intro';
+    } else if (b.lyricSig && sigCounts[b.lyricSig] >= 2) {
+      if (!refrainNames[b.lyricSig]) {
+        refrainN += 1;
+        refrainNames[b.lyricSig] = refrainN === 1 ? 'Refrain' : `Refrain ${refrainN}`;
+      }
+      name = refrainNames[b.lyricSig];
+    } else {
+      coupletN += 1;
+      name = `Couplet ${coupletN}`;
+    }
+    return { name, chords: b.chords.slice(0, 64), items: b.items };
+  }).slice(0, 30);
+}
+
+// Version texte simple (pour le collage manuel, sans info de position pour l'image)
+function parseChordSheetLines(rawLines) {
+  return parseChordSheetItems(rawLines.map(text => ({ text }))).map(({ name, chords }) => ({ name, chords }));
+}
+
+// Convertit les sections détectées ({name, chords}) au format attendu par version.structure
+function chordSectionsToStructure(sections, colsPerRow = 4) {
+  return sections.map((sec, idx) => {
+    const cols = Math.min(colsPerRow, Math.max(1, sec.chords.length));
+    const cells = sec.chords.length > 0
+      ? sec.chords.map((chord, i) => ({ id: `${Date.now()}-${idx}-${i}`, split: false, chord, top: '', bottom: '' }))
+      : [{ id: `${Date.now()}-${idx}-0`, split: false, chord: '', top: '', bottom: '' }];
+    // Complète la dernière ligne avec des cases vides pour obtenir une grille rectangulaire
+    const remainder = cells.length % cols;
+    if (remainder !== 0) {
+      for (let i = 0; i < cols - remainder; i++) {
+        cells.push({ id: `${Date.now()}-${idx}-pad${i}`, split: false, chord: '', top: '', bottom: '' });
+      }
+    }
+    return {
+      id: `${Date.now()}-${idx}`,
+      section: sec.name,
+      cols,
+      rows: Math.ceil(cells.length / cols),
+      collapsed: false,
+      rhythm: [],
+      cells,
+    };
+  });
+}
+
+function SaveStatusBadge({ status, onForceSave }) {
+  const [flashing, setFlashing] = useState(false);
   if (status === 'idle') return null;
   const config = {
     saving: { label: 'Enregistrement...', className: 'text-gray-400' },
@@ -3277,19 +4240,153 @@ function SaveStatusBadge({ status }) {
     error: { label: 'Non enregistré', className: 'text-red-400' },
   }[status];
   if (!config) return null;
+
+  const handleForce = async () => {
+    setFlashing(true);
+    await onForceSave?.();
+    setTimeout(() => setFlashing(false), 1400);
+  };
+
   return (
-    <span className={`ml-auto text-[10px] font-normal ${config.className}`} title={status === 'error' ? "La sauvegarde a échoué, tes changements restent visibles ici mais ne seront pas conservés après rechargement." : undefined}>
-      {config.label}
+    <span className="ml-auto flex items-center gap-1.5">
+      <span className={`text-[10px] font-normal transition-colors ${flashing ? 'text-green-400' : config.className}`} title={status === 'error' ? "La sauvegarde a échoué, tes changements restent visibles ici mais ne seront pas conservés après rechargement." : undefined}>
+        {flashing ? '✓ Enregistré !' : config.label}
+      </span>
+      <button
+        onClick={handleForce}
+        className={`min-w-[28px] min-h-[28px] flex items-center justify-center text-sm rounded transition ${flashing ? 'bg-green-700' : 'bg-gray-700 hover:bg-gray-600 active:bg-amber-600'}`}
+        title="Forcer l'enregistrement maintenant"
+      >
+        💾
+      </button>
     </span>
   );
 }
 
-export default function GuitarApp() {
+// Panneau de debug intégré à l'écran (sans F12 sur iPad)
+// Petit pont global vers le DebugPanel : n'importe quel composant peut logger un message visible dans 🐛
+function glLog(msg, type = 'info') {
+  try {
+    window.dispatchEvent(new CustomEvent('gl-debug-log', { detail: { msg, type } }));
+  } catch (err) { /* ignore */ }
+}
+
+function DebugPanel() {
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [swStatus, setSwStatus] = useState("non enregistré");
+
+  useEffect(() => {
+    const addLog = (msg, type = "info") => {
+      setLogs(prev => [...prev, { msg, type, time: new Date().toLocaleTimeString() }].slice(-20));
+    };
+
+    const onCustomLog = (e) => addLog(e.detail?.msg, e.detail?.type);
+    window.addEventListener("gl-debug-log", onCustomLog);
+
+    window.addEventListener("error", e => {
+      addLog(`❌ ${e.message}`, "error");
+    });
+
+    window.addEventListener("unhandledrejection", e => {
+      addLog(`⚠️ ${e.reason}`, "error");
+    });
+
+    window.addEventListener("online", () => {
+      setIsOnline(true);
+      addLog("🟢 Connexion rétablie", "success");
+    });
+
+    window.addEventListener("offline", () => {
+      setIsOnline(false);
+      addLog("🔴 Offline mode", "warning");
+    });
+
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.ready.then(reg => {
+        setSwStatus("✅ Actif");
+        addLog("Service Worker enregistré", "success");
+      }).catch(err => {
+        setSwStatus("❌ Erreur");
+        addLog(`SW error: ${err.message}`, "error");
+      });
+    }
+
+    addLog("🎸 Guitar Lab démarré", "info");
+  }, []);
+
+  return (
+    <div className="fixed bottom-4 right-4 z-40">
+      <button onClick={() => setDebugOpen(!debugOpen)} className="w-12 h-12 rounded-full bg-gray-700 hover:bg-gray-600 border-2 border-amber-500 flex items-center justify-center font-bold text-amber-400 shadow-lg" title="Ouvrir le panneau de debug">🐛</button>
+      {debugOpen && (
+        <div className="absolute bottom-16 right-0 w-80 bg-gray-900 border border-gray-700 rounded-lg shadow-xl overflow-hidden flex flex-col max-h-96">
+          <div className="bg-gray-800 p-3 border-b border-gray-700 flex justify-between items-center">
+            <h3 className="font-bold text-amber-400 text-sm">🐛 Debug Panel</h3>
+            <button onClick={() => setDebugOpen(false)} className="text-gray-400 hover:text-white">✕</button>
+          </div>
+          <div className="p-3 space-y-2 border-b border-gray-700 text-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-gray-400">Connexion :</span>
+              <span className={isOnline ? "text-green-400" : "text-red-400"}>{isOnline ? "🟢 Online" : "🔴 Offline"}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-gray-400">Service Worker :</span>
+              <span className={swStatus.includes("✅") ? "text-green-400" : "text-red-400"}>{swStatus}</span>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto bg-gray-950 p-2">
+            {logs.length === 0 ? <p className="text-gray-600 text-xs">Aucun log</p> : logs.map((log, i) => <div key={i} className="text-[9px] font-mono mb-1"><span className="text-gray-500">[{log.time}]</span> <span className={log.type === "error" ? "text-red-400" : log.type === "warning" ? "text-yellow-400" : log.type === "success" ? "text-green-400" : "text-gray-300"}>{log.msg}</span></div>)}
+          </div>
+          <div className="p-2 border-t border-gray-700 flex gap-1">
+            <button onClick={() => setLogs([])} className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold">Effacer</button>
+            <button onClick={() => window.location.reload()} className="flex-1 px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold">Rafraîchir</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Bloc repliable de la barre latérale bibliothèque (Trier, Filtres, Affichage...)
+function SidebarSection({ title, icon, isOpen, onToggle, badge, children }) {
+  return (
+    <div className="border-b border-gray-700">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-semibold text-gray-300 hover:bg-gray-750 hover:text-amber-300 transition"
+      >
+        <span className="flex items-center gap-1.5">
+          {icon} {title}
+          {badge ? <span className="text-[10px] font-normal text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">{badge}</span> : null}
+        </span>
+        <ChevronDown className={`w-3.5 h-3.5 flex-shrink-0 transition ${isOpen ? '' : '-rotate-90'}`} />
+      </button>
+      {isOpen && <div className="px-4 pb-3 space-y-3">{children}</div>}
+    </div>
+  );
+}
+
+function GuitarApp() {
   const [appMode, setAppMode] = useState('library');
   const [songs, setSongs] = useState(DEFAULT_SONGS);
   const [isLoaded, setIsLoaded] = useState(false);
   const [saveStatus, setSaveStatus] = useState('idle'); // idle | saving | saved | error
   const saveTimerRef = useRef(null);
+  const songsRef = useRef(songs);
+  useEffect(() => { songsRef.current = songs; }, [songs]);
+
+  // Enregistrement immédiat (annule le minuteur en cours), utilisable manuellement ou en filet de sécurité
+  const flushSongsSave = async () => {
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+    setSaveStatus('saving');
+    try {
+      const result = await window.storage.set(SONGS_STORAGE_KEY, JSON.stringify(songsRef.current), false);
+      setSaveStatus(result ? 'saved' : 'error');
+    } catch (err) {
+      setSaveStatus('error');
+    }
+  };
 
   // Chargement depuis le stockage persistant au montage
   useEffect(() => {
@@ -3315,16 +4412,22 @@ export default function GuitarApp() {
     if (!isLoaded) return;
     setSaveStatus('saving');
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(async () => {
-      try {
-        const result = await window.storage.set(SONGS_STORAGE_KEY, JSON.stringify(songs), false);
-        setSaveStatus(result ? 'saved' : 'error');
-      } catch (err) {
-        setSaveStatus('error');
-      }
-    }, 600);
+    saveTimerRef.current = setTimeout(flushSongsSave, 600);
     return () => clearTimeout(saveTimerRef.current);
   }, [songs, isLoaded]);
+
+  // Filet de sécurité : si l'app passe en arrière-plan (changement d'appli, verrouillage...) ou se ferme
+  // pendant qu'un enregistrement est en attente, on le force immédiatement plutôt que d'attendre le minuteur.
+  useEffect(() => {
+    const forceIfPending = () => { if (saveTimerRef.current) flushSongsSave(); };
+    const onVisibility = () => { if (document.visibilityState === 'hidden') forceIfPending(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', forceIfPending);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', forceIfPending);
+    };
+  }, []);
 
   // Liste maîtresse des étiquettes de classement, modifiable et partagée entre la bibliothèque et l'écran de travail
   const [classificationOptions, setClassificationOptions] = useState(DEFAULT_CLASSIFICATIONS);
@@ -3359,27 +4462,35 @@ export default function GuitarApp() {
     return () => clearTimeout(classificationsSaveTimerRef.current);
   }, [classificationOptions, classificationsLoaded]);
 
-  const addClassificationOption = (label) => {
+  const addClassificationOption = useCallback((label) => {
     const clean = label.trim();
-    if (!clean || classificationOptions.includes(clean)) return;
-    setClassificationOptions([...classificationOptions, clean]);
-  };
+    if (!clean) return;
+    setClassificationOptions(prev => prev.includes(clean) ? prev : [...prev, clean]);
+  }, []);
 
-  const removeClassificationOption = (label) => {
-    setClassificationOptions(classificationOptions.filter(c => c !== label));
-  };
+  const removeClassificationOption = useCallback((label) => {
+    setClassificationOptions(prev => prev.filter(c => c !== label));
+  }, []);
 
   const [selectedSongId, setSelectedSongId] = useState(null);
   const [selectedVersionId, setSelectedVersionId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [classificationFilter, setClassificationFilter] = useState('all');
-  const [groupBy, setGroupBy] = useState('artist');
+  const [setlistOnly, setSetlistOnly] = useState(false);
+  const [groupBy, setGroupBy] = useState('none');
   const [expandedGroups, setExpandedGroups] = useState({});
-  const [viewMode, setViewMode] = useState('detailed');
+  const [viewMode, setViewMode] = useState('tiles');
+  const [tileSize, setTileSize] = useState('medium');
   const [sortBy, setSortBy] = useState('favorite');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const DEFAULT_SIDEBAR_SECTIONS = { sort: true, filters: false, display: false, roadmap: false, journal: false, storage: false };
+  const [sidebarSections, setSidebarSections] = useState(DEFAULT_SIDEBAR_SECTIONS);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [prefsSaved, setPrefsSaved] = useState(false);
+
+  const toggleSidebarSection = (key) => {
+    setSidebarSections(prev => ({ ...prev, [key]: !prev[key] }));
+  };
 
   // Chargement des préférences d'affichage enregistrées
   useEffect(() => {
@@ -3390,10 +4501,14 @@ export default function GuitarApp() {
         if (!cancelled && result?.value) {
           const p = JSON.parse(result.value) || {};
           if (p.viewMode) setViewMode(p.viewMode);
+          if (p.tileSize) setTileSize(p.tileSize);
           if (p.sortBy) setSortBy(p.sortBy);
           if (p.groupBy) setGroupBy(p.groupBy);
           if (p.classificationFilter) setClassificationFilter(p.classificationFilter);
           if (typeof p.sidebarCollapsed === 'boolean') setSidebarCollapsed(p.sidebarCollapsed);
+          if (p.sidebarSections && typeof p.sidebarSections === 'object') {
+            setSidebarSections({ ...DEFAULT_SIDEBAR_SECTIONS, ...p.sidebarSections });
+          }
         }
       } catch (err) {
         // Aucune préférence enregistrée
@@ -3407,7 +4522,7 @@ export default function GuitarApp() {
   const saveDisplayPrefs = async () => {
     try {
       await window.storage.set(PREFS_STORAGE_KEY, JSON.stringify({
-        viewMode, sortBy, groupBy, classificationFilter, sidebarCollapsed,
+        viewMode, tileSize, sortBy, groupBy, classificationFilter, sidebarCollapsed, sidebarSections,
       }), false);
       setPrefsSaved(true);
       setTimeout(() => setPrefsSaved(false), 2000);
@@ -3421,11 +4536,11 @@ export default function GuitarApp() {
     if (!prefsLoaded) return;
     const t = setTimeout(() => {
       window.storage.set(PREFS_STORAGE_KEY, JSON.stringify({
-        viewMode, sortBy, groupBy, classificationFilter, sidebarCollapsed,
+        viewMode, tileSize, sortBy, groupBy, classificationFilter, sidebarCollapsed, sidebarSections,
       }), false).catch(() => {});
     }, 500);
     return () => clearTimeout(t);
-  }, [viewMode, sortBy, groupBy, classificationFilter, sidebarCollapsed, prefsLoaded]);
+  }, [viewMode, tileSize, sortBy, groupBy, classificationFilter, sidebarCollapsed, sidebarSections, prefsLoaded]);
 
   const selectedSong = songs.find(s => s.id === selectedSongId);
   const selectedVersion = selectedSong?.versions.find(v => v.id === selectedVersionId) || selectedSong?.versions[0];
@@ -3436,7 +4551,8 @@ export default function GuitarApp() {
       song.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       song.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesClassification = classificationFilter === 'all' || (song.classifications || []).includes(classificationFilter);
-    return matchesSearch && matchesClassification;
+    const matchesSetlist = !setlistOnly || song.isSetlist;
+    return matchesSearch && matchesClassification && matchesSetlist;
   });
 
   const sortedSongs = [...filteredSongs].sort((a, b) => {
@@ -3448,6 +4564,11 @@ export default function GuitarApp() {
     if (sortBy === 'progress-desc') return b.progress - a.progress;
     if (sortBy === 'recent') return new Date(b.updatedAt) - new Date(a.updatedAt);
     if (sortBy === 'old') return new Date(a.updatedAt) - new Date(b.updatedAt);
+    if (sortBy === 'created-desc') return new Date(b.createdAt) - new Date(a.createdAt);
+    if (sortBy === 'created-asc') return new Date(a.createdAt) - new Date(b.createdAt);
+    if (sortBy === 'alpha-asc') return a.title.localeCompare(b.title, 'fr', { sensitivity: 'base' });
+    if (sortBy === 'alpha-desc') return b.title.localeCompare(a.title, 'fr', { sensitivity: 'base' });
+    if (sortBy === 'artist-asc') return a.artist.localeCompare(b.artist, 'fr', { sensitivity: 'base' });
     if (sortBy === 'difficulty-asc' || sortBy === 'difficulty-desc') {
       const da = DIFFICULTY_ORDER.indexOf(getDifficulty(a));
       const db = DIFFICULTY_ORDER.indexOf(getDifficulty(b));
@@ -3479,6 +4600,8 @@ export default function GuitarApp() {
       imageUrl: '',
       progress: 0,
       isFavorite: false,
+      isSetlist: false,
+      lastPracticedAt: null,
       tags: [],
       youtubeUrls: [{ id: now + '-y', url: '' }],
       versions: [{
@@ -3511,17 +4634,139 @@ export default function GuitarApp() {
     setDraftSong(null);
   };
 
-  const deleteSong = (id) => {
-    setSongs(songs.filter(s => s.id !== id));
-    if (selectedSongId === id) setSelectedSongId(null);
+  const deleteSong = useCallback((id) => {
+    setSongs(prev => prev.filter(s => s.id !== id));
+    setSelectedSongId(prev => (prev === id ? null : prev));
+  }, []);
+
+  const [progressHistory, setProgressHistory] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await window.storage.get('guitar-lab:progress-history', false);
+        if (r?.value) setProgressHistory(JSON.parse(r.value));
+      } catch (err) { /* pas d'historique enregistré */ }
+    })();
+  }, []);
+
+  const updateSong = useCallback((updatedSong) => {
+    setSongs(prev => {
+      const prevSong = prev.find(s => s.id === updatedSong.id);
+      // Trace discrètement l'évolution de la maîtrise dans le temps, pour le futur graphe de tendance du Journal
+      if (prevSong && (prevSong.progress || 0) !== (updatedSong.progress || 0)) {
+        const entry = { songId: updatedSong.id, date: new Date().toISOString(), progress: updatedSong.progress || 0 };
+        setProgressHistory(hist => {
+          const next = [...hist, entry].slice(-3000);
+          window.storage.set('guitar-lab:progress-history', JSON.stringify(next), false).catch(() => {});
+          return next;
+        });
+      }
+      return prev.map(s => s.id === updatedSong.id ? { ...updatedSong, updatedAt: new Date().toISOString() } : s);
+    });
+  }, []);
+
+  const toggleFavorite = useCallback((id) => {
+    setSongs(prev => prev.map(s => s.id === id ? { ...s, isFavorite: !s.isFavorite } : s));
+  }, []);
+
+  const toggleSetlist = useCallback((id) => {
+    setSongs(prev => prev.map(s => s.id === id ? { ...s, isSetlist: !s.isSetlist } : s));
+  }, []);
+
+  // Identité stable (jamais recréée) pour ouvrir un morceau depuis la bibliothèque —
+  // nécessaire pour que React.memo sur SongItem serve réellement à quelque chose
+  const openSong = useCallback((id) => {
+    setSelectedSongId(id);
+    const song = songsRef.current.find(s => s.id === id);
+    setSelectedVersionId(song?.versions[0]?.id);
+    setAppMode('editor');
+  }, []);
+
+  const markPracticed = (id) => {
+    setSongs(songs.map(s => s.id === id ? { ...s, lastPracticedAt: new Date().toISOString() } : s));
   };
 
-  const updateSong = (updatedSong) => {
-    setSongs(songs.map(s => s.id === updatedSong.id ? { ...updatedSong, updatedAt: new Date().toISOString() } : s));
+  const [reviewIntervals, setReviewIntervals] = useState(DEFAULT_REVIEW_INTERVALS);
+  const [reviewSettingsOpen, setReviewSettingsOpen] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await window.storage.get('guitar-lab:review-intervals', false);
+        if (result?.value) setReviewIntervals(JSON.parse(result.value));
+      } catch (err) { /* pas de préférence enregistrée */ }
+    })();
+  }, []);
+  const updateReviewIntervals = (next) => {
+    setReviewIntervals(next);
+    window.storage.set('guitar-lab:review-intervals', JSON.stringify(next), false).catch(() => {});
   };
 
-  const toggleFavorite = (id) => {
-    setSongs(songs.map(s => s.id === id ? { ...s, isFavorite: !s.isFavorite } : s));
+  const reviewQueue = useMemo(() => computeReviewQueue(songs, 3, reviewIntervals), [songs, reviewIntervals]);
+  const fullReviewQueue = useMemo(() => computeReviewQueue(songs, songs.length, reviewIntervals), [songs, reviewIntervals]);
+
+  // Session du jour : enchaîne automatiquement les morceaux à revoir, avec chrono auto-démarré
+  const [sessionSetupOpen, setSessionSetupOpen] = useState(false);
+  const [roadmapOpen, setRoadmapOpen] = useState(false);
+  const [journalOpen, setJournalOpen] = useState(false);
+  const [sessionQueue, setSessionQueue] = useState(null); // tableau d'ids, ou null si aucune session en cours
+  const [sessionIndex, setSessionIndex] = useState(0);
+
+  const startSession = (orderedIds) => {
+    if (!orderedIds.length) return;
+    setSessionQueue(orderedIds);
+    setSessionIndex(0);
+    setSelectedSongId(orderedIds[0]);
+    const firstSong = songs.find(s => s.id === orderedIds[0]);
+    setSelectedVersionId(firstSong?.versions[0]?.id);
+    setAppMode('editor');
+    setSessionSetupOpen(false);
+  };
+
+  const goToNextSessionSong = () => {
+    const nextIndex = sessionIndex + 1;
+    if (!sessionQueue || nextIndex >= sessionQueue.length) {
+      setSessionQueue(null);
+      setAppMode('library');
+      return;
+    }
+    setSessionIndex(nextIndex);
+    setSelectedSongId(sessionQueue[nextIndex]);
+    const nextSong = songs.find(s => s.id === sessionQueue[nextIndex]);
+    setSelectedVersionId(nextSong?.versions[0]?.id);
+  };
+
+  const endSession = () => setSessionQueue(null);
+
+  // Journal de pratique : sessions chronométrées (toutes chansons confondues) + objectif hebdomadaire
+  const [practiceSessions, setPracticeSessions] = useState([]);
+  const [weeklyGoalMinutes, setWeeklyGoalMinutes] = useState(120);
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await window.storage.get('guitar-lab:practice-sessions', false);
+        if (result?.value) setPracticeSessions(JSON.parse(result.value));
+      } catch (err) { /* pas de session enregistrée */ }
+      try {
+        const goalResult = await window.storage.get('guitar-lab:weekly-goal', false);
+        if (goalResult?.value) setWeeklyGoalMinutes(JSON.parse(goalResult.value));
+      } catch (err) { /* objectif par défaut */ }
+    })();
+  }, []);
+
+  const logPracticeSession = (songId, songTitle, durationSec) => {
+    if (durationSec < 5) return; // ignore les sessions trop courtes (déclenchement accidentel)
+    const entry = { id: newId(), songId, title: songTitle, date: new Date().toISOString(), durationSec };
+    setPracticeSessions(prev => {
+      const next = [...prev, entry].slice(-500); // on garde un historique raisonnable
+      window.storage.set('guitar-lab:practice-sessions', JSON.stringify(next), false).catch(() => {});
+      return next;
+    });
+    markPracticed(songId);
+  };
+
+  const updateWeeklyGoal = (minutes) => {
+    setWeeklyGoalMinutes(minutes);
+    window.storage.set('guitar-lab:weekly-goal', JSON.stringify(minutes), false).catch(() => {});
   };
 
   const organizeByGroup = () => {
@@ -3558,17 +4803,18 @@ export default function GuitarApp() {
       {appMode === 'library' ? (
         <>
           {/* SIDEBAR */}
-          <div className={`${sidebarCollapsed ? 'w-8' : 'w-72'} bg-gray-800 border-r border-gray-700 flex flex-col flex-shrink-0 transition-all`}>
+          <div className={`${sidebarCollapsed ? 'w-8' : 'w-72'} bg-gray-800 border-r border-gray-700 flex flex-col flex-shrink-0 overflow-hidden transition-all`}>
             <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="p-2 hover:bg-gray-700 flex items-center justify-center border-b border-gray-700">
               {sidebarCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
             </button>
             {!sidebarCollapsed && (
               <>
-                <div className="p-4 border-b border-gray-700">
+                {/* En-tête fixe : toujours visible, jamais dans le scroll */}
+                <div className="p-4 border-b border-gray-700 flex-shrink-0">
                   <div className="flex items-center gap-2 mb-4">
                     <Music className="w-5 h-5 text-amber-500" />
                     <h1 className="text-lg font-bold">Guitar Lab</h1>
-                    <SaveStatusBadge status={saveStatus} />
+                    <SaveStatusBadge status={saveStatus} onForceSave={flushSongsSave} />
                   </div>
                   <input
                     type="text"
@@ -3592,7 +4838,16 @@ export default function GuitarApp() {
                       <Plus className="w-4 h-4" />
                     </button>
                   </div>
-                  <div className="mt-3 space-y-2">
+                </div>
+
+                {/* Corps défilant : sections repliables (Trier ouvert par défaut) */}
+                <div className="flex-1 overflow-y-auto">
+                  <SidebarSection
+                    title="Trier"
+                    icon="🔃"
+                    isOpen={sidebarSections.sort}
+                    onToggle={() => toggleSidebarSection('sort')}
+                  >
                     <div>
                       <label className="text-xs text-gray-500 block mb-2">Regrouper :</label>
                       <select
@@ -3621,10 +4876,72 @@ export default function GuitarApp() {
                         <option value="progress-asc">📉 Progression (bas→haut)</option>
                         <option value="difficulty-asc">🟢 Difficulté (facile→difficile)</option>
                         <option value="difficulty-desc">🔴 Difficulté (difficile→facile)</option>
+                        <option value="created-desc">🆕 Date d'ajout (récent→ancien)</option>
+                        <option value="created-asc">🆕 Date d'ajout (ancien→récent)</option>
+                        <option value="alpha-asc">🔤 Titre (A→Z)</option>
+                        <option value="alpha-desc">🔤 Titre (Z→A)</option>
+                        <option value="artist-asc">🎤 Artiste (A→Z)</option>
                       </select>
                     </div>
                     <div>
-                      <label className="text-xs text-gray-500 block mb-2">Affichage :</label>
+                      <label className="text-xs text-gray-500 block mb-2">Tris rapides :</label>
+                      <div className="grid grid-cols-2 gap-1">
+                        <button
+                          onClick={() => setSortBy('created-desc')}
+                          className={`px-2 py-2 rounded text-xs font-semibold transition text-left ${sortBy === 'created-desc' || sortBy === 'created-asc' ? 'bg-amber-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-1px_0_rgba(0,0,0,0.3)]' : 'bg-gray-700 hover:bg-gray-600'}`}
+                          title="Trier par date d'ajout"
+                        >
+                          🆕 Ajout
+                        </button>
+                        <button
+                          onClick={() => setSortBy(sortBy === 'recent' ? 'old' : 'recent')}
+                          className={`px-2 py-2 rounded text-xs font-semibold transition text-left ${sortBy === 'recent' || sortBy === 'old' ? 'bg-amber-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-1px_0_rgba(0,0,0,0.3)]' : 'bg-gray-700 hover:bg-gray-600'}`}
+                          title="Trier par date de modification"
+                        >
+                          📅 Modif
+                        </button>
+                        <button
+                          onClick={() => setSortBy(sortBy === 'alpha-asc' ? 'alpha-desc' : 'alpha-asc')}
+                          className={`px-2 py-2 rounded text-xs font-semibold transition text-left ${sortBy === 'alpha-asc' || sortBy === 'alpha-desc' ? 'bg-amber-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-1px_0_rgba(0,0,0,0.3)]' : 'bg-gray-700 hover:bg-gray-600'}`}
+                          title="Trier par titre"
+                        >
+                          🔤 Titre
+                        </button>
+                        <button
+                          onClick={() => setSortBy('artist-asc')}
+                          className={`px-2 py-2 rounded text-xs font-semibold transition text-left ${sortBy === 'artist-asc' ? 'bg-amber-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-1px_0_rgba(0,0,0,0.3)]' : 'bg-gray-700 hover:bg-gray-600'}`}
+                          title="Trier par artiste"
+                        >
+                          🎤 Artiste
+                        </button>
+                      </div>
+                    </div>
+                  </SidebarSection>
+
+                  <SidebarSection
+                    title="Filtres"
+                    icon="🎯"
+                    isOpen={sidebarSections.filters}
+                    onToggle={() => toggleSidebarSection('filters')}
+                    badge={setlistOnly ? '🎉' : null}
+                  >
+                    <button
+                      onClick={() => setSetlistOnly(!setlistOnly)}
+                      className={`w-full px-2 py-2 rounded text-xs font-semibold transition text-left flex items-center gap-1.5 ${setlistOnly ? 'bg-amber-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),inset_0_-1px_0_rgba(0,0,0,0.3)]' : 'bg-gray-700 hover:bg-gray-600'}`}
+                      title="N'afficher que les titres sélectionnés pour une soirée"
+                    >
+                      🎉 Soirée uniquement
+                    </button>
+                  </SidebarSection>
+
+                  <SidebarSection
+                    title="Affichage"
+                    icon="🖼️"
+                    isOpen={sidebarSections.display}
+                    onToggle={() => toggleSidebarSection('display')}
+                  >
+                    <div>
+                      <label className="text-xs text-gray-500 block mb-2">Mode :</label>
                       <div className="flex gap-1">
                         <button
                           onClick={() => setViewMode('detailed')}
@@ -3647,13 +4964,83 @@ export default function GuitarApp() {
                         </button>
                       </div>
                     </div>
-                  </div>
+                    {viewMode === 'tiles' && (
+                      <div>
+                        <label className="text-xs text-gray-500 block mb-2">Taille des tuiles :</label>
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => setTileSize('small')}
+                            className={`flex-1 px-2 py-2 rounded text-xs font-semibold transition ${tileSize === 'small' ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+                            title="Petites tuiles"
+                          >
+                            S
+                          </button>
+                          <button
+                            onClick={() => setTileSize('medium')}
+                            className={`flex-1 px-2 py-2 rounded text-xs font-semibold transition ${tileSize === 'medium' ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+                            title="Tuiles moyennes"
+                          >
+                            M
+                          </button>
+                          <button
+                            onClick={() => setTileSize('large')}
+                            className={`flex-1 px-2 py-2 rounded text-xs font-semibold transition ${tileSize === 'large' ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+                            title="Grandes tuiles"
+                          >
+                            L
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </SidebarSection>
+
+                  <ClassificationManager
+                    options={classificationOptions}
+                    onAdd={addClassificationOption}
+                    onRemove={removeClassificationOption}
+                  />
+
+                  <SidebarSection
+                    title="Feuille de route"
+                    icon="🗺️"
+                    isOpen={sidebarSections.roadmap}
+                    onToggle={() => toggleSidebarSection('roadmap')}
+                  >
+                    <p className="text-xs text-gray-400">Objectifs en cours, morceaux maîtrisés et prochains défis.</p>
+                    <button
+                      onClick={() => setRoadmapOpen(true)}
+                      className="w-full px-2 py-2 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold transition"
+                      title="Ouvrir la feuille de route en grand"
+                    >
+                      Voir en grand →
+                    </button>
+                  </SidebarSection>
+
+                  <SidebarSection
+                    title="Journal"
+                    icon="📊"
+                    isOpen={sidebarSections.journal}
+                    onToggle={() => toggleSidebarSection('journal')}
+                  >
+                    <p className="text-xs text-gray-400">Ton carnet de suivi : temps passé, styles joués, tendances dans le temps.</p>
+                    <button
+                      onClick={() => setJournalOpen(true)}
+                      className="w-full px-2 py-2 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold transition"
+                      title="Ouvrir le journal en grand"
+                    >
+                      Voir en grand →
+                    </button>
+                  </SidebarSection>
+
+                  <SidebarSection
+                    title="Stockage"
+                    icon="💾"
+                    isOpen={sidebarSections.storage}
+                    onToggle={() => toggleSidebarSection('storage')}
+                  >
+                    <StorageManager />
+                  </SidebarSection>
                 </div>
-                <ClassificationManager
-                  options={classificationOptions}
-                  onAdd={addClassificationOption}
-                  onRemove={removeClassificationOption}
-                />
               </>
             )}
           </div>
@@ -3684,6 +5071,84 @@ export default function GuitarApp() {
 
             {/* LIBRARY CONTENT */}
             <div className="flex-1 overflow-y-auto">
+              <div className="m-4 mb-0 p-3 bg-amber-900/20 border border-amber-700/50 rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-amber-400 flex items-center gap-1.5">
+                    📅 {reviewQueue.length > 0 ? "À revoir aujourd'hui" : 'Révision espacée : tout est à jour ✅'}
+                  </h3>
+                  <div className="flex items-center gap-1">
+                    {fullReviewQueue.length > 0 && (
+                      <button
+                        onClick={() => setSessionSetupOpen(true)}
+                        className="px-2 py-1 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-semibold transition flex items-center gap-1"
+                        title="Enchaîner les morceaux à revoir, avec chrono automatique"
+                      >
+                        🎯 Démarrer ma session
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setReviewSettingsOpen(!reviewSettingsOpen)}
+                      className="p-1 hover:bg-gray-700 rounded transition"
+                      title="Régler les intervalles de révision"
+                    >
+                      ⚙️
+                    </button>
+                  </div>
+                </div>
+
+                {reviewSettingsOpen && (
+                    <div className="mb-3 p-2 bg-gray-800 border border-gray-600 rounded-lg space-y-2">
+                      <p className="text-[11px] text-gray-400">Revoir un morceau tous les... (en jours)</p>
+                      {[
+                        { key: 'low', label: 'Peu maîtrisé (< 34%)' },
+                        { key: 'mid', label: 'Intermédiaire (34-70%)' },
+                        { key: 'high', label: 'Bien acquis (≥ 71%)' },
+                      ].map(row => (
+                        <div key={row.key} className="flex items-center justify-between gap-2">
+                          <span className="text-xs text-gray-300">{row.label}</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={90}
+                            value={reviewIntervals[row.key]}
+                            onChange={(e) => {
+                              const v = Math.max(1, Math.min(90, parseInt(e.target.value, 10) || 1));
+                              updateReviewIntervals({ ...reviewIntervals, [row.key]: v });
+                            }}
+                            className="w-16 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs text-right focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {reviewQueue.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {reviewQueue.map(s => (
+                        <div key={s.id} className="flex items-center gap-1.5 bg-gray-800 border border-gray-600 rounded-lg pl-2 pr-1 py-1">
+                          <button
+                            onClick={() => {
+                              setSelectedSongId(s.id);
+                              setSelectedVersionId(s.versions[0]?.id);
+                              setAppMode('editor');
+                            }}
+                            className="text-xs font-semibold hover:text-amber-400 transition text-left"
+                            title={s.artist}
+                          >
+                            {s.title}
+                          </button>
+                          <button
+                            onClick={() => markPracticed(s.id)}
+                            className="p-1 hover:bg-green-700 rounded transition"
+                            title="Marquer comme pratiqué aujourd'hui"
+                          >
+                            ✓
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               {sortedSongs.length === 0 ? (
                 <div className="flex items-center justify-center h-full">
                   <div className="text-center">
@@ -3692,19 +5157,16 @@ export default function GuitarApp() {
                   </div>
                 </div>
               ) : groupBy === 'none' ? (
-                <div className={`p-4 ${viewMode === 'detailed' ? 'grid grid-cols-1 gap-3' : viewMode === 'tiles' ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2' : 'space-y-1'}`}>
+                <div className={`p-4 ${viewMode === 'detailed' ? 'grid grid-cols-1 gap-3' : viewMode === 'tiles' ? `grid ${TILE_GRID_CLASSES[tileSize]} gap-2` : 'space-y-1'}`}>
                   {sortedSongs.map(song => (
                     <SongItem
                       key={song.id}
                       song={song}
                       isSelected={selectedSongId === song.id}
-                      onSelect={() => {
-                        setSelectedSongId(song.id);
-                        setSelectedVersionId(song.versions[0]?.id);
-                        setAppMode('editor');
-                      }}
-                      onDelete={() => deleteSong(song.id)}
-                      onToggleFavorite={() => toggleFavorite(song.id)}
+                      onSelect={openSong}
+                      onDelete={deleteSong}
+                      onToggleFavorite={toggleFavorite}
+                      onToggleSetlist={toggleSetlist}
                       onUpdate={updateSong}
                       viewMode={viewMode}
                       classificationOptions={classificationOptions}
@@ -3724,19 +5186,16 @@ export default function GuitarApp() {
                         {groupKey} <span className="text-xs text-gray-500 ml-1">({groupSongs.length})</span>
                       </button>
                       {expandedGroups[groupKey] && (
-                        <div className={`bg-gray-800 border border-t-0 border-gray-600 rounded-b-lg overflow-hidden ${viewMode === 'detailed' ? 'grid grid-cols-1 gap-2 p-3' : viewMode === 'tiles' ? 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 p-2' : 'space-y-0.5 p-2'}`}>
+                        <div className={`bg-gray-800 border border-t-0 border-gray-600 rounded-b-lg overflow-hidden ${viewMode === 'detailed' ? 'grid grid-cols-1 gap-2 p-3' : viewMode === 'tiles' ? `grid ${TILE_GRID_CLASSES[tileSize]} gap-2 p-2` : 'space-y-0.5 p-2'}`}>
                           {groupSongs.map(song => (
                             <SongItem
                               key={song.id}
                               song={song}
                               isSelected={selectedSongId === song.id}
-                              onSelect={() => {
-                                setSelectedSongId(song.id);
-                                setSelectedVersionId(song.versions[0]?.id);
-                                setAppMode('editor');
-                              }}
-                              onDelete={() => deleteSong(song.id)}
-                              onToggleFavorite={() => toggleFavorite(song.id)}
+                              onSelect={openSong}
+                              onDelete={deleteSong}
+                              onToggleFavorite={toggleFavorite}
+                              onToggleSetlist={toggleSetlist}
                               onUpdate={updateSong}
                               viewMode={viewMode}
                               classificationOptions={classificationOptions}
@@ -3769,6 +5228,13 @@ export default function GuitarApp() {
             classificationOptions={classificationOptions}
             onAddClassificationOption={addClassificationOption}
             onRemoveClassificationOption={removeClassificationOption}
+            practiceSessions={practiceSessions}
+            onLogPracticeSession={logPracticeSession}
+            weeklyGoalMinutes={weeklyGoalMinutes}
+            onUpdateWeeklyGoal={updateWeeklyGoal}
+            sessionInfo={sessionQueue ? { position: sessionIndex + 1, total: sessionQueue.length } : null}
+            onSessionNext={goToNextSessionSong}
+            onSessionEnd={endSession}
           />
         )
       )}
@@ -3782,6 +5248,1148 @@ export default function GuitarApp() {
           onAddClassificationOption={addClassificationOption}
           title="➕ Nouveau morceau"
         />
+      )}
+      {sessionSetupOpen && (
+        <SessionSetupModal
+          songs={fullReviewQueue}
+          onStart={startSession}
+          onCancel={() => setSessionSetupOpen(false)}
+        />
+      )}
+      {roadmapOpen && (
+        <RoadmapModal
+          songs={songs}
+          practiceSessions={practiceSessions}
+          onSelectSong={(id) => {
+            setSelectedSongId(id);
+            const song = songs.find(s => s.id === id);
+            setSelectedVersionId(song?.versions[0]?.id);
+            setAppMode('editor');
+          }}
+          onToggleSetlist={toggleSetlist}
+          onClose={() => setRoadmapOpen(false)}
+        />
+      )}
+      {journalOpen && (
+        <JournalModal
+          songs={songs}
+          practiceSessions={practiceSessions}
+          progressHistory={progressHistory}
+          weeklyGoalMinutes={weeklyGoalMinutes}
+          onUpdateWeeklyGoal={updateWeeklyGoal}
+          onSelectSong={(id) => {
+            setSelectedSongId(id);
+            const song = songs.find(s => s.id === id);
+            setSelectedVersionId(song?.versions[0]?.id);
+            setAppMode('editor');
+          }}
+          onClose={() => setJournalOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Version modale/plein-écran de la roadmap, pour une meilleure visibilité sur petit écran
+const ROADMAP_ORDER_KEY = 'guitar-lab:roadmap-order';
+const ROADMAP_OVERRIDES_KEY = 'guitar-lab:roadmap-overrides';
+const ROADMAP_SECTION_META = {
+  progress: { label: '📌 En cours', titleColor: 'text-amber-400' },
+  mastered: { label: '✓ Maîtrisés', titleColor: 'text-green-400' },
+  challenges: { label: '🎯 Prochains défis', titleColor: 'text-gray-400' },
+};
+
+// Dégradé continu rouge → ambre → vert selon le % de progression (0 à 100)
+function progressToRoadmapRgb(pct) {
+  const p = Math.max(0, Math.min(100, pct || 0));
+  const [lo, hi] = p >= 50
+    ? [{ p: 50, c: [245, 158, 11] }, { p: 100, c: [34, 197, 94] }]
+    : [{ p: 0, c: [239, 68, 68] }, { p: 50, c: [245, 158, 11] }];
+  const t = hi.p === lo.p ? 0 : (p - lo.p) / (hi.p - lo.p);
+  return lo.c.map((v, i) => Math.round(v + (hi.c[i] - v) * t));
+}
+function progressToRoadmapColor(pct) {
+  const [r, g, b] = progressToRoadmapRgb(pct);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+function progressToRoadmapFill(pct) {
+  const [r, g, b] = progressToRoadmapRgb(pct);
+  return `rgba(${r}, ${g}, ${b}, 0.35)`;
+}
+
+// Formate une durée en secondes en texte compact ("45 min", "2h15")
+function formatDuration(totalSec) {
+  const totalMin = Math.round((totalSec || 0) / 60);
+  if (totalMin < 1) return '< 1 min';
+  if (totalMin < 60) return `${totalMin} min`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return m > 0 ? `${h}h${m.toString().padStart(2, '0')}` : `${h}h`;
+}
+
+function daysSince(dateStr) {
+  if (!dateStr) return null;
+  return Math.floor((Date.now() - new Date(dateStr).getTime()) / (24 * 60 * 60 * 1000));
+}
+
+// Petit visuel selon le style musical déclaré (reconnaissance par mots-clés simples)
+function styleIcon(style) {
+  const s = (style || '').toLowerCase();
+  if (/rock|metal|punk/.test(s)) return '🤘';
+  if (/pop/.test(s)) return '🎧';
+  if (/folk|chanson|variété|acoustique/.test(s)) return '🪕';
+  if (/blues/.test(s)) return '🎷';
+  if (/jazz|swing/.test(s)) return '🎺';
+  if (/classi/.test(s)) return '🎻';
+  if (/reggae/.test(s)) return '🌴';
+  if (/latin|salsa/.test(s)) return '💃';
+  if (/soul|motown|r&b|rnb/.test(s)) return '🎙️';
+  return null;
+}
+
+// Petit ascenseur flottant : accès rapide au haut / bas d'une longue liste (pratique pour le glisser-déposer)
+function QuickScrollButtons({ scrollRef }) {
+  const scrollTo = (pos) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: pos === 'top' ? 0 : el.scrollHeight, behavior: 'smooth' });
+  };
+  return (
+    <div className="absolute bottom-3 right-3 z-20 flex flex-col gap-1.5">
+      <button
+        onClick={() => scrollTo('top')}
+        className="w-8 h-8 rounded-full bg-gray-700/90 hover:bg-gray-600 border border-gray-600 shadow-lg flex items-center justify-center text-gray-300"
+        title="Aller tout en haut"
+      >
+        <ArrowUp className="w-4 h-4" />
+      </button>
+      <button
+        onClick={() => scrollTo('bottom')}
+        className="w-8 h-8 rounded-full bg-gray-700/90 hover:bg-gray-600 border border-gray-600 shadow-lg flex items-center justify-center text-gray-300"
+        title="Aller tout en bas"
+      >
+        <ArrowDown className="w-4 h-4" />
+      </button>
+    </div>
+  );
+}
+
+function RoadmapModal({ songs, practiceSessions = [], onSelectSong, onToggleSetlist, onClose }) {
+  const scrollRef = useRef(null);
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  // Statistiques de pratique par morceau (temps total, nb de sessions, dernière session), à partir du vrai journal
+  const statsBySong = useMemo(() => {
+    const map = {};
+    (practiceSessions || []).forEach(entry => {
+      if (!map[entry.songId]) map[entry.songId] = { totalSec: 0, count: 0, lastDate: null };
+      const st = map[entry.songId];
+      st.totalSec += entry.durationSec || 0;
+      st.count += 1;
+      if (!st.lastDate || new Date(entry.date) > new Date(st.lastDate)) st.lastDate = entry.date;
+    });
+    return map;
+  }, [practiceSessions]);
+
+  // Déplacements manuels vers une autre catégorie (prioritaires sur le classement automatique) et ordre au sein
+  // de chaque section, mémorisés d'une session à l'autre. Tant que l'utilisateur n'interagit pas, rien ne change
+  // par rapport au comportement d'origine (100% automatique).
+  const [overrides, setOverrides] = useState({});
+  const [order, setOrder] = useState({ progress: [], mastered: [], challenges: [] });
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const o = await window.storage.get(ROADMAP_OVERRIDES_KEY, false);
+        if (o?.value) setOverrides(JSON.parse(o.value));
+      } catch (err) { /* pas de déplacement enregistré */ }
+      try {
+        const r = await window.storage.get(ROADMAP_ORDER_KEY, false);
+        if (r?.value) setOrder(JSON.parse(r.value));
+      } catch (err) { /* pas d'ordre enregistré */ }
+    })();
+  }, []);
+
+  const saveOverrides = (next) => {
+    setOverrides(next);
+    window.storage.set(ROADMAP_OVERRIDES_KEY, JSON.stringify(next), false).catch(() => {});
+  };
+  const saveOrder = (next) => {
+    setOrder(next);
+    window.storage.set(ROADMAP_ORDER_KEY, JSON.stringify(next), false).catch(() => {});
+  };
+
+  // Catégorie automatique : reprend la logique d'origine, mais attribue une seule catégorie par morceau
+  // (auparavant un même morceau pouvait apparaître à la fois dans "En cours" et "Maîtrisés")
+  const computeAutoSection = (s) => {
+    if (!s.lastPracticedAt) return 'challenges';
+    const diff = getDifficulty(s);
+    const sessionCount = statsBySong[s.id]?.count || 0;
+    if (diff === 'hard' || sessionCount >= 5) return 'mastered';
+    const isRecent = new Date(s.lastPracticedAt) >= sevenDaysAgo;
+    if (isRecent) return 'progress';
+    return 'challenges';
+  };
+
+  const bySection = { progress: [], mastered: [], challenges: [] };
+  songs.forEach(s => {
+    const section = overrides[s.id] && bySection[overrides[s.id]] ? overrides[s.id] : computeAutoSection(s);
+    bySection[section].push(s);
+  });
+
+  // Applique l'ordre manuel mémorisé ; les morceaux jamais déplacés gardent l'ordre naturel, ajoutés à la fin
+  const applyOrder = (section, list) => {
+    const savedIds = order[section] || [];
+    const byId = new Map(list.map(s => [s.id, s]));
+    const ordered = savedIds.map(id => byId.get(id)).filter(Boolean);
+    const remaining = list.filter(s => !savedIds.includes(s.id));
+    if (section === 'challenges' && savedIds.length === 0) {
+      const diffOrder = { easy: 0, medium: 1, hard: 2 };
+      remaining.sort((a, b) => (diffOrder[getDifficulty(a)] || 0) - (diffOrder[getDifficulty(b)] || 0));
+    }
+    return [...ordered, ...remaining];
+  };
+
+  const listsBySection = {
+    progress: applyOrder('progress', bySection.progress),
+    mastered: applyOrder('mastered', bySection.mastered),
+    challenges: applyOrder('challenges', bySection.challenges),
+  };
+  const { progress: inProgress, mastered, challenges: nextChallenges } = listsBySection;
+
+  // Statistiques globales : de quoi transformer la page en vrai tableau de bord du parcours
+  const totalPracticeSec = (practiceSessions || []).reduce((sum, e) => sum + (e.durationSec || 0), 0);
+  const weekAgoTs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const weekPracticeSec = (practiceSessions || [])
+    .filter(e => new Date(e.date).getTime() >= weekAgoTs)
+    .reduce((sum, e) => sum + (e.durationSec || 0), 0);
+  const mostNeglected = songs
+    .filter(s => s.lastPracticedAt)
+    .sort((a, b) => new Date(a.lastPracticedAt) - new Date(b.lastPracticedAt))[0];
+  const neverPracticedCount = songs.filter(s => !s.lastPracticedAt).length;
+
+  // Carnet d'idées : morceaux qui donnent envie, pas encore dans la bibliothèque
+  const IDEAS_KEY = 'guitar-lab:roadmap-ideas';
+  const [ideas, setIdeas] = useState([]);
+  const [newIdea, setNewIdea] = useState('');
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await window.storage.get(IDEAS_KEY, false);
+        if (r?.value) setIdeas(JSON.parse(r.value));
+      } catch (err) { /* pas d'idée enregistrée */ }
+    })();
+  }, []);
+  const saveIdeas = (next) => {
+    setIdeas(next);
+    window.storage.set(IDEAS_KEY, JSON.stringify(next), false).catch(() => {});
+  };
+  const addIdea = () => {
+    const clean = newIdea.trim();
+    if (!clean) return;
+    saveIdeas([{ id: newId(), text: clean }, ...ideas]);
+    setNewIdea('');
+  };
+  const removeIdea = (id) => saveIdeas(ideas.filter(i => i.id !== id));
+
+  const setlistSongs = songs.filter(s => s.isSetlist);
+
+  const moveInSection = (section, songId, dir) => {
+    const ids = listsBySection[section].map(s => s.id);
+    const i = ids.indexOf(songId);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    saveOrder({ ...order, [section]: ids });
+  };
+
+  const moveToSection = (songId, fromSection, toSection) => {
+    if (fromSection === toSection) return;
+    saveOverrides({ ...overrides, [songId]: toSection });
+    saveOrder({
+      ...order,
+      [fromSection]: (order[fromSection] || []).filter(id => id !== songId),
+      [toSection]: [songId, ...(order[toSection] || []).filter(id => id !== songId)],
+    });
+  };
+
+  const resetOverride = (songId) => {
+    const next = { ...overrides };
+    delete next[songId];
+    saveOverrides(next);
+  };
+
+  const SongRow = ({ song, section }) => {
+    const ids = listsBySection[section].map(s => s.id);
+    const index = ids.indexOf(song.id);
+    const isFirst = index === 0;
+    const isLast = index === ids.length - 1;
+    const isOverridden = !!overrides[song.id];
+    const rowRef = useRef(null);
+    const [dragDy, setDragDy] = useState(null); // null = pas en cours de glisser
+    const dragging = dragDy !== null;
+
+    // Glisser-déposer tactile pour réordonner (le drag-and-drop HTML5 natif ne fonctionne pas au doigt sur iPad)
+    const startRowDrag = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const pointer = e.touches ? e.touches[0] : e;
+      const startY = pointer.clientY;
+      const list = listsBySection[section];
+      const startIndex = list.map(s => s.id).indexOf(song.id);
+      const stepHeight = (rowRef.current?.offsetHeight || 60) + 8; // + l'espacement entre lignes (space-y-2)
+      const count = list.length;
+      setDragDy(0);
+
+      const onMove = (ev) => {
+        ev.preventDefault?.();
+        const p = ev.touches ? ev.touches[0] : ev;
+        setDragDy(p.clientY - startY);
+      };
+      const onUp = (ev) => {
+        const p = ev.changedTouches ? ev.changedTouches[0] : ev;
+        const dy = (p ? p.clientY : startY) - startY;
+        const delta = Math.round(dy / stepHeight);
+        const targetIndex = Math.max(0, Math.min(count - 1, startIndex + delta));
+        if (targetIndex !== startIndex) {
+          const newIds = list.map(s => s.id);
+          newIds.splice(startIndex, 1);
+          newIds.splice(targetIndex, 0, song.id);
+          saveOrder({ ...order, [section]: newIds });
+        }
+        setDragDy(null);
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        window.removeEventListener('touchmove', onMove);
+        window.removeEventListener('touchend', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+      window.addEventListener('touchmove', onMove, { passive: false });
+      window.addEventListener('touchend', onUp);
+    };
+
+    const fillPct = Math.max(0, Math.min(100, song.progress || 0));
+    const stat = statsBySong[song.id];
+    const sIcon = styleIcon(song.style);
+
+    return (
+      <div
+        ref={rowRef}
+        className="relative w-full rounded overflow-hidden border-l-4 group"
+        style={{
+          borderColor: progressToRoadmapColor(song.progress),
+          transform: dragging ? `translateY(${dragDy}px) scale(1.02)` : undefined,
+          transition: dragging ? 'none' : 'transform 0.15s ease',
+          zIndex: dragging ? 30 : undefined,
+          boxShadow: dragging ? '0 10px 24px rgba(0,0,0,0.55)' : undefined,
+        }}
+      >
+        {/* Fond + remplissage proportionnel au % de maîtrise (100% = case pleine, 50% = à moitié...) */}
+        <div className="absolute inset-0 bg-gray-750 group-hover:bg-gray-700 transition-colors" />
+        <div
+          className="absolute inset-y-0 left-0 transition-[width] duration-300"
+          style={{ width: `${fillPct}%`, backgroundColor: progressToRoadmapFill(song.progress) }}
+        />
+
+        <div className="relative flex items-center gap-2 p-3">
+          <div
+            onMouseDown={startRowDrag}
+            onTouchStart={startRowDrag}
+            className="flex-shrink-0 text-gray-400 hover:text-gray-200 active:text-amber-400 -ml-1 p-1"
+            style={{ touchAction: 'none', cursor: 'grab' }}
+            title="Glisser pour réordonner"
+          >
+            <GripVertical className="w-4 h-4" />
+          </div>
+
+          <button onClick={() => { onSelectSong?.(song.id); onClose?.(); }} className="flex-1 min-w-0 text-left">
+            <p className="font-semibold text-sm truncate flex items-center gap-1.5">
+              <PickIcon difficulty={song.difficulty} size={13} className="flex-shrink-0" />
+              <span className="truncate">{song.title}</span>
+              <span className="flex-shrink-0 text-xs" title={song.songType === 'instrumental' ? 'Instrumental' : 'Chanté'}>
+                {song.songType === 'instrumental' ? '🎸' : '🎤'}
+              </span>
+              {sIcon && (
+                <span className="flex-shrink-0 text-xs" title={song.style}>{sIcon}</span>
+              )}
+            </p>
+            <p className="text-xs text-gray-300 truncate">
+              {song.artist} • {song.progress || 0}% maîtrisé
+              {stat?.totalSec ? <> • ⏱️ {formatDuration(stat.totalSec)}</> : <span className="text-gray-500"> • jamais pratiqué</span>}
+            </p>
+          </button>
+
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            <button onClick={() => moveInSection(section, song.id, -1)} disabled={isFirst} className="p-1.5 hover:bg-gray-600/60 rounded disabled:opacity-20" title="Monter dans la liste">
+              <ArrowUp className="w-3.5 h-3.5" />
+            </button>
+            <button onClick={() => moveInSection(section, song.id, 1)} disabled={isLast} className="p-1.5 hover:bg-gray-600/60 rounded disabled:opacity-20" title="Descendre dans la liste">
+              <ArrowDown className="w-3.5 h-3.5" />
+            </button>
+            <select
+              value=""
+              onChange={(e) => { if (e.target.value) moveToSection(song.id, section, e.target.value); e.target.value = ''; }}
+              className="bg-gray-800/90 border border-gray-600 rounded text-[10px] px-1 py-1.5 focus:outline-none max-w-[92px]"
+              title="Déplacer vers une autre catégorie"
+            >
+              <option value="">↔ Déplacer</option>
+              {Object.entries(ROADMAP_SECTION_META).filter(([key]) => key !== section).map(([key, meta]) => (
+                <option key={key} value={key}>{meta.label}</option>
+              ))}
+            </select>
+            {isOverridden && (
+              <button onClick={() => resetOverride(song.id)} className="p-1.5 hover:bg-gray-600/60 rounded text-gray-400" title="Revenir au classement automatique">
+                ↺
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="relative bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] border border-gray-700 shadow-2xl flex flex-col">
+      <div ref={scrollRef} className="overflow-y-auto rounded-lg">
+        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-start gap-2 z-10">
+          <div>
+            <h2 className="font-bold text-amber-400 text-lg">🗺️ Feuille de route</h2>
+            <p className="text-[11px] text-gray-500 mt-0.5">⠿ glisse pour réordonner • ↑↓ pas à pas • le menu déplace vers une autre catégorie • ↺ revient à l'automatique</p>
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded flex-shrink-0">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Tableau de bord : vue d'ensemble du parcours */}
+        <div className="p-4 pb-0 grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+            <div className="text-[10px] text-gray-400">📚 Morceaux</div>
+            <div className="text-lg font-bold text-amber-400">{songs.length}</div>
+          </div>
+          <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+            <div className="text-[10px] text-gray-400">✓ Maîtrisés</div>
+            <div className="text-lg font-bold text-green-400">{mastered.length}</div>
+          </div>
+          <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+            <div className="text-[10px] text-gray-400">⏱️ Temps total</div>
+            <div className="text-lg font-bold text-sky-400">{formatDuration(totalPracticeSec)}</div>
+          </div>
+          <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+            <div className="text-[10px] text-gray-400">🔥 Cette semaine</div>
+            <div className="text-lg font-bold text-purple-400">{formatDuration(weekPracticeSec)}</div>
+          </div>
+        </div>
+
+        {mostNeglected && (
+          <button
+            onClick={() => { onSelectSong?.(mostNeglected.id); onClose?.(); }}
+            className="mx-4 mt-3 block w-[calc(100%-2rem)] text-left px-3 py-2 bg-gray-750 hover:bg-gray-700 border border-dashed border-gray-600 rounded-lg text-xs text-gray-400 transition"
+          >
+            🕰️ À ne pas oublier : <span className="text-gray-200 font-semibold">{mostNeglected.title}</span> — pas pratiqué depuis {daysSince(mostNeglected.lastPracticedAt)} jour{daysSince(mostNeglected.lastPracticedAt) > 1 ? 's' : ''}
+            {neverPracticedCount > 0 && <span className="text-gray-500"> • {neverPracticedCount} morceau{neverPracticedCount > 1 ? 'x' : ''} jamais pratiqué{neverPracticedCount > 1 ? 's' : ''}</span>}
+          </button>
+        )}
+
+        <div className="p-4 space-y-4">
+          {setlistSongs.length > 0 && (
+            <section>
+              <h3 className="font-semibold mb-2 text-pink-400">🎉 Prêt pour la scène</h3>
+              <div className="space-y-1.5">
+                {setlistSongs.map(s => (
+                  <div key={s.id} className="flex items-center gap-2 bg-gray-750 rounded-lg px-3 py-2 border-l-4" style={{ borderColor: progressToRoadmapColor(s.progress) }}>
+                    <PickIcon difficulty={s.difficulty} size={13} className="flex-shrink-0" />
+                    <button onClick={() => { onSelectSong?.(s.id); onClose?.(); }} className="flex-1 min-w-0 text-left">
+                      <p className="text-sm font-semibold truncate">{s.title}</p>
+                      <p className="text-xs text-gray-400 truncate">{s.artist} • {s.progress || 0}% maîtrisé</p>
+                    </button>
+                    <button
+                      onClick={() => onToggleSetlist?.(s.id)}
+                      className="flex-shrink-0 p-1.5 hover:bg-gray-600/60 rounded text-gray-400 hover:text-pink-400"
+                      title="Retirer de la sélection soirée"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {inProgress.length > 0 && (
+            <section>
+              <h3 className={`font-semibold mb-2 ${ROADMAP_SECTION_META.progress.titleColor}`}>{ROADMAP_SECTION_META.progress.label}</h3>
+              <div className="space-y-2">
+                {inProgress.map(s => <SongRow key={s.id} song={s} section="progress" />)}
+              </div>
+            </section>
+          )}
+
+          {mastered.length > 0 && (
+            <section>
+              <h3 className={`font-semibold mb-2 ${ROADMAP_SECTION_META.mastered.titleColor}`}>{ROADMAP_SECTION_META.mastered.label}</h3>
+              <div className="space-y-2">
+                {mastered.map(s => <SongRow key={s.id} song={s} section="mastered" />)}
+              </div>
+            </section>
+          )}
+
+          {nextChallenges.length > 0 && (
+            <section>
+              <h3 className={`font-semibold mb-2 ${ROADMAP_SECTION_META.challenges.titleColor}`}>{ROADMAP_SECTION_META.challenges.label}</h3>
+              <div className="space-y-2">
+                {nextChallenges.map(s => <SongRow key={s.id} song={s} section="challenges" />)}
+              </div>
+            </section>
+          )}
+
+          {inProgress.length === 0 && mastered.length === 0 && nextChallenges.length === 0 && (
+            <p className="text-center text-gray-500 py-8">Ajoute des morceaux pour voir ta feuille de route</p>
+          )}
+
+          <section className="pt-2 border-t border-gray-700">
+            <h3 className="font-semibold mb-2 text-sky-400">💡 Idées de morceaux à apprendre</h3>
+            <div className="flex gap-1 mb-2">
+              <input
+                value={newIdea}
+                onChange={(e) => setNewIdea(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addIdea()}
+                placeholder="Un morceau qui te tente..."
+                className="flex-1 px-2 py-1.5 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500"
+              />
+              <button onClick={addIdea} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 rounded text-sm font-semibold transition">+</button>
+            </div>
+            {ideas.length === 0 ? (
+              <p className="text-xs text-gray-500 italic">Pas encore d'idée notée.</p>
+            ) : (
+              <div className="space-y-1">
+                {ideas.map(idea => (
+                  <div key={idea.id} className="flex items-center justify-between gap-2 bg-gray-750 rounded px-3 py-1.5">
+                    <span className="text-sm truncate">{idea.text}</span>
+                    <button onClick={() => removeIdea(idea.id)} className="text-gray-500 hover:text-red-400 flex-shrink-0" title="Retirer">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
+      <QuickScrollButtons scrollRef={scrollRef} />
+      </div>
+    </div>
+  );
+}
+
+// Modal de préparation de la session du jour : reprend la file de révision, réordonnable avant de lancer
+// Journal global : carnet de suivi (temps, styles, tendances) — pas un outil de planification
+const JOURNAL_WINDOWS = [
+  { key: '7', label: '7 jours', days: 7 },
+  { key: '30', label: '30 jours', days: 30 },
+  { key: 'all', label: 'Tout', days: null },
+];
+
+function JournalModal({ songs, practiceSessions = [], progressHistory = [], weeklyGoalMinutes = 120, onUpdateWeeklyGoal, onSelectSong, onClose }) {
+  const scrollRef = useRef(null);
+  const [windowKey, setWindowKey] = useState('7');
+  const win = JOURNAL_WINDOWS.find(w => w.key === windowKey);
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+  const cutoff = win.days ? now - win.days * DAY : 0;
+
+  const sessionsInWindow = useMemo(
+    () => practiceSessions.filter(e => new Date(e.date).getTime() >= cutoff),
+    [practiceSessions, cutoff]
+  );
+
+  const songById = useMemo(() => {
+    const map = {};
+    songs.forEach(s => { map[s.id] = s; });
+    return map;
+  }, [songs]);
+
+  const totalSec = sessionsInWindow.reduce((sum, e) => sum + (e.durationSec || 0), 0);
+  const sessionCount = sessionsInWindow.length;
+  const distinctSongsCount = new Set(sessionsInWindow.map(e => e.songId)).size;
+
+  // Série actuelle (jours consécutifs avec au moins une session), sur tout l'historique
+  const streak = useMemo(() => {
+    const daysWithSession = new Set(practiceSessions.map(e => new Date(e.date).toDateString()));
+    let count = 0;
+    let cursor = new Date();
+    if (!daysWithSession.has(cursor.toDateString())) cursor = new Date(cursor.getTime() - DAY);
+    while (daysWithSession.has(cursor.toDateString())) {
+      count++;
+      cursor = new Date(cursor.getTime() - DAY);
+    }
+    return count;
+  }, [practiceSessions]);
+
+  // Barres de temps par période (jour ou semaine selon la fenêtre choisie)
+  const barBuckets = useMemo(() => {
+    if (windowKey === 'all') {
+      if (practiceSessions.length === 0) return [];
+      const weekMs = 7 * DAY;
+      const oldest = Math.min(...practiceSessions.map(e => new Date(e.date).getTime()));
+      const weeksSpan = Math.min(12, Math.max(1, Math.ceil((now - oldest) / weekMs) + 1));
+      return Array.from({ length: weeksSpan }, (_, i) => {
+        const end = now - (weeksSpan - 1 - i) * weekMs;
+        const start = end - weekMs;
+        const sec = practiceSessions
+          .filter(e => { const t = new Date(e.date).getTime(); return t >= start && t < end; })
+          .reduce((sum, e) => sum + (e.durationSec || 0), 0);
+        return { minutes: Math.round(sec / 60) };
+      });
+    }
+    const days = win.days;
+    return Array.from({ length: days }, (_, i) => {
+      const d = new Date(now - (days - 1 - i) * DAY);
+      const sec = practiceSessions
+        .filter(e => new Date(e.date).toDateString() === d.toDateString())
+        .reduce((sum, e) => sum + (e.durationSec || 0), 0);
+      return { label: d.toLocaleDateString('fr-FR', { weekday: 'short' }), minutes: Math.round(sec / 60) };
+    });
+  }, [windowKey, practiceSessions, now]);
+  const maxBar = Math.max(...barBuckets.map(b => b.minutes), 1);
+
+  // Répartition par style / technique (temps cumulé sur la fenêtre choisie)
+  const rankBy = (keyFn) => {
+    const map = {};
+    sessionsInWindow.forEach(e => {
+      const song = songById[e.songId];
+      const key = song ? keyFn(song) : null;
+      if (!key) return;
+      map[key] = (map[key] || 0) + (e.durationSec || 0);
+    });
+    return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  };
+  const styleRanking = rankBy(s => s.style && s.style.trim());
+  const techniqueRanking = rankBy(s => s.technique);
+  const maxRankSec = Math.max(...styleRanking.map(([, v]) => v), ...techniqueRanking.map(([, v]) => v), 1);
+
+  // Top morceaux pratiqués sur la fenêtre
+  const songTimeMap = {};
+  sessionsInWindow.forEach(e => { songTimeMap[e.songId] = (songTimeMap[e.songId] || 0) + (e.durationSec || 0); });
+  const topSongs = Object.entries(songTimeMap)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([songId, sec]) => ({ song: songById[songId], sec }))
+    .filter(x => x.song);
+  const maxSongSec = Math.max(...topSongs.map(x => x.sec), 1);
+
+  // Tendance de progression : moyenne des mises à jour de maîtrise par semaine, si assez de recul
+  const progressWeeks = useMemo(() => {
+    if (progressHistory.length === 0) return [];
+    const weekMs = 7 * DAY;
+    const oldest = Math.min(...progressHistory.map(e => new Date(e.date).getTime()));
+    const span = Math.min(10, Math.max(1, Math.ceil((now - oldest) / weekMs) + 1));
+    return Array.from({ length: span }, (_, i) => {
+      const end = now - (span - 1 - i) * weekMs;
+      const start = end - weekMs;
+      const vals = progressHistory.filter(e => { const t = new Date(e.date).getTime(); return t >= start && t < end; }).map(e => e.progress);
+      return { avg: vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null };
+    });
+  }, [progressHistory, now]);
+  const hasEnoughProgressHistory = progressWeeks.filter(w => w.avg !== null).length >= 2;
+
+  const techniqueLabel = (t) => ({ fingerstyle: 'Fingerstyle', rythmique: 'Rythmique', 'les deux': 'Les deux' }[t] || t);
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="relative bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] border border-gray-700 shadow-2xl flex flex-col">
+      <div ref={scrollRef} className="overflow-y-auto rounded-lg">
+        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-start gap-2 z-10">
+          <div>
+            <h2 className="font-bold text-amber-400 text-lg">📊 Journal</h2>
+            <p className="text-[11px] text-gray-500 mt-0.5">Ton carnet de suivi — temps passé, styles joués, tendances. Pas un planning, juste ta progression au fil de l'envie.</p>
+          </div>
+          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded flex-shrink-0">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-5">
+          <div className="flex gap-1">
+            {JOURNAL_WINDOWS.map(w => (
+              <button
+                key={w.key}
+                onClick={() => setWindowKey(w.key)}
+                className={`flex-1 px-2 py-1.5 rounded text-xs font-semibold transition ${windowKey === w.key ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+              >
+                {w.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+              <div className="text-[10px] text-gray-400">⏱️ Temps</div>
+              <div className="text-lg font-bold text-sky-400">{formatDuration(totalSec)}</div>
+            </div>
+            <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+              <div className="text-[10px] text-gray-400">🎯 Sessions</div>
+              <div className="text-lg font-bold text-amber-400">{sessionCount}</div>
+            </div>
+            <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+              <div className="text-[10px] text-gray-400">🎸 Morceaux</div>
+              <div className="text-lg font-bold text-green-400">{distinctSongsCount}</div>
+            </div>
+            <div className="bg-gray-750 rounded-lg p-2.5 border border-gray-700 text-center">
+              <div className="text-[10px] text-gray-400">🔥 Série</div>
+              <div className="text-lg font-bold text-purple-400">{streak} j</div>
+            </div>
+          </div>
+
+          {windowKey === '7' && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-gray-400">Objectif hebdomadaire</span>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    min={1}
+                    max={2000}
+                    value={weeklyGoalMinutes}
+                    onChange={(e) => onUpdateWeeklyGoal?.(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    className="w-16 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs text-right focus:outline-none focus:border-amber-500"
+                  />
+                  <span className="text-xs text-gray-400">min</span>
+                </div>
+              </div>
+              <div className="w-full bg-gray-700 rounded-full h-2">
+                <div className="bg-amber-500 h-full rounded-full transition-all" style={{ width: `${Math.min(100, Math.round((totalSec / 60) / Math.max(1, weeklyGoalMinutes) * 100))}%` }} />
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1">{Math.round(totalSec / 60)} / {weeklyGoalMinutes} min cette semaine</p>
+            </div>
+          )}
+
+          {barBuckets.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-400 mb-2">
+                {windowKey === 'all' ? 'Minutes par semaine' : windowKey === '30' ? 'Minutes par jour (30 derniers jours)' : 'Minutes par jour (7 derniers jours)'}
+              </p>
+              <div className="flex items-end gap-0.5 h-20">
+                {barBuckets.map((b, i) => (
+                  <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1 min-w-0">
+                    <div
+                      className="w-full bg-amber-600 rounded-t"
+                      style={{ height: `${Math.max(2, (b.minutes / maxBar) * 100)}%` }}
+                      title={`${b.minutes} min`}
+                    />
+                    {barBuckets.length <= 12 && <span className="text-[8px] text-gray-500 truncate w-full text-center">{b.label}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <p className="text-xs text-gray-400 mb-2">📈 Évolution de la maîtrise</p>
+            {hasEnoughProgressHistory ? (
+              <div className="flex items-end gap-1 h-16">
+                {progressWeeks.map((w, i) => (
+                  <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1">
+                    <div
+                      className="w-full rounded-t"
+                      style={{
+                        height: w.avg !== null ? `${Math.max(4, w.avg)}%` : '2%',
+                        backgroundColor: w.avg !== null ? progressToRoadmapColor(w.avg) : '#374151',
+                      }}
+                      title={w.avg !== null ? `${w.avg}% en moyenne cette semaine-là` : 'Pas de mise à jour cette semaine-là'}
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500 italic bg-gray-750 rounded-lg p-3 border border-gray-700">
+                Le suivi vient de démarrer — chaque fois que tu ajustes la maîtrise d'un morceau, ça s'enregistre ici. Reviens dans quelques semaines pour voir la tendance se dessiner. 🌱
+              </p>
+            )}
+          </div>
+
+          {styleRanking.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-400 mb-2">🎨 Styles les plus joués</p>
+              <div className="space-y-1.5">
+                {styleRanking.map(([style, sec]) => (
+                  <div key={style} className="flex items-center gap-2">
+                    <span className="text-xs w-24 truncate flex-shrink-0">{styleIcon(style) || '🎵'} {style}</span>
+                    <div className="flex-1 bg-gray-700 rounded-full h-2.5 overflow-hidden">
+                      <div className="bg-sky-500 h-full rounded-full" style={{ width: `${(sec / maxRankSec) * 100}%` }} />
+                    </div>
+                    <span className="text-[10px] text-gray-400 w-12 text-right flex-shrink-0">{formatDuration(sec)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {techniqueRanking.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-400 mb-2">✋ Techniques pratiquées</p>
+              <div className="space-y-1.5">
+                {techniqueRanking.map(([tech, sec]) => (
+                  <div key={tech} className="flex items-center gap-2">
+                    <span className="text-xs w-24 truncate flex-shrink-0">{techniqueLabel(tech)}</span>
+                    <div className="flex-1 bg-gray-700 rounded-full h-2.5 overflow-hidden">
+                      <div className="bg-purple-500 h-full rounded-full" style={{ width: `${(sec / maxRankSec) * 100}%` }} />
+                    </div>
+                    <span className="text-[10px] text-gray-400 w-12 text-right flex-shrink-0">{formatDuration(sec)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {topSongs.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-400 mb-2">🏆 Morceaux les plus pratiqués</p>
+              <div className="space-y-1.5">
+                {topSongs.map(({ song, sec }) => (
+                  <button
+                    key={song.id}
+                    onClick={() => { onSelectSong?.(song.id); onClose?.(); }}
+                    className="w-full flex items-center gap-2 bg-gray-750 hover:bg-gray-700 rounded-lg px-2.5 py-1.5 transition text-left"
+                  >
+                    <PickIcon difficulty={song.difficulty} size={12} className="flex-shrink-0" />
+                    <span className="text-xs flex-1 min-w-0 truncate">{song.title}</span>
+                    <div className="w-16 bg-gray-700 rounded-full h-1.5 flex-shrink-0">
+                      <div className="bg-amber-500 h-full rounded-full" style={{ width: `${(sec / maxSongSec) * 100}%` }} />
+                    </div>
+                    <span className="text-[10px] text-gray-400 w-12 text-right flex-shrink-0">{formatDuration(sec)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {sessionCount === 0 && (
+            <p className="text-center text-gray-500 py-6 text-sm">Aucune session de pratique sur cette période.</p>
+          )}
+        </div>
+      </div>
+      <QuickScrollButtons scrollRef={scrollRef} />
+      </div>
+    </div>
+  );
+}
+
+function SessionSetupModal({ songs, onStart, onCancel }) {
+  const [order, setOrder] = useState(() => songs.map(s => s.id));
+  const orderedSongs = order.map(id => songs.find(s => s.id === id)).filter(Boolean);
+
+  const move = (index, dir) => {
+    const target = index + dir;
+    if (target < 0 || target >= order.length) return;
+    const next = [...order];
+    [next[index], next[target]] = [next[target], next[index]];
+    setOrder(next);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-800 rounded-lg max-w-sm w-full max-h-[80vh] overflow-y-auto border border-gray-700 shadow-2xl">
+        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-center">
+          <h3 className="font-bold text-amber-400 text-sm">🎯 Session du jour</h3>
+          <button onClick={onCancel} className="p-1 hover:bg-gray-700 rounded">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="p-4">
+          <p className="text-xs text-gray-400 mb-3">Réordonne si besoin, puis lance : chaque morceau démarre son chrono automatiquement.</p>
+          <div className="space-y-1.5">
+            {orderedSongs.map((s, i) => (
+              <div key={s.id} className="flex items-center gap-2 bg-gray-750 border border-gray-600 rounded px-2 py-1.5">
+                <span className="text-xs text-gray-500 w-4 text-center flex-shrink-0">{i + 1}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold truncate">{s.title}</div>
+                  <div className="text-[10px] text-gray-400 truncate">{s.artist}</div>
+                </div>
+                <button onClick={() => move(i, -1)} disabled={i === 0} className="p-1 hover:bg-gray-600 rounded disabled:opacity-30 flex-shrink-0" title="Monter">
+                  <ArrowUp className="w-3 h-3" />
+                </button>
+                <button onClick={() => move(i, 1)} disabled={i === order.length - 1} className="p-1 hover:bg-gray-600 rounded disabled:opacity-30 flex-shrink-0" title="Descendre">
+                  <ArrowDown className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="p-4 border-t border-gray-700 flex gap-2 sticky bottom-0 bg-gray-800">
+          <button onClick={() => onStart(order)} className="flex-1 px-3 py-2 bg-indigo-600 hover:bg-indigo-500 rounded font-semibold transition text-sm">
+            ▶️ Commencer
+          </button>
+          <button onClick={onCancel} className="flex-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded font-semibold transition text-sm">
+            ✕ Annuler
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Feuille de route visible : montre où tu en es et où tu vas (en cours / maîtrisés / prochains défis)
+function Roadmap({ songs, onSelectSong }) {
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  // Morceaux en cours : pratiqués récemment, pas encore maîtrisés
+  const inProgress = songs.filter(s => {
+    if (!s.lastPracticedAt) return false;
+    const lastDate = new Date(s.lastPracticedAt);
+    const isRecent = lastDate >= sevenDaysAgo;
+    const notMastered = getDifficulty(s) !== 'hard'; // Simplifié : hard = maîtrisé
+    return isRecent && notMastered;
+  }).slice(0, 3);
+
+  // Morceaux maîtrisés : difficulty hard OU beaucoup de sessions
+  const mastered = songs.filter(s => {
+    if (!s.lastPracticedAt) return false;
+    const diff = getDifficulty(s);
+    const sessionCount = (s.practiceSessions || []).length;
+    return diff === 'hard' || sessionCount >= 5;
+  }).slice(0, 3);
+
+  // Prochains défis : non-maîtrisés, non-en-cours, triés par difficulté croissante
+  const inProgressIds = new Set(inProgress.map(s => s.id));
+  const masteredIds = new Set(mastered.map(s => s.id));
+  const nextChallenges = songs
+    .filter(s => !inProgressIds.has(s.id) && !masteredIds.has(s.id))
+    .sort((a, b) => {
+      const diffOrder = { easy: 0, medium: 1, hard: 2 };
+      const da = diffOrder[getDifficulty(a)] || 0;
+      const db = diffOrder[getDifficulty(b)] || 0;
+      return da - db;
+    })
+    .slice(0, 5);
+
+  const diffColor = (diff) => {
+    const colors = { easy: 'text-green-400', medium: 'text-amber-400', hard: 'text-red-400' };
+    return colors[diff] || 'text-gray-400';
+  };
+
+  return (
+    <div className="p-4 border-t border-gray-700">
+      <p className="text-xs text-gray-500 uppercase tracking-wide mb-3">🗺️ Feuille de route</p>
+
+      {inProgress.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[10px] text-gray-400 mb-1">En cours</p>
+          <div className="space-y-0.5">
+            {inProgress.map(s => (
+              <button
+                key={s.id}
+                onClick={() => onSelectSong?.(s.id)}
+                className="w-full text-left px-2 py-1 bg-amber-900/30 hover:bg-amber-900/50 rounded text-xs truncate transition"
+              >
+                {s.title}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {mastered.length > 0 && (
+        <div className="mb-3">
+          <p className="text-[10px] text-gray-400 mb-1">Maîtrisés ✓</p>
+          <div className="space-y-0.5">
+            {mastered.map(s => (
+              <button
+                key={s.id}
+                onClick={() => onSelectSong?.(s.id)}
+                className="w-full text-left px-2 py-1 bg-green-900/30 hover:bg-green-900/50 rounded text-xs truncate transition text-green-300"
+              >
+                {s.title}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {nextChallenges.length > 0 && (
+        <div>
+          <p className="text-[10px] text-gray-400 mb-1">Prochains défis</p>
+          <div className="space-y-0.5">
+            {nextChallenges.map(s => (
+              <button
+                key={s.id}
+                onClick={() => onSelectSong?.(s.id)}
+                className="w-full text-left px-2 py-1 bg-gray-750 hover:bg-gray-700 rounded text-xs truncate transition flex items-center justify-between"
+              >
+                <span>{s.title}</span>
+                <span className={`text-[9px] font-semibold ml-1 flex-shrink-0 ${diffColor(getDifficulty(s))}`}>
+                  {getDifficulty(s)[0].toUpperCase()}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {inProgress.length === 0 && mastered.length === 0 && nextChallenges.length === 0 && (
+        <p className="text-[10px] text-gray-500 italic">Ajoute des morceaux pour voir ta feuille de route</p>
+      )}
+    </div>
+  );
+}
+
+function StorageManager() {
+  const [estimate, setEstimate] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState(null); // { type: 'ok' | 'error', text }
+
+  const refreshEstimate = async () => {
+    setLoading(true);
+    try {
+      const est = await window.storage.estimate?.();
+      setEstimate(est);
+    } catch (e) {
+      setEstimate(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { refreshEstimate(); }, []);
+
+  const formatSize = (bytes) => {
+    if (bytes == null) return '?';
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} Ko`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+  };
+
+  const pct = estimate?.quota ? Math.min(100, Math.round((estimate.usage / estimate.quota) * 100)) : null;
+  const barColor = pct === null ? 'bg-gray-500' : pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-green-500';
+
+  const handleExport = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const payload = await window.storage.exportBackup();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `guitar-lab-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      setMessage({ type: 'ok', text: 'Exporté — choisis « Enregistrer dans Fichiers » → iCloud Drive' });
+    } catch (e) {
+      setMessage({ type: 'error', text: "Échec de l'export : " + (e.message || e) });
+    } finally {
+      setBusy(false);
+      refreshEstimate();
+    }
+  };
+
+  const RECOVERY_KEY = 'pre-import-backup';
+  const [hasRecovery, setHasRecovery] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await window.storage.get(RECOVERY_KEY, false);
+        setHasRecovery(!!r?.value);
+      } catch (err) { /* pas de copie de sécurité */ }
+    })();
+  }, []);
+
+  const handleImportFile = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!window.confirm("Importer ce fichier remplacera tes données actuelles (morceaux, préférences...) par celles du fichier.\n\nL'état actuel sera d'abord sauvegardé automatiquement, au cas où. Continuer ?")) return;
+    setBusy(true);
+    setMessage(null);
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const payload = JSON.parse(ev.target.result);
+        // Filet de sécurité : on garde une copie de l'état actuel avant d'écraser quoi que ce soit
+        try {
+          const currentSnapshot = await window.storage.exportBackup();
+          await window.storage.set(RECOVERY_KEY, JSON.stringify(currentSnapshot), false);
+        } catch (snapErr) { /* si la copie de sécurité échoue, on tente quand même l'import */ }
+        await window.storage.importBackup(payload);
+        setMessage({ type: 'ok', text: 'Données importées, rechargement…' });
+        setTimeout(() => location.reload(), 600);
+      } catch (err) {
+        setMessage({ type: 'error', text: err.message || String(err) });
+        setBusy(false);
+      }
+    };
+    reader.onerror = () => {
+      setMessage({ type: 'error', text: 'Impossible de lire ce fichier.' });
+      setBusy(false);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleRestoreRecovery = async () => {
+    if (!window.confirm("Restaurer l'état d'avant le dernier import ? Ce qui a été importé depuis sera perdu.")) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const r = await window.storage.get(RECOVERY_KEY, false);
+      if (!r?.value) throw new Error('Aucune copie de sécurité trouvée.');
+      const snapshot = JSON.parse(r.value);
+      await window.storage.importBackup(snapshot);
+      setMessage({ type: 'ok', text: 'État restauré, rechargement…' });
+      setTimeout(() => location.reload(), 600);
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message || String(err) });
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs text-gray-500">Espace utilisé</span>
+        <button onClick={refreshEstimate} className="text-[10px] text-gray-500 hover:text-gray-300 px-1" title="Actualiser">↻</button>
+      </div>
+
+      {loading ? (
+        <p className="text-[11px] text-gray-500 mb-2">Calcul en cours…</p>
+      ) : estimate?.quota ? (
+        <>
+          <div className="w-full bg-gray-700 rounded-full h-1.5 mb-1">
+            <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${pct}%` }} />
+          </div>
+          <p className="text-[10px] text-gray-500 mb-2">{formatSize(estimate.usage)} / {formatSize(estimate.quota)} ({pct}%)</p>
+        </>
+      ) : (
+        <p className="text-[11px] text-gray-500 mb-2">Estimation indisponible sur ce navigateur.</p>
+      )}
+
+      <div className="flex gap-1">
+        <button onClick={handleExport} disabled={busy} className="flex-1 px-2 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded text-xs font-semibold transition">
+          ☁️ Exporter
+        </button>
+        <label className={`flex-1 px-2 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold transition text-center cursor-pointer ${busy ? 'opacity-50 pointer-events-none' : ''}`}>
+          📂 Importer
+          <input type="file" accept="application/json,.json" onChange={handleImportFile} className="hidden" />
+        </label>
+      </div>
+
+      {hasRecovery && (
+        <button
+          onClick={handleRestoreRecovery}
+          disabled={busy}
+          className="w-full mt-1.5 px-2 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded text-[11px] font-semibold transition text-gray-300"
+          title="Revenir à l'état d'avant le dernier import de sauvegarde"
+        >
+          ↩️ Annuler le dernier import
+        </button>
+      )}
+
+      {message && (
+        <p className={`text-[10px] mt-2 ${message.type === 'error' ? 'text-red-400' : 'text-green-400'}`}>{message.text}</p>
       )}
     </div>
   );
@@ -3839,33 +6447,73 @@ function ClassificationManager({ options, onAdd, onRemove }) {
   );
 }
 
-function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUpdate, viewMode, classificationOptions = [], onAddClassificationOption }) {
+// Mémorisé : avec 90+ morceaux (et leurs photos), une frappe dans un champ ne doit pas faire
+// re-rendre toute la bibliothèque — seul l'élément dont les données ont réellement changé se met à jour
+const SongItem = React.memo(function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onToggleSetlist, onUpdate, viewMode, classificationOptions = [], onAddClassificationOption }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState(song);
+  const [coverError, setCoverError] = useState(false);
+
+  useEffect(() => { setCoverError(false); }, [song.imageUrl]);
 
   const saveEdit = () => {
     onUpdate(editData);
     setIsEditing(false);
   };
 
+  const CoverThumb = ({ size }) => {
+    const dim = size === 'sm' ? 'w-9 h-9' : size === 'md' ? 'w-full aspect-square' : 'w-14 h-14';
+    if (song.imageUrl && !coverError) {
+      return (
+        <img
+          src={song.imageUrl}
+          alt=""
+          onError={() => setCoverError(true)}
+          className={`${dim} object-cover rounded-md border border-gray-600 bg-gray-800 flex-shrink-0`}
+        />
+      );
+    }
+    return (
+      <div className={`${dim} rounded-md border border-gray-600 bg-gray-800 flex items-center justify-center flex-shrink-0 text-gray-600`}>
+        <Music className={size === 'sm' ? 'w-4 h-4' : 'w-6 h-6'} />
+      </div>
+    );
+  };
+
   if (viewMode === 'tiles') {
     return (
       <>
         <div
-          onClick={onSelect}
+          onClick={() => onSelect(song.id)}
           className={`relative p-2 rounded-lg border transition cursor-pointer overflow-hidden ${
             isSelected ? 'border-amber-500 bg-amber-500/15' : 'border-gray-600 bg-gray-750 hover:bg-gray-700'
           }`}
         >
+          <div className="mb-1.5">
+            <CoverThumb size="md" />
+          </div>
           <div className="flex items-start justify-between gap-1 mb-1">
             <button
-              onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
+              onClick={(e) => { e.stopPropagation(); onToggleFavorite(song.id); }}
               className="hover:opacity-75 transition flex-shrink-0"
             >
               <Star className={`w-3.5 h-3.5 ${song.isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-500'}`} />
             </button>
             <button
-              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              onClick={(e) => { e.stopPropagation(); onToggleSetlist(song.id); }}
+              className="hover:opacity-75 transition flex-shrink-0"
+              title="Sélectionner pour une soirée"
+            >
+              <span className={song.isSetlist ? 'opacity-100' : 'opacity-30 grayscale'}>🎉</span>
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
+              className="p-0.5 hover:bg-gray-600 rounded transition flex-shrink-0"
+            >
+              <Edit2 className="w-3 h-3 text-amber-400" />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onDelete(song.id); }}
               className="p-0.5 hover:bg-red-900 rounded transition flex-shrink-0"
             >
               <Trash2 className="w-3 h-3 text-red-400" />
@@ -3902,11 +6550,15 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
     return (
       <>
       <div className={`flex items-center gap-2 px-3 py-2 rounded transition ${isSelected ? 'bg-amber-600 text-white' : 'bg-gray-700 hover:bg-gray-650 text-gray-100'}`}>
-        <button onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }} className="hover:opacity-75">
+        <button onClick={(e) => { e.stopPropagation(); onToggleFavorite(song.id); }} className="hover:opacity-75">
           <Star className={`w-4 h-4 ${song.isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-400'}`} />
         </button>
+        <button onClick={(e) => { e.stopPropagation(); onToggleSetlist(song.id); }} className="hover:opacity-75" title="Sélectionner pour une soirée">
+          <span className={song.isSetlist ? 'opacity-100' : 'opacity-30 grayscale'}>🎉</span>
+        </button>
+        <CoverThumb size="sm" />
         <DifficultyPick difficulty={song.difficulty} size={14} onChange={(d) => onUpdate({ ...song, difficulty: d })} />
-        <div className="flex-1 min-w-0 cursor-pointer" onClick={onSelect}>
+        <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onSelect(song.id)}>
           <div className="text-sm font-semibold truncate">{song.title}</div>
           <div className="text-xs text-gray-300 truncate">{song.artist}</div>
         </div>
@@ -3919,7 +6571,7 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
         <button onClick={(e) => { e.stopPropagation(); setIsEditing(true); }} className="p-1 hover:bg-gray-600 rounded text-xs">
           ✏️
         </button>
-        <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-1 hover:bg-red-600 rounded text-xs">
+        <button onClick={(e) => { e.stopPropagation(); onDelete(song.id); }} className="p-1 hover:bg-red-600 rounded text-xs">
           🗑️
         </button>
       </div>
@@ -3940,27 +6592,37 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
   return (
     <>
       <div
-        onClick={onSelect}
+        onClick={() => onSelect(song.id)}
         className={`p-4 rounded-lg border-2 transition cursor-pointer ${
           isSelected ? 'border-amber-500 bg-amber-500/10' : 'border-gray-600 bg-gray-750 hover:bg-gray-700'
         }`}
       >
         <div className="flex items-start justify-between gap-3 mb-2">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleFavorite();
-                }}
-                className="hover:opacity-75 transition flex-shrink-0"
-              >
-                <Star className={`w-4 h-4 ${song.isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-500'}`} />
-              </button>
-              <DifficultyPick difficulty={song.difficulty} size={15} onChange={(d) => onUpdate({ ...song, difficulty: d })} />
-              <h3 className="font-bold truncate text-sm">{song.title}</h3>
+          <div className="flex items-start gap-3 flex-1 min-w-0">
+            <CoverThumb size="lg" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleFavorite(song.id);
+                  }}
+                  className="hover:opacity-75 transition flex-shrink-0"
+                >
+                  <Star className={`w-4 h-4 ${song.isFavorite ? 'fill-yellow-400 text-yellow-400' : 'text-gray-500'}`} />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onToggleSetlist(song.id); }}
+                  className="hover:opacity-75 transition flex-shrink-0"
+                  title="Sélectionner pour une soirée"
+                >
+                  <span className={song.isSetlist ? 'opacity-100' : 'opacity-30 grayscale'}>🎉</span>
+                </button>
+                <DifficultyPick difficulty={song.difficulty} size={15} onChange={(d) => onUpdate({ ...song, difficulty: d })} />
+                <h3 className="font-bold truncate text-sm">{song.title}</h3>
+              </div>
+              <p className="text-xs text-gray-400 truncate">{song.artist}</p>
             </div>
-            <p className="text-xs text-gray-400 truncate">{song.artist}</p>
           </div>
           <div className="flex gap-1 flex-shrink-0">
             <button
@@ -3975,7 +6637,7 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onDelete();
+                onDelete(song.id);
               }}
               className="p-2 hover:bg-red-900 rounded transition"
             >
@@ -4032,7 +6694,7 @@ function SongItem({ song, isSelected, onSelect, onDelete, onToggleFavorite, onUp
       )}
     </>
   );
-}
+});
 
 // Suggère des mots-clés à partir des informations du morceau (aide "IA" locale, sans réseau)
 function suggestKeywords(song) {
@@ -4056,10 +6718,190 @@ function suggestKeywords(song) {
   return out.filter(t => !(song.tags || []).includes(t)).slice(0, 8);
 }
 
+// ============================================
+// 🎵 EXTRACTION YOUTUBE METADATA
+// ============================================
+const extractYouTubeMetadata = (title) => {
+  if (!title || typeof title !== 'string') {
+    return { title: '', artist: '', language: 'FR', style: '', bpm: 120 };
+  }
+  const normalizeText = (str) => str?.trim?.() || '';
+  let extracted = { title: '', artist: '', language: 'FR', style: '', bpm: 120 };
+  const patterns = [
+    { regex: /^(.+?)\s*[-–—]\s*(.+?)\s*(?:\[.+?\])*$/i, groups: ['artist', 'title'] },
+    { regex: /^(.+?)\s*\|\s*(.+?)$/i, groups: ['title', 'artist'] },
+    { regex: /^(.+?)\s+by\s+(.+?)$/i, groups: ['title', 'artist'] },
+  ];
+  let matched = false;
+  for (const { regex, groups } of patterns) {
+    const match = title.match(regex);
+    if (match) {
+      extracted.artist = normalizeText(match[groups.indexOf('artist') + 1] || '');
+      extracted.title = normalizeText(match[groups.indexOf('title') + 1] || '');
+      matched = true;
+      break;
+    }
+  }
+  if (!matched) extracted.title = normalizeText(title);
+  ['[Tutorial]', '[Guitar Tutorial]', '[Lesson]', '[Guitare]', '[Tuto]', '[Cover]', '[Live]'].forEach(artifact => {
+    extracted.title = extracted.title.replace(new RegExp(artifact, 'gi'), '').trim();
+    extracted.artist = extracted.artist.replace(new RegExp(artifact, 'gi'), '').trim();
+  });
+  if (/[àâäéèêëïîôùûüœç]/i.test(extracted.title + extracted.artist)) {
+    extracted.language = 'FR';
+  } else {
+    extracted.language = 'EN';
+  }
+  const styleKeywords = ['rock', 'blues', 'jazz', 'pop', 'folk', 'country', 'metal', 'funk', 'latin', 'reggae'];
+  const lowerTitle = (extracted.title + ' ' + extracted.artist).toLowerCase();
+  for (const keyword of styleKeywords) {
+    if (lowerTitle.includes(keyword)) {
+      extracted.style = keyword.charAt(0).toUpperCase() + keyword.slice(1);
+      break;
+    }
+  }
+  const bpmMatch = title.match(/(\d{2,3})\s*bpm/i);
+  if (bpmMatch) {
+    extracted.bpm = Math.max(40, Math.min(300, parseInt(bpmMatch[1]) || 120));
+  }
+  return extracted;
+};
+
+// Modale de feedback de fin de séance
+function SessionFeedbackModal({ songTitle, currentProgress, onFeedback, onCancel }) {
+  const [feedbackType, setFeedbackType] = useState('progressed');
+  const [adjustedProgress, setAdjustedProgress] = useState(currentProgress || 0);
+
+  const handleFeedback = () => {
+    let newProgress = currentProgress || 0;
+    if (feedbackType === 'progressed-1') newProgress = Math.min(100, newProgress + 1);
+    else if (feedbackType === 'progressed-2') newProgress = Math.min(100, newProgress + 2);
+    else if (feedbackType === 'progressed-5') newProgress = Math.min(100, newProgress + 5);
+    else if (feedbackType === 'no-progress') newProgress = currentProgress || 0;
+    else if (feedbackType === 'adjust') newProgress = adjustedProgress;
+
+    onFeedback(newProgress);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-800 rounded-lg max-w-sm w-full border border-gray-700 shadow-2xl">
+        <div className="p-4 border-b border-gray-700">
+          <h3 className="font-bold text-amber-400">📊 Fin de séance : {songTitle}</h3>
+          <p className="text-xs text-gray-400 mt-1">Quel est ton ressenti ?</p>
+        </div>
+        <div className="p-4 space-y-3">
+          <label className="flex items-center gap-2 p-2 rounded cursor-pointer hover:bg-gray-750">
+            <input type="radio" name="feedback" value="progressed-1" checked={feedbackType === 'progressed-1'} onChange={(e) => setFeedbackType(e.target.value)} className="accent-green-500" />
+            <span className="text-sm">✅ J'ai progressé (+1%)</span>
+          </label>
+          <label className="flex items-center gap-2 p-2 rounded cursor-pointer hover:bg-gray-750">
+            <input type="radio" name="feedback" value="progressed-2" checked={feedbackType === 'progressed-2'} onChange={(e) => setFeedbackType(e.target.value)} className="accent-green-500" />
+            <span className="text-sm">✅ J'ai bien progressé (+2%)</span>
+          </label>
+          <label className="flex items-center gap-2 p-2 rounded cursor-pointer hover:bg-gray-750">
+            <input type="radio" name="feedback" value="progressed-5" checked={feedbackType === 'progressed-5'} onChange={(e) => setFeedbackType(e.target.value)} className="accent-green-500" />
+            <span className="text-sm">🚀 Vraiment progressé (+5%)</span>
+          </label>
+          <label className="flex items-center gap-2 p-2 rounded cursor-pointer hover:bg-gray-750">
+            <input type="radio" name="feedback" value="no-progress" checked={feedbackType === 'no-progress'} onChange={(e) => setFeedbackType(e.target.value)} className="accent-amber-500" />
+            <span className="text-sm">😐 Pas de progrès aujourd'hui</span>
+          </label>
+          <div className="border-t border-gray-700 pt-3">
+            <label className="flex items-center gap-2 p-2 rounded cursor-pointer hover:bg-gray-750">
+              <input type="radio" name="feedback" value="adjust" checked={feedbackType === 'adjust'} onChange={(e) => setFeedbackType(e.target.value)} className="accent-orange-500" />
+              <span className="text-sm">🎯 Mon % est mal réglé</span>
+            </label>
+            {feedbackType === 'adjust' && (
+              <div className="mt-2 ml-6 space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-gray-400">Nouvelle maîtrise</span>
+                  <span className="text-sm font-bold text-amber-400">{adjustedProgress}%</span>
+                </div>
+                <input type="range" min="0" max="100" step="5" value={adjustedProgress} onChange={(e) => setAdjustedProgress(parseInt(e.target.value))} className="w-full accent-orange-500" />
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="p-3 border-t border-gray-700 flex gap-2">
+          <button onClick={onCancel} className="flex-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm font-semibold transition">Annuler</button>
+          <button onClick={handleFeedback} className="flex-1 px-3 py-2 bg-green-600 hover:bg-green-500 rounded text-sm font-semibold transition text-white">✅ Enregistrer</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Modale de review YouTube
+function YouTubeImportReviewModal({ metadata, youtubeUrl, onConfirm, onCancel }) {
+  const [reviewed, setReviewed] = useState(metadata);
+  const handleConfirm = () => {
+    if (!reviewed.title.trim()) {
+      alert('⚠️ Le titre ne peut pas être vide');
+      return;
+    }
+    onConfirm({ ...reviewed, youtubeUrl });
+  };
+  const inputCls = 'w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500 text-white';
+  const labelCls = 'text-xs text-gray-400 block mb-1';
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-800 rounded-lg max-w-sm w-full border border-gray-700 shadow-2xl">
+        <div className="p-4 border-b border-gray-700 flex justify-between items-center">
+          <h3 className="font-bold text-amber-400">🔗 Importer depuis YouTube</h3>
+          <button onClick={onCancel} className="p-1 hover:bg-gray-700 rounded text-sm">✕</button>
+        </div>
+        <div className="p-4 space-y-3 max-h-[60vh] overflow-y-auto">
+          <div className="bg-gray-750 px-3 py-2 rounded border border-gray-600 text-xs text-gray-300 break-all">
+            🎬 {youtubeUrl}
+          </div>
+          <div>
+            <label className={labelCls}>Titre *</label>
+            <input type="text" value={reviewed.title} onChange={(e) => setReviewed({ ...reviewed, title: e.target.value })} className={inputCls} placeholder="ex. Wonderwall" autoFocus />
+          </div>
+          <div>
+            <label className={labelCls}>Artiste</label>
+            <input type="text" value={reviewed.artist} onChange={(e) => setReviewed({ ...reviewed, artist: e.target.value })} className={inputCls} placeholder="ex. Oasis" />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className={labelCls}>Langue</label>
+              <select value={reviewed.language} onChange={(e) => setReviewed({ ...reviewed, language: e.target.value })} className={inputCls}>
+                <option value="FR">🇫🇷 FR</option>
+                <option value="EN">🇬🇧 EN</option>
+                <option value="ES">🇪🇸 ES</option>
+                <option value="Instrumental">🎵 Instrumental</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Style</label>
+              <input type="text" value={reviewed.style} onChange={(e) => setReviewed({ ...reviewed, style: e.target.value })} className={inputCls} placeholder="ex. Rock" />
+            </div>
+          </div>
+          <div>
+            <label className={labelCls}>BPM</label>
+            <div className="flex gap-2">
+              <input type="number" value={reviewed.bpm} onChange={(e) => { const val = parseInt(e.target.value) || 120; setReviewed({ ...reviewed, bpm: Math.max(40, Math.min(300, val)) }); }} className={inputCls} min="40" max="300" step="5" />
+              <div className="text-xs text-gray-400 flex items-center">BPM</div>
+            </div>
+          </div>
+        </div>
+        <div className="p-3 border-t border-gray-700 flex gap-2">
+          <button onClick={onCancel} className="flex-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm font-semibold transition">Annuler</button>
+          <button onClick={handleConfirm} className="flex-1 px-3 py-2 bg-amber-600 hover:bg-amber-500 rounded text-sm font-semibold transition text-white">✅ Importer</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions = [], onAddClassificationOption, title = '✏️ Éditer' }) {
   const [newTag, setNewTag] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [newClassification, setNewClassification] = useState('');
+  const [youtubeImportUrl, setYoutubeImportUrl] = useState('');
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [pendingImportMetadata, setPendingImportMetadata] = useState(null);
 
   const tags = song.tags || [];
   const classifications = song.classifications || [];
@@ -4102,6 +6944,33 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
   const addLink = () => onChange({ ...song, youtubeUrls: [...links, { id: newId(), url: '' }] });
   const removeLink = (id) => onChange({ ...song, youtubeUrls: links.filter(l => l.id !== id) });
 
+  // Handlers pour l'import YouTube
+  const handleYouTubeImport = () => {
+    if (!youtubeImportUrl.trim()) {
+      alert('⚠️ Veuillez entrer une URL ou titre YouTube valide');
+      return;
+    }
+    const metadata = extractYouTubeMetadata(youtubeImportUrl);
+    setPendingImportMetadata(metadata);
+    setReviewOpen(true);
+  };
+
+  const handleImportConfirm = (importedData) => {
+    const { youtubeUrl, title, artist, language, style, bpm } = importedData;
+    onChange({
+      ...song,
+      title: title || song.title,
+      artist: artist || song.artist,
+      language: language || song.language,
+      style: style || song.style,
+      youtubeUrls: youtubeUrl ? [...links.filter(l => l.url !== youtubeUrl), { id: newId(), url: youtubeUrl }] : links,
+      versions: song.versions.map((v, i) => (i === 0 ? { ...v, bpm: bpm || v.bpm } : v)),
+    });
+    setYoutubeImportUrl('');
+    setReviewOpen(false);
+    setPendingImportMetadata(null);
+  };
+
   const inputCls = 'w-full px-2 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-amber-500';
 
   return (
@@ -4129,6 +6998,27 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
                   {DIFFICULTY_META[d].label}
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Import YouTube */}
+          <div className="bg-gray-750 px-3 py-2 rounded border border-amber-700/50">
+            <label className="text-xs text-gray-400 block mb-2">🔗 Importer depuis YouTube</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={youtubeImportUrl}
+                onChange={(e) => setYoutubeImportUrl(e.target.value)}
+                placeholder="ex. Oasis - Wonderwall [Tutorial]"
+                className={`${inputCls} flex-1`}
+                onKeyPress={(e) => e.key === 'Enter' && handleYouTubeImport()}
+              />
+              <button
+                onClick={handleYouTubeImport}
+                className="px-3 py-2 bg-amber-600 hover:bg-amber-500 rounded text-sm font-semibold transition text-white whitespace-nowrap"
+              >
+                📥 Importer
+              </button>
             </div>
           </div>
 
@@ -4174,13 +7064,44 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
             </div>
             <div>
               <label className="text-xs text-gray-400 block mb-1">Style</label>
-              <input
-                type="text"
-                value={song.style || ''}
-                placeholder="Rock français, Pop, Blues…"
-                onChange={(e) => onChange({ ...song, style: e.target.value })}
-                className={inputCls}
-              />
+              {!song.style || STYLE_OPTIONS.includes(song.style) ? (
+                <select
+                  value={song.style || ''}
+                  onChange={(e) => onChange({ ...song, style: e.target.value })}
+                  className={inputCls}
+                >
+                  <option value="">— Choisir un style…</option>
+                  {STYLE_OPTIONS.filter(s => s !== 'Autre (préciser)…').map(opt => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                  <option value="Autre (préciser)…">Autre (préciser)…</option>
+                </select>
+              ) : (
+                <select
+                  value="Autre (préciser)…"
+                  onChange={(e) => {
+                    if (e.target.value === '') onChange({ ...song, style: '' });
+                    else onChange({ ...song, style: e.target.value });
+                  }}
+                  className={inputCls}
+                >
+                  <option value="">— Choisir un style…</option>
+                  {STYLE_OPTIONS.filter(s => s !== 'Autre (préciser)…').map(opt => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                  <option value="Autre (préciser)…">Autre (préciser)…</option>
+                </select>
+              )}
+              {song.style === 'Autre (préciser)…' || (!STYLE_OPTIONS.includes(song.style) && song.style) ? (
+                <input
+                  type="text"
+                  value={song.style === 'Autre (préciser)…' ? '' : song.style || ''}
+                  placeholder="ex. Folk acidulé"
+                  onChange={(e) => onChange({ ...song, style: e.target.value })}
+                  className={inputCls + ' mt-2'}
+                  autoFocus
+                />
+              ) : null}
             </div>
           </div>
 
@@ -4378,6 +7299,19 @@ function SongEditModal({ song, onChange, onSave, onCancel, classificationOptions
           </button>
         </div>
       </div>
+
+      {/* Modale de review YouTube */}
+      {reviewOpen && pendingImportMetadata && (
+        <YouTubeImportReviewModal
+          metadata={pendingImportMetadata}
+          youtubeUrl={youtubeImportUrl}
+          onConfirm={handleImportConfirm}
+          onCancel={() => {
+            setReviewOpen(false);
+            setPendingImportMetadata(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -4463,10 +7397,337 @@ function ClassificationPicker({ song, options, onAddOption, onRemoveOption, onUp
   );
 }
 
-function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVersion, onUpdateSong, classificationOptions = [], onAddClassificationOption, onRemoveClassificationOption }) {
+// Sélecteur visuel du capodastre : grille de 0 (sans capo) à 12, en popover pour rester utilisable directement dans l'écran de travail
+function CapoPicker({ capo, onChange }) {
+  const [open, setOpen] = useState(false);
+  const value = capo || 0;
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 hover:text-amber-400 transition"
+        title="Régler le capodastre"
+      >
+        <span>Capo:</span>
+        <span className="font-bold text-amber-400">{value === 0 ? 'Aucun' : value}</span>
+        <ChevronDown className="w-3 h-3 text-gray-500" />
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-2xl p-2">
+            <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-1.5 text-center">Position du capo</p>
+            <div className="grid grid-cols-4 gap-1.5" style={{ width: 176 }}>
+              {Array.from({ length: 13 }, (_, i) => i).map(n => (
+                <button
+                  key={n}
+                  onClick={() => { onChange(n); setOpen(false); }}
+                  className={`w-9 h-9 rounded-lg text-sm font-bold flex items-center justify-center transition ${
+                    value === n ? 'bg-amber-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                  }`}
+                  title={n === 0 ? 'Sans capo' : `Capo case ${n}`}
+                >
+                  {n === 0 ? '—' : n}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Onglets de version : plusieurs versions d'un même morceau (accords/photos/notes/bpm/capo/clé propres à chacune),
+// affichés sous l'en-tête commun (titre, artiste, favoris, chrono, journal...). Nommage inline, ajout via l'onglet "+",
+// duplication et suppression disponibles sur l'onglet actif. N'affecte jamais les champs communs du morceau (song.*).
+function VersionTabsBar({ song, activeVersionId, onSelectVersion, onUpdateSong }) {
+  const versions = song.versions || [];
+  const [editingId, setEditingId] = useState(null);
+  const [editValue, setEditValue] = useState('');
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (editingId && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editingId]);
+
+  const startRename = (v) => {
+    setEditingId(v.id);
+    setEditValue(v.label || '');
+  };
+
+  const commitRename = () => {
+    const clean = editValue.trim();
+    if (editingId && clean) {
+      onUpdateSong({ ...song, versions: versions.map(v => (v.id === editingId ? { ...v, label: clean } : v)) });
+    }
+    setEditingId(null);
+  };
+
+  // Nouvelle version vierge (même structure de départ qu'à la création d'un morceau) : n'affecte jamais les autres versions
+  const addVersion = () => {
+    const stamp = Date.now().toString();
+    const newVersion = {
+      id: stamp + '-v',
+      label: `Version ${versions.length + 1}`,
+      bpm: 120,
+      capo: 0,
+      key: '',
+      structure: [{
+        id: stamp + '-s',
+        section: 'Intro',
+        cols: 4,
+        rows: 1,
+        rhythm: [],
+        cells: Array.from({ length: 4 }, (_, i) => ({ id: `${stamp}-${i}`, split: false, chord: '', top: '', bottom: '' })),
+      }],
+      images: [],
+      notes: '',
+      chordThumbnails: [],
+    };
+    onUpdateSong({ ...song, versions: [...versions, newVersion] });
+    onSelectVersion(newVersion.id);
+    startRename(newVersion);
+  };
+
+  // Duplique une version existante (accords, photos, notes, réglages) sous un nouvel id, sans jamais modifier l'originale
+  const duplicateVersion = (v) => {
+    const stamp = Date.now().toString();
+    const copy = {
+      ...v,
+      id: stamp + '-v',
+      label: `${v.label || 'Version'} (copie)`,
+      structure: (v.structure || []).map((s, si) => ({
+        ...s,
+        id: `${stamp}-s${si}`,
+        rhythm: (s.rhythm || []).map((r, ri) => ({ ...r, id: `${stamp}-s${si}-r${ri}` })),
+        cells: (s.cells || []).map((c, ci) => ({ ...c, id: `${stamp}-s${si}-c${ci}` })),
+      })),
+      images: (v.images || []).map((img, ii) => ({ ...img, id: `${stamp}-img${ii}` })),
+      chordThumbnails: (v.chordThumbnails || []).map((t, ti) => ({ ...t, id: `${stamp}-thumb${ti}` })),
+    };
+    onUpdateSong({ ...song, versions: [...versions, copy] });
+    onSelectVersion(copy.id);
+  };
+
+  const deleteVersion = (v) => {
+    if (versions.length <= 1) return; // toujours garder au moins une version
+    if (!window.confirm(`Supprimer la version « ${v.label || 'Sans nom'} » ? Cette action est définitive.`)) return;
+    const remaining = versions.filter(x => x.id !== v.id);
+    onUpdateSong({ ...song, versions: remaining });
+    if (activeVersionId === v.id) onSelectVersion(remaining[0]?.id);
+  };
+
+  return (
+    <div className="flex items-end gap-1 px-3 pt-2 bg-gray-850 border-b border-gray-700 overflow-x-auto flex-shrink-0">
+      {versions.map(v => {
+        const isActive = v.id === activeVersionId;
+        const isEditing = editingId === v.id;
+        return (
+          <div
+            key={v.id}
+            onClick={() => !isEditing && onSelectVersion(v.id)}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-t-lg text-xs font-semibold cursor-pointer transition flex-shrink-0 border border-b-0 ${
+              isActive ? 'bg-gray-900 text-amber-400 border-gray-700' : 'bg-gray-800 text-gray-400 hover:text-gray-200 border-transparent'
+            }`}
+          >
+            {isEditing ? (
+              <input
+                ref={inputRef}
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitRename();
+                  if (e.key === 'Escape') setEditingId(null);
+                }}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-gray-700 border border-amber-500 rounded px-1 py-0.5 text-xs w-24 focus:outline-none"
+              />
+            ) : (
+              <span className="truncate max-w-[120px]">{v.label || 'Sans nom'}</span>
+            )}
+            {isActive && !isEditing && (
+              <span className="flex items-center gap-0.5 flex-shrink-0">
+                <button
+                  onClick={(e) => { e.stopPropagation(); startRename(v); }}
+                  className="p-0.5 hover:bg-gray-700 rounded"
+                  title="Renommer cette version"
+                >
+                  <Edit2 className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); duplicateVersion(v); }}
+                  className="p-0.5 hover:bg-gray-700 rounded text-[10px] leading-none"
+                  title="Dupliquer cette version"
+                >
+                  ⧉
+                </button>
+                {versions.length > 1 && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deleteVersion(v); }}
+                    className="p-0.5 hover:bg-red-900 rounded text-red-400"
+                    title="Supprimer cette version"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </span>
+            )}
+          </div>
+        );
+      })}
+      <button
+        onClick={addVersion}
+        className="flex-shrink-0 px-3 py-1.5 rounded-t-lg text-sm font-bold text-gray-400 hover:text-amber-400 hover:bg-gray-800 transition"
+        title="Ajouter une nouvelle version du morceau"
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
+function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVersion, onUpdateSong, classificationOptions = [], onAddClassificationOption, onRemoveClassificationOption, practiceSessions = [], onLogPracticeSession, weeklyGoalMinutes = 120, onUpdateWeeklyGoal, sessionInfo = null, onSessionNext, onSessionEnd }) {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [focusMode, setFocusMode] = useState(false); // Masque les panneaux pour une concentration maximale
   const [performance, setPerformance] = useState(false);
+  const [videoMenuOpen, setVideoMenuOpen] = useState(false);
+  const [activeLink, setActiveLink] = useState(null);
+  const validYoutubeLinks = (song.youtubeUrls || [])
+    .map(l => ({ ...l, videoId: extractYoutubeId(l.url) }))
+    .filter(l => l.videoId);
+  const isSessionActive = !!sessionInfo;
+
+  const saveBookmark = (linkId, bookmarkData) => {
+    // bookmarkData peut être :
+    // - { seconds, name } : ajouter/créer un nouveau bookmark
+    // - { delete: bookmarkId } : supprimer un bookmark
+    onUpdateSong({
+      ...song,
+      youtubeUrls: (song.youtubeUrls || []).map(u => {
+        if (u.id !== linkId) return u;
+        const bookmarks = u.bookmarks || [];
+        if (bookmarkData.delete) {
+          return { ...u, bookmarks: bookmarks.filter(bm => bm.id !== bookmarkData.delete) };
+        } else {
+          // Ajouter ou remplacer un bookmark
+          const newBookmark = { id: newId(), seconds: bookmarkData.seconds, name: bookmarkData.name };
+          return { ...u, bookmarks: [newBookmark, ...bookmarks] };
+        }
+      }),
+    });
+  };
+
+  // Minuteur de pratique : chronomètre la session en cours sur ce morceau
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [timerSeconds, setTimerSeconds] = useState(0);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackSongData, setFeedbackSongData] = useState(null);
+  useEffect(() => {
+    if (!timerRunning) return;
+    const interval = setInterval(() => setTimerSeconds(s => s + 1), 1000);
+    return () => clearInterval(interval);
+  }, [timerRunning]);
+  // Arrête et remet à zéro le chrono si on change de morceau (démarre automatiquement en mode session)
+  useEffect(() => {
+    setTimerRunning(isSessionActive);
+    setTimerSeconds(0);
+  }, [song.id, isSessionActive]);
+  const formatTimer = (sec) => {
+    const m = Math.floor(sec / 60).toString().padStart(2, '0');
+    const s = (sec % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+  const stopAndLogTimer = () => {
+    setTimerRunning(false);
+    if (timerSeconds > 0) {
+      setFeedbackSongData({ 
+        id: song.id, 
+        title: song.title, 
+        duration: timerSeconds,
+        currentProgress: song.progress || 0
+      });
+      setFeedbackOpen(true);
+    }
+    setTimerSeconds(0);
+  };
+
+  const handleFeedbackSubmit = (newProgress) => {
+    if (feedbackSongData) {
+      // Enregistrer la session avec la nouvelle valeur de maîtrise
+      onLogPracticeSession?.(feedbackSongData.id, feedbackSongData.title, feedbackSongData.duration);
+      // Mettre à jour le progrès de la chanson
+      onUpdateSong({ ...song, progress: newProgress });
+    }
+    setFeedbackOpen(false);
+    setFeedbackSongData(null);
+  };
+
+  const goToNextInSession = () => {
+    stopAndLogTimer();
+    onSessionNext?.();
+  };
+
+  const endSession = () => {
+    stopAndLogTimer();
+    onSessionEnd?.();
+  };
+
+  // Largeurs des bandeaux latéraux, réglables par glisser, mémorisées d'une session à l'autre
+  const [leftPanelWidth, setLeftPanelWidth] = useState(224);
+  const [rightPanelWidth, setRightPanelWidth] = useState(320);
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await window.storage.get('guitar-lab:panel-widths', false);
+        if (result?.value) {
+          const p = JSON.parse(result.value);
+          if (p.left) setLeftPanelWidth(p.left);
+          if (p.right) setRightPanelWidth(p.right);
+        }
+      } catch (err) { /* pas de préférence enregistrée */ }
+    })();
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      window.storage.set('guitar-lab:panel-widths', JSON.stringify({ left: leftPanelWidth, right: rightPanelWidth }), false).catch(() => {});
+    }, 500);
+    return () => clearTimeout(t);
+  }, [leftPanelWidth, rightPanelWidth]);
+
+  const startResize = (side) => (e) => {
+    e.preventDefault();
+    const pointer = e.touches ? e.touches[0] : e;
+    const startX = pointer.clientX;
+    const startWidth = side === 'left' ? leftPanelWidth : rightPanelWidth;
+    const min = side === 'left' ? 180 : 260;
+    const max = side === 'left' ? 460 : 560;
+
+    const onMove = (ev) => {
+      const p = ev.touches ? ev.touches[0] : ev;
+      const delta = side === 'left' ? (p.clientX - startX) : (startX - p.clientX);
+      const next = Math.max(min, Math.min(max, startWidth + delta));
+      if (side === 'left') setLeftPanelWidth(next); else setRightPanelWidth(next);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onUp);
+  };
 
 
   // Mode compact (téléphone) : tous les panneaux en volets superposés
@@ -4496,6 +7757,38 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
   }, [isNarrow]);
 
 
+  // Ferme la vidéo active si on change de morceau
+  useEffect(() => {
+    setActiveLink(null);
+    setVideoMenuOpen(false);
+  }, [song.id]);
+
+  // Quitter le mode Focus avec ESC
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && focusMode) {
+        setFocusMode(false);
+      }
+    };
+    if (focusMode) {
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [focusMode]);
+
+  // En mode Focus, forcer le collapse des panneaux, puis restaurer leur état précédent en sortant
+  const panelStateBeforeFocusRef = useRef({ left: leftCollapsed, right: rightCollapsed });
+  useEffect(() => {
+    if (focusMode) {
+      panelStateBeforeFocusRef.current = { left: leftCollapsed, right: rightCollapsed };
+      setLeftCollapsed(true);
+      setRightCollapsed(true);
+    } else {
+      setLeftCollapsed(panelStateBeforeFocusRef.current.left);
+      setRightCollapsed(panelStateBeforeFocusRef.current.right);
+    }
+  }, [focusMode]);
+
   const updateVersion = (updates) => {
     const updatedSong = {
       ...song,
@@ -4504,19 +7797,45 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
     onUpdateSong(updatedSong);
   };
 
+  // Ajoute une ou plusieurs images (captures vidéo, imports...) à la galerie de la version en cours
+  const addImagesToVersion = (dataUrls) => {
+    if (!dataUrls || !dataUrls.length) return;
+    const added = dataUrls.map(src => ({ id: newId(), src, x: 0, y: 0, scale: 1 }));
+    updateVersion({ images: [...(version?.images || []), ...added] });
+  };
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="bg-gradient-to-r from-gray-800 to-gray-750 border-b border-gray-700 p-3 flex-shrink-0">
+        <div className="text-center mb-2 px-2">
+          <h2 className="text-base font-bold flex items-center justify-center gap-1.5 flex-wrap">
+            <DifficultyPick difficulty={song.difficulty} size={16} onChange={(d) => onUpdateSong({ ...song, difficulty: d })} />
+            <span className="break-words">{song.title}</span>
+          </h2>
+          <p className="text-xs text-gray-400 break-words">{song.artist}</p>
+        </div>
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <button
-              onClick={onBack}
+              onClick={() => { if (isSessionActive) endSession(); onBack(); }}
               className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded transition flex items-center gap-2 text-sm font-medium"
             >
               <ChevronLeft className="w-4 h-4" />
               Biblio
             </button>
-            {isCompact && (
+            {isSessionActive && (
+              <span className="px-2 py-1 bg-indigo-600/30 border border-indigo-500/40 text-indigo-200 rounded text-xs font-semibold whitespace-nowrap">
+                🎯 Session {sessionInfo.position}/{sessionInfo.total}
+              </span>
+            )}
+            <button
+              onClick={() => setFocusMode(!focusMode)}
+              className={`px-3 py-2 rounded transition flex items-center gap-1 text-sm font-medium ${focusMode ? 'bg-purple-600 pulse' : 'bg-gray-700 hover:bg-gray-600'}`}
+              title={focusMode ? 'Quitter le mode Focus (ESC)' : 'Mode Focus : masquer tout pour la concentration'}
+            >
+              {focusMode ? '🎯 Focus' : '◯ Focus'}
+            </button>
+            {isCompact && !focusMode && (
               <>
                 <button
                   onClick={() => setLeftCollapsed(!leftCollapsed)}
@@ -4536,43 +7855,180 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
             )}
           </div>
 
-          <div className="text-center flex-1 min-w-0">
-            <h2 className="text-base font-bold truncate flex items-center justify-center gap-1.5">
-              <DifficultyPick difficulty={song.difficulty} size={16} onChange={(d) => onUpdateSong({ ...song, difficulty: d })} />
-              <span className="truncate">{song.title}</span>
-            </h2>
-            <p className="text-xs text-gray-400 truncate">{song.artist}</p>
+          <div className={`flex items-center gap-2 ${focusMode ? 'bg-transparent border-0 p-0' : 'bg-gray-900 rounded p-2 border border-gray-700'} text-xs`}>
+            {!focusMode && (
+              <>
+                <span>♪ {version.bpm} BPM</span>
+                <span className="text-gray-500">•</span>
+              </>
+            )}
+            <CapoPicker capo={version.capo} onChange={(n) => updateVersion({ capo: n })} />
+            {!focusMode && (
+              <>
+                <span className="text-gray-500">•</span>
+                <span>{version.key}</span>
+              </>
+            )}
           </div>
 
-          <div className="flex items-center gap-2 bg-gray-900 rounded p-2 border border-gray-700 text-xs">
-            <span>♪ {version.bpm} BPM</span>
-            <span className="text-gray-500">•</span>
-            <span>Capo: {version.capo}</span>
-            <span className="text-gray-500">•</span>
-            <span>{version.key}</span>
+          {validYoutubeLinks.length > 0 && (
+            <div className="relative">
+              <button
+                onClick={() => {
+                  if (validYoutubeLinks.length === 1) {
+                    setActiveLink(activeLink ? null : validYoutubeLinks[0]);
+                  } else {
+                    setVideoMenuOpen(!videoMenuOpen);
+                  }
+                }}
+                className="px-3 py-2 bg-red-700 hover:bg-red-600 rounded transition text-sm font-semibold flex items-center gap-1"
+                title="Voir la vidéo YouTube"
+              >
+                ▶️ Vidéo{validYoutubeLinks.length > 1 ? ` (${validYoutubeLinks.length})` : ''}
+              </button>
+              {videoMenuOpen && validYoutubeLinks.length > 1 && (
+                <div className="absolute top-full mt-1 right-0 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-30 min-w-[220px] max-w-[320px] overflow-hidden">
+                  {validYoutubeLinks.map((l, i) => (
+                    <button
+                      key={l.id}
+                      onClick={() => { setActiveLink(l); setVideoMenuOpen(false); }}
+                      className="w-full text-left px-3 py-2 text-xs hover:bg-gray-700 transition flex items-center gap-2 border-b border-gray-700 last:border-0"
+                      title={l.url}
+                    >
+                      ▶️ <span className="truncate">{l.url}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center gap-1 bg-gray-900 rounded p-1 border border-gray-700">
+            <span className="text-xs font-mono w-12 text-center">{formatTimer(timerSeconds)}</span>
+            {!timerRunning ? (
+              <button
+                onClick={() => setTimerRunning(true)}
+                className="p-1.5 bg-green-700 hover:bg-green-600 rounded transition"
+                title={timerSeconds > 0 ? 'Reprendre le chrono' : 'Démarrer une session de pratique'}
+              >
+                ▶️
+              </button>
+            ) : (
+              <button
+                onClick={() => setTimerRunning(false)}
+                className="p-1.5 bg-amber-700 hover:bg-amber-600 rounded transition"
+                title="Mettre en pause"
+              >
+                ⏸️
+              </button>
+            )}
+            {timerSeconds > 0 && (
+              <button
+                onClick={stopAndLogTimer}
+                className="p-1.5 bg-red-700 hover:bg-red-600 rounded transition"
+                title="Arrêter et enregistrer la session"
+              >
+                ⏹️
+              </button>
+            )}
           </div>
 
-          <button
-            onClick={() => setPerformance(true)}
-            className="px-3 py-2 bg-amber-600 hover:bg-amber-500 rounded transition text-sm font-semibold flex items-center gap-1"
-            title="Mode prestation : plein écran, photos qui défilent"
-          >
-            🎤 Prestation
-          </button>
+          {!focusMode && (
+            <>
+              <button
+                onClick={() => setHistoryOpen(true)}
+                className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded transition text-sm font-semibold flex items-center gap-1"
+                title="Journal de pratique et progression"
+              >
+                📊 Journal
+              </button>
 
-          <ClassificationPicker
-            song={song}
-            options={classificationOptions}
-            onAddOption={onAddClassificationOption}
-            onRemoveOption={onRemoveClassificationOption}
-            onUpdateSong={onUpdateSong}
-          />
+              <button
+                onClick={() => onUpdateSong({ ...song, lastPracticedAt: new Date().toISOString() })}
+                className={`px-3 py-2 rounded transition text-sm font-semibold flex items-center gap-1 ${
+                  song.lastPracticedAt && new Date(song.lastPracticedAt).toDateString() === new Date().toDateString()
+                    ? 'bg-green-700'
+                    : 'bg-gray-700 hover:bg-gray-600'
+                }`}
+                title="Marquer comme pratiqué aujourd'hui (pour la révision espacée)"
+              >
+                ✓ Pratiqué
+              </button>
+
+              <button
+                onClick={() => setPerformance(true)}
+                className="px-3 py-2 bg-amber-600 hover:bg-amber-500 rounded transition text-sm font-semibold flex items-center gap-1"
+                title="Mode prestation : plein écran, photos qui défilent"
+              >
+                🎤 Prestation
+              </button>
+
+              <ClassificationPicker
+                song={song}
+                options={classificationOptions}
+                onAddOption={onAddClassificationOption}
+                onRemoveOption={onRemoveClassificationOption}
+                onUpdateSong={onUpdateSong}
+              />
+
+              {isSessionActive && (
+                <button
+                  onClick={goToNextInSession}
+                  className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 rounded transition text-sm font-semibold flex items-center gap-1"
+                  title={sessionInfo.position < sessionInfo.total ? 'Enregistrer et passer au morceau suivant' : 'Terminer la session'}
+                >
+                  {sessionInfo.position < sessionInfo.total ? 'Suivant ▶' : '🏁 Terminer'}
+                </button>
+              )}
+            </>
+          )}
+
+          {focusMode && (
+            <div className="text-center text-xs text-gray-500 px-2 py-1">
+              Appuyez sur <kbd className="bg-gray-700 px-1.5 py-0.5 rounded">ESC</kbd> pour quitter le mode Focus
+            </div>
+          )}
 
         </div>
       </div>
 
+      {!focusMode && (
+        <VersionTabsBar
+          song={song}
+          activeVersionId={version.id}
+          onSelectVersion={onSelectVersion}
+          onUpdateSong={onUpdateSong}
+        />
+      )}
+
       {performance && (
         <PerformanceMode song={song} version={version} onClose={() => setPerformance(false)} />
+      )}
+
+      {activeLink && (
+        <YoutubeMiniPlayer link={activeLink} onSaveBookmark={saveBookmark} onClose={() => setActiveLink(null)} onAddImages={addImagesToVersion} />
+      )}
+
+      {historyOpen && (
+        <PracticeHistoryModal
+          song={song}
+          practiceSessions={practiceSessions}
+          weeklyGoalMinutes={weeklyGoalMinutes}
+          onUpdateWeeklyGoal={onUpdateWeeklyGoal}
+          onClose={() => setHistoryOpen(false)}
+        />
+      )}
+
+      {feedbackOpen && feedbackSongData && (
+        <SessionFeedbackModal
+          songTitle={feedbackSongData.title}
+          currentProgress={feedbackSongData.currentProgress}
+          onFeedback={handleFeedbackSubmit}
+          onCancel={() => {
+            setFeedbackOpen(false);
+            setFeedbackSongData(null);
+          }}
+        />
       )}
 
 
@@ -4588,20 +8044,38 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
           className={
             isCompact
               ? `fixed inset-y-0 left-0 z-40 w-72 max-w-[85vw] bg-gray-800 border-r border-gray-700 flex flex-col overflow-hidden transition-transform duration-200 shadow-2xl ${leftCollapsed ? '-translate-x-full' : 'translate-x-0'}`
-              : `bg-gray-800 border border-gray-700 rounded flex flex-col overflow-hidden transition-all duration-200 flex-shrink-0 ${leftCollapsed ? 'w-0 border-0' : (isNarrow ? 'w-48' : 'w-56')}`
+              : `bg-gray-800 border border-gray-700 rounded flex flex-col overflow-hidden flex-shrink-0 ${leftCollapsed ? 'w-0 border-0' : ''}`
           }
+          style={!isCompact && !leftCollapsed ? { width: leftPanelWidth } : undefined}
         >
           <LeftPanel version={version} updateVersion={updateVersion} />
         </div>
 
         {!isCompact && (
-          <button
-            onClick={() => setLeftCollapsed(!leftCollapsed)}
-            className="flex-shrink-0 w-4 self-stretch bg-gray-800 border border-gray-700 rounded hover:bg-gray-700 transition flex items-center justify-center group"
-            title={leftCollapsed ? 'Afficher le panneau Structure' : 'Masquer le panneau Structure'}
-          >
-            {leftCollapsed ? <ChevronRight className="w-3 h-3 text-gray-500 group-hover:text-amber-400" /> : <ChevronLeft className="w-3 h-3 text-gray-500 group-hover:text-amber-400" />}
-          </button>
+          <div className="flex-shrink-0 flex items-stretch">
+            {!leftCollapsed && (
+              <div
+                onMouseDown={startResize('left')}
+                onTouchStart={startResize('left')}
+                className="relative w-3 cursor-col-resize hover:bg-amber-600/40 active:bg-amber-600/60 transition-colors flex-shrink-0 flex items-center justify-center"
+                style={{ touchAction: 'none' }}
+                title="Glisser pour ajuster la largeur"
+              >
+                <span className="flex flex-col gap-1 pointer-events-none">
+                  <span className="w-1 h-1 rounded-full bg-gray-400" />
+                  <span className="w-1 h-1 rounded-full bg-gray-400" />
+                  <span className="w-1 h-1 rounded-full bg-gray-400" />
+                </span>
+              </div>
+            )}
+            <button
+              onClick={() => setLeftCollapsed(!leftCollapsed)}
+              className="flex-shrink-0 w-4 self-stretch bg-gray-800 border border-gray-700 rounded hover:bg-gray-700 transition flex items-center justify-center group"
+              title={leftCollapsed ? 'Afficher le panneau Structure' : 'Masquer le panneau Structure'}
+            >
+              {leftCollapsed ? <ChevronRight className="w-3 h-3 text-gray-500 group-hover:text-amber-400" /> : <ChevronLeft className="w-3 h-3 text-gray-500 group-hover:text-amber-400" />}
+            </button>
+          </div>
         )}
 
         <div className="flex-1 bg-gray-800 border border-gray-700 rounded flex flex-col overflow-hidden min-w-0">
@@ -4609,23 +8083,47 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
         </div>
 
         {!isNarrow && (
-          <button
-            onClick={() => setRightCollapsed(!rightCollapsed)}
-            className="flex-shrink-0 w-4 self-stretch bg-gray-800 border border-gray-700 rounded hover:bg-gray-700 transition flex items-center justify-center group"
-            title={rightCollapsed ? 'Afficher le panneau Notes/Galerie' : 'Masquer le panneau Notes/Galerie'}
-          >
-            {rightCollapsed ? <ChevronLeft className="w-3 h-3 text-gray-500 group-hover:text-amber-400" /> : <ChevronRight className="w-3 h-3 text-gray-500 group-hover:text-amber-400" />}
-          </button>
+          <div className="flex-shrink-0 flex items-stretch">
+            <button
+              onClick={() => setRightCollapsed(!rightCollapsed)}
+              className="flex-shrink-0 w-4 self-stretch bg-gray-800 border border-gray-700 rounded hover:bg-gray-700 transition flex items-center justify-center group"
+              title={rightCollapsed ? 'Afficher le panneau Notes/Galerie' : 'Masquer le panneau Notes/Galerie'}
+            >
+              {rightCollapsed ? <ChevronLeft className="w-3 h-3 text-gray-500 group-hover:text-amber-400" /> : <ChevronRight className="w-3 h-3 text-gray-500 group-hover:text-amber-400" />}
+            </button>
+            {!rightCollapsed && (
+              <div
+                onMouseDown={startResize('right')}
+                onTouchStart={startResize('right')}
+                className="relative w-3 cursor-col-resize hover:bg-amber-600/40 active:bg-amber-600/60 transition-colors flex-shrink-0 flex items-center justify-center"
+                style={{ touchAction: 'none' }}
+                title="Glisser pour ajuster la largeur"
+              >
+                <span className="flex flex-col gap-1 pointer-events-none">
+                  <span className="w-1 h-1 rounded-full bg-gray-400" />
+                  <span className="w-1 h-1 rounded-full bg-gray-400" />
+                  <span className="w-1 h-1 rounded-full bg-gray-400" />
+                </span>
+              </div>
+            )}
+          </div>
         )}
 
         <div
           className={
             isNarrow
               ? `fixed inset-y-0 right-0 z-40 w-80 max-w-[85vw] bg-gray-800 border-l border-gray-700 flex flex-col overflow-hidden transition-transform duration-200 shadow-2xl ${rightCollapsed ? 'translate-x-full' : 'translate-x-0'}`
-              : `bg-gray-800 border border-gray-700 rounded flex flex-col overflow-hidden transition-all duration-200 flex-shrink-0 ${rightCollapsed ? 'w-0 border-0' : 'w-80'}`
+              : `bg-gray-800 border border-gray-700 rounded flex flex-col overflow-hidden flex-shrink-0 ${rightCollapsed ? 'w-0 border-0' : ''}`
           }
+          style={!isNarrow && !rightCollapsed ? { width: rightPanelWidth } : undefined}
         >
-          <RightPanel song={song} version={version} updateVersion={updateVersion} onUpdateSong={onUpdateSong} />
+          <RightPanel
+            song={song}
+            version={version}
+            updateVersion={updateVersion}
+            onUpdateSong={onUpdateSong}
+            onPlayVideo={(link) => setActiveLink(link)}
+          />
         </div>
       </div>
     </div>
@@ -4633,6 +8131,101 @@ function WorkScreen({ song, version, allSongs, onBack, onSelectSong, onSelectVer
 }
 
 // ============= Mode prestation : plein écran, uniquement les photos qui défilent =============
+// Journal de pratique : historique des sessions, objectif hebdo, petit graphe de progression
+function PracticeHistoryModal({ song, practiceSessions, weeklyGoalMinutes, onUpdateWeeklyGoal, onClose }) {
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+
+  const songSessions = practiceSessions
+    .filter(s => s.songId === song.id)
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+  const songTotalSec = songSessions.reduce((sum, s) => sum + s.durationSec, 0);
+
+  // Total de la semaine en cours (toutes chansons), et minutes par jour sur les 7 derniers jours
+  const last7Days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(now - (6 - i) * DAY);
+    return { date: d, key: d.toDateString(), label: d.toLocaleDateString('fr-FR', { weekday: 'short' }) };
+  });
+  const minutesByDay = last7Days.map(day => {
+    const totalSec = practiceSessions
+      .filter(s => new Date(s.date).toDateString() === day.key)
+      .reduce((sum, s) => sum + s.durationSec, 0);
+    return { ...day, minutes: Math.round(totalSec / 60) };
+  });
+  const weekTotalMinutes = minutesByDay.reduce((sum, d) => sum + d.minutes, 0);
+  const maxMinutes = Math.max(...minutesByDay.map(d => d.minutes), 1);
+  const goalPct = Math.min(100, Math.round((weekTotalMinutes / Math.max(1, weeklyGoalMinutes)) * 100));
+
+  return (
+    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+      <div className="bg-gray-800 border border-gray-600 rounded-lg p-4 max-w-md w-full max-h-[85vh] overflow-y-auto flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-amber-400 text-sm">📊 Journal de pratique</h3>
+          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded transition">
+            <X className="w-4 h-4 text-gray-400" />
+          </button>
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs text-gray-400">Objectif hebdomadaire</span>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min={1}
+                max={2000}
+                value={weeklyGoalMinutes}
+                onChange={(e) => onUpdateWeeklyGoal(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                className="w-16 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs text-right focus:outline-none focus:border-amber-500"
+              />
+              <span className="text-xs text-gray-400">min</span>
+            </div>
+          </div>
+          <div className="w-full bg-gray-700 rounded-full h-2">
+            <div className="bg-amber-500 h-full rounded-full transition-all" style={{ width: `${goalPct}%` }} />
+          </div>
+          <p className="text-[11px] text-gray-400 mt-1">{weekTotalMinutes} / {weeklyGoalMinutes} min cette semaine (toutes chansons)</p>
+        </div>
+
+        <div>
+          <p className="text-xs text-gray-400 mb-2">Minutes par jour (7 derniers jours)</p>
+          <div className="flex items-end gap-1.5 h-20">
+            {minutesByDay.map((d, i) => (
+              <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1">
+                <div
+                  className="w-full bg-amber-600 rounded-t"
+                  style={{ height: `${Math.max(2, (d.minutes / maxMinutes) * 100)}%` }}
+                  title={`${d.minutes} min`}
+                />
+                <span className="text-[9px] text-gray-500">{d.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <p className="text-xs text-gray-400 mb-2">
+            « {song.title} » — {Math.round(songTotalSec / 60)} min au total, {songSessions.length} session{songSessions.length > 1 ? 's' : ''}
+          </p>
+          {songSessions.length === 0 ? (
+            <p className="text-xs text-gray-500 italic">Aucune session chronométrée pour ce morceau pour l'instant.</p>
+          ) : (
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {songSessions.slice(0, 20).map(s => (
+                <div key={s.id} className="flex items-center justify-between text-xs bg-gray-700/50 rounded px-2 py-1">
+                  <span className="text-gray-300">{new Date(s.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })} à {new Date(s.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
+                  <span className="font-mono text-amber-400">{Math.floor(s.durationSec / 60)}:{(s.durationSec % 60).toString().padStart(2, '0')}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function PerformanceMode({ song, version, onClose }) {
   const images = version?.images || [];
   const scrollRef = useRef(null);
@@ -4733,7 +8326,85 @@ function PerformanceMode({ song, version, onClose }) {
 
 
 
+// Formatte le contenu d'une cellule pour l'affichage synthétique (accord simple, ou top/bottom si divisée)
+function formatCellChord(cell) {
+  if (!cell) return '';
+  if (cell.split) {
+    const parts = [cell.top, cell.bottom].filter(Boolean);
+    return parts.join('/');
+  }
+  return cell.chord || '';
+}
+
+// Vue de synthèse : structure complète, lisible d'un coup d'œil, code couleur par section
+function StructureSummary({ structure }) {
+  if (!structure || structure.length === 0) {
+    return <p className="text-xs text-gray-500 italic text-center py-6">Aucune section pour l'instant.</p>;
+  }
+  return (
+    <div className="space-y-2.5">
+      {structure.map(section => {
+        const style = getSectionStyle(section.section);
+        const cols = section.cols || 1;
+        const cells = section.cells || [];
+        const rowCount = Math.max(1, Math.ceil(cells.length / cols));
+        const rows = Array.from({ length: rowCount }, (_, rowIdx) => {
+          const rowCells = cells.slice(rowIdx * cols, (rowIdx + 1) * cols);
+          const chords = rowCells.map(formatCellChord).filter(Boolean);
+          const repeat = section.rowRepeats?.[rowIdx] || 1;
+          return { repeat, chords };
+        }).filter(r => r.chords.length > 0);
+
+        return (
+          <div key={section.id} className={`rounded border-l-4 ${style.border} ${style.tint} border border-gray-600 px-3 py-2`}>
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${style.dot}`} />
+              <span className={`font-semibold text-xs ${style.text}`}>{section.section}</span>
+              {(section.repeat || 1) > 1 && (
+                <span className="text-[10px] text-gray-400 font-semibold">(section ×{section.repeat})</span>
+              )}
+            </div>
+            {rows.length === 0 ? (
+              <p className="text-[11px] text-gray-500 italic pl-3">Vide</p>
+            ) : (
+              <div className="space-y-0.5 pl-3">
+                {rows.map((row, i) => (
+                  <p key={i} className="text-xs text-gray-200 font-mono leading-relaxed">
+                    <span className="text-amber-400 font-semibold">{row.repeat}x</span>{' '}
+                    {row.chords.join(' - ')}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function LeftPanel({ version, updateVersion }) {
+  const SUMMARY_MODE_KEY = 'guitar-lab:structure-summary-mode';
+  const [summaryMode, setSummaryMode] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await window.storage.get(SUMMARY_MODE_KEY, false);
+        if (result?.value) setSummaryMode(JSON.parse(result.value));
+      } catch (err) { /* préférence par défaut : édition */ }
+    })();
+  }, []);
+
+  const toggleSummaryMode = () => {
+    setSummaryMode(prev => {
+      const next = !prev;
+      window.storage.set(SUMMARY_MODE_KEY, JSON.stringify(next), false).catch(() => {});
+      return next;
+    });
+  };
+
   const addSection = () => {
     const newSection = {
       id: Date.now().toString(),
@@ -4753,31 +8424,57 @@ function LeftPanel({ version, updateVersion }) {
 
   return (
     <>
+      <div className="bg-gray-750 border-b border-gray-700 p-3 flex-shrink-0">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-semibold text-amber-400 text-sm">📋 Structure</h3>
+          <button
+            onClick={toggleSummaryMode}
+            className={`px-2 py-1 rounded text-[11px] font-semibold transition flex items-center gap-1 ${summaryMode ? 'bg-sky-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300'}`}
+            title={summaryMode ? "Revenir à l'édition de la grille" : 'Afficher une vue de synthèse, lecture seule'}
+          >
+            {summaryMode ? '✏️ Éditer' : '👁️ Synthèse'}
+          </button>
+        </div>
+        {!summaryMode && (
+          <>
+            <button onClick={addSection} className="w-full px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold transition mb-2">
+              + Section
+            </button>
+            <button onClick={() => setImportOpen(true)} className="w-full px-2 py-1 bg-sky-700 hover:bg-sky-600 rounded text-xs font-semibold transition mb-2" title="Importer un PDF de fiche accords/paroles pour pré-remplir la structure">
+              📄 Importer un PDF
+            </button>
+            {version.structure.length > 1 && (
+              <div className="flex gap-1">
+                <button onClick={() => setAllCollapsed(false)} className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[11px] transition">
+                  Tout déplier
+                </button>
+                <button onClick={() => setAllCollapsed(true)} className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[11px] transition">
+                  Tout replier
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
       <datalist id="section-name-suggestions">
         {SECTION_NAME_SUGGESTIONS.map(s => <option key={s} value={s} />)}
       </datalist>
-
-      <div className="bg-gray-750 border-b border-gray-700 p-3 flex-shrink-0">
-        <h3 className="font-semibold text-amber-400 text-sm mb-2">📋 Structure</h3>
-        <button onClick={addSection} className="w-full px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold transition mb-2">
-          + Section
-        </button>
-        {version.structure.length > 1 && (
-          <div className="flex gap-1">
-            <button onClick={() => setAllCollapsed(false)} className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[11px] transition">
-              Tout déplier
-            </button>
-            <button onClick={() => setAllCollapsed(true)} className="flex-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-[11px] transition">
-              Tout replier
-            </button>
-          </div>
+      <div className="flex-1 overflow-y-auto space-y-2 p-3">
+        {summaryMode ? (
+          <StructureSummary structure={version.structure} />
+        ) : (
+          version.structure.map((section, idx) => (
+            <SectionBuilder key={section.id} section={section} index={idx} version={version} updateVersion={updateVersion} />
+          ))
         )}
       </div>
-      <div className="flex-1 overflow-y-auto space-y-2 p-3">
-        {version.structure.map((section, idx) => (
-          <SectionBuilder key={section.id} section={section} index={idx} version={version} updateVersion={updateVersion} />
-        ))}
-      </div>
+      {importOpen && (
+        <PdfImportModal
+          version={version}
+          updateVersion={updateVersion}
+          onClose={() => setImportOpen(false)}
+        />
+      )}
     </>
   );
 }
@@ -4861,17 +8558,25 @@ function SectionBuilder({ section, index, version, updateVersion }) {
         >
           {collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
         </button>
-        <select
+        <input
+          type="text"
+          list="section-name-suggestions"
           value={section.section}
           onChange={(e) => updateSection({ section: e.target.value })}
-          className={`w-[4.75rem] bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-[11px] font-semibold focus:outline-none focus:border-amber-500 ${style.text}`}
-        >
-          {SECTION_NAME_SUGGESTIONS.map((name) => (
-            <option key={name} value={name}>{name}</option>
-          ))}
-        </select>
+          className={`w-24 bg-gray-800 border border-gray-600 rounded px-1 py-0.5 text-[11px] font-semibold focus:outline-none focus:border-amber-500 ${style.text}`}
+        />
         <div className="flex items-center gap-0.5">
           <span className="text-gray-400 text-[9px] font-semibold">L</span>
+          <button
+            onClick={() => {
+              const rows = Math.max(1, rowCount - 1);
+              resizeGrid(section.cols || 4, rows);
+            }}
+            className="w-5 h-5 bg-gray-700 hover:bg-gray-600 rounded text-[9px] font-bold transition flex items-center justify-center"
+            title="Réduire les lignes"
+          >
+            −
+          </button>
           <input
             type="number"
             min={1}
@@ -4880,8 +8585,20 @@ function SectionBuilder({ section, index, version, updateVersion }) {
               const rows = parseInt(e.target.value, 10) || 1;
               resizeGrid(section.cols || 4, rows);
             }}
-            className="w-6 bg-gray-800 border border-gray-600 rounded px-0.5 py-0.5 text-center text-[10px] focus:outline-none focus:border-amber-500"
+            onDoubleClick={(e) => e.target.select()}
+            className="w-6 bg-gray-800 border border-gray-600 rounded px-0.5 py-0.5 text-center text-[10px] focus:outline-none focus:border-amber-500 cursor-pointer"
+            title="Double-cliquer pour éditer, ou utiliser les boutons +/−"
           />
+          <button
+            onClick={() => {
+              const rows = rowCount + 1;
+              resizeGrid(section.cols || 4, rows);
+            }}
+            className="w-5 h-5 bg-gray-700 hover:bg-gray-600 rounded text-[9px] font-bold transition flex items-center justify-center"
+            title="Augmenter les lignes"
+          >
+            +
+          </button>
         </div>
         <div className="flex items-center gap-0.5">
           <span className="text-gray-400 text-[9px] font-semibold">C</span>
@@ -4895,6 +8612,35 @@ function SectionBuilder({ section, index, version, updateVersion }) {
             }}
             className="w-6 bg-gray-800 border border-gray-600 rounded px-0.5 py-0.5 text-center text-[10px] focus:outline-none focus:border-amber-500"
           />
+        </div>
+        <div className="flex items-center gap-0.5">
+          <span className="text-gray-400 text-[9px] font-semibold">×</span>
+          <button
+            onClick={() => updateSection({ repeat: Math.max(1, (section.repeat || 1) - 1) })}
+            className="w-5 h-5 bg-gray-700 hover:bg-gray-600 rounded text-[9px] font-bold transition flex items-center justify-center"
+            title="Réduire les répétitions"
+          >
+            −
+          </button>
+          <input
+            type="number"
+            min={1}
+            value={section.repeat || 1}
+            onChange={(e) => {
+              const val = parseInt(e.target.value, 10) || 1;
+              updateSection({ repeat: Math.max(1, val) });
+            }}
+            onDoubleClick={(e) => e.target.select()}
+            className="w-6 bg-gray-800 border border-gray-600 rounded px-0.5 py-0.5 text-center text-[10px] font-semibold focus:outline-none focus:border-amber-500 cursor-pointer"
+            title="Double-cliquer pour éditer, ou utiliser les boutons +/−"
+          />
+          <button
+            onClick={() => updateSection({ repeat: (section.repeat || 1) + 1 })}
+            className="w-5 h-5 bg-gray-700 hover:bg-gray-600 rounded text-[9px] font-bold transition flex items-center justify-center"
+            title="Augmenter les répétitions"
+          >
+            +
+          </button>
         </div>
         {collapsed && (
           <span className="flex-shrink-0 text-gray-400 text-[10px] whitespace-nowrap">
@@ -4934,10 +8680,57 @@ function SectionBuilder({ section, index, version, updateVersion }) {
           )}
 
           <div className="overflow-x-auto">
-            <div className="grid w-max gap-0.5" style={{ gridTemplateColumns: `repeat(${section.cols}, 2.5rem)` }}>
-              {section.cells.map(cell => (
-                <ChordCell key={cell.id} cell={cell} onUpdate={(c) => updateCell(cell.id, c)} onToggleSplit={() => toggleSplit(cell.id)} />
-              ))}
+            <div className="flex gap-2">
+              {/* Colonne des numéros de ligne */}
+              <div className="flex flex-col gap-0.5 justify-start pt-0.5">
+                {Array.from({ length: Math.ceil(section.cells.length / section.cols) }).map((_, rowIdx) => (
+                  <div key={`row-${rowIdx}`} className="h-10 flex items-center gap-1">
+                    <button
+                      onClick={() => {
+                        const newRepeats = [...(section.rowRepeats || Array(Math.ceil(section.cells.length / section.cols)).fill(1))];
+                        newRepeats[rowIdx] = Math.max(1, (newRepeats[rowIdx] || 1) - 1);
+                        updateSection({ rowRepeats: newRepeats });
+                      }}
+                      className="w-5 h-5 bg-gray-700 hover:bg-gray-600 rounded text-[9px] font-bold transition flex items-center justify-center"
+                      title="Réduire les répétitions"
+                    >
+                      −
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      value={section.rowRepeats?.[rowIdx] || 1}
+                      onChange={(e) => {
+                        const val = Math.max(1, parseInt(e.target.value) || 1);
+                        const newRepeats = [...(section.rowRepeats || Array(Math.ceil(section.cells.length / section.cols)).fill(1))];
+                        newRepeats[rowIdx] = val;
+                        updateSection({ rowRepeats: newRepeats });
+                      }}
+                      onDoubleClick={(e) => e.target.select()}
+                      className="w-6 text-center bg-gray-800 border border-gray-600 rounded px-0.5 py-0.5 text-[10px] font-bold focus:outline-none focus:border-amber-500 cursor-pointer"
+                      title={`Répétitions ligne ${rowIdx + 1}`}
+                    />
+                    <button
+                      onClick={() => {
+                        const newRepeats = [...(section.rowRepeats || Array(Math.ceil(section.cells.length / section.cols)).fill(1))];
+                        newRepeats[rowIdx] = (newRepeats[rowIdx] || 1) + 1;
+                        updateSection({ rowRepeats: newRepeats });
+                      }}
+                      className="w-5 h-5 bg-gray-700 hover:bg-gray-600 rounded text-[9px] font-bold transition flex items-center justify-center"
+                      title="Augmenter les répétitions"
+                    >
+                      +
+                    </button>
+                  </div>
+                ))}
+              </div>
+              
+              {/* Grille d'accords */}
+              <div className="grid w-max gap-0.5" style={{ gridTemplateColumns: `repeat(${section.cols}, 2.5rem)` }}>
+                {section.cells.map(cell => (
+                  <ChordCell key={cell.id} cell={cell} onUpdate={(c) => updateCell(cell.id, c)} onToggleSplit={() => toggleSplit(cell.id)} />
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -4972,13 +8765,237 @@ function ChordCell({ cell, onUpdate, onToggleSplit }) {
   );
 }
 
+const METRONOME_PREFS_KEY = 'guitar-lab:metronome-prefs';
+const TIME_SIGNATURES = [
+  { label: '4/4', beats: 4 },
+  { label: '3/4', beats: 3 },
+  { label: '2/4', beats: 2 },
+  { label: '6/8', beats: 2, defaultSubdivision: 3 },
+];
+
+// Métronome enrichi : accent sur le 1, mesures, subdivisions, tap-tempo, pré-compte visuel
+function Metronome({ bpm, onBpmChange }) {
+  const [isActive, setIsActive] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [timeSigIndex, setTimeSigIndex] = useState(0);
+  const [subdivision, setSubdivision] = useState(1);
+  const [accentFirstBeat, setAccentFirstBeat] = useState(true);
+  const [preCountEnabled, setPreCountEnabled] = useState(true);
+  const [uiBeat, setUiBeat] = useState({ beat: 0, isFirst: false, isMainBeat: false });
+  const [showCountIn, setShowCountIn] = useState(false);
+
+  const audioCtxRef = useRef(null);
+  const nextNoteTimeRef = useRef(0);
+  const stepRef = useRef(0);
+  const stepsSinceStartRef = useRef(0);
+  const timerRef = useRef(null);
+  const tapTimesRef = useRef([]);
+
+  const timeSig = TIME_SIGNATURES[timeSigIndex];
+  const beatsPerMeasure = timeSig.beats;
+
+  // Chargement / sauvegarde des préférences (mesure, subdivision, accent, pré-compte)
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await window.storage.get(METRONOME_PREFS_KEY, false);
+        if (result?.value) {
+          const p = JSON.parse(result.value);
+          if (typeof p.timeSigIndex === 'number') setTimeSigIndex(p.timeSigIndex);
+          if (typeof p.subdivision === 'number') setSubdivision(p.subdivision);
+          if (typeof p.accentFirstBeat === 'boolean') setAccentFirstBeat(p.accentFirstBeat);
+          if (typeof p.preCountEnabled === 'boolean') setPreCountEnabled(p.preCountEnabled);
+        }
+      } catch (err) { /* préférences par défaut */ }
+    })();
+  }, []);
+  useEffect(() => {
+    window.storage.set(METRONOME_PREFS_KEY, JSON.stringify({ timeSigIndex, subdivision, accentFirstBeat, preCountEnabled }), false).catch(() => {});
+  }, [timeSigIndex, subdivision, accentFirstBeat, preCountEnabled]);
+
+  const scheduleClick = (time, isAccent, isSub) => {
+    const ctx = audioCtxRef.current;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = isAccent ? 1300 : (isSub ? 650 : 950);
+    const vol = isAccent ? 0.22 : (isSub ? 0.05 : 0.13);
+    gain.gain.setValueAtTime(vol, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.06);
+    osc.start(time);
+    osc.stop(time + 0.07);
+  };
+
+  useEffect(() => {
+    if (!isActive) {
+      setShowCountIn(false);
+      return;
+    }
+    audioCtxRef.current = audioCtxRef.current || new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = audioCtxRef.current;
+    if (ctx.state === 'suspended') ctx.resume();
+
+    stepRef.current = 0;
+    stepsSinceStartRef.current = 0;
+    nextNoteTimeRef.current = ctx.currentTime + 0.05;
+    setShowCountIn(preCountEnabled);
+
+    const totalSteps = beatsPerMeasure * subdivision;
+    const secPerStep = 60 / bpm / subdivision;
+    const SCHEDULE_AHEAD = 0.12;
+
+    timerRef.current = setInterval(() => {
+      while (nextNoteTimeRef.current < ctx.currentTime + SCHEDULE_AHEAD) {
+        const step = stepRef.current;
+        const beatIdx = Math.floor(step / subdivision);
+        const subIdx = step % subdivision;
+        const isMainBeat = subIdx === 0;
+        const isFirst = beatIdx === 0 && isMainBeat;
+        const isAccent = isFirst && accentFirstBeat;
+        scheduleClick(nextNoteTimeRef.current, isAccent, !isMainBeat);
+
+        const delayMs = Math.max(0, (nextNoteTimeRef.current - ctx.currentTime) * 1000);
+        const stepsElapsed = stepsSinceStartRef.current;
+        setTimeout(() => {
+          setUiBeat({ beat: beatIdx + 1, isFirst, isMainBeat });
+          if (stepsElapsed >= totalSteps - 1) setShowCountIn(false);
+        }, delayMs);
+
+        nextNoteTimeRef.current += secPerStep;
+        stepRef.current = (step + 1) % totalSteps;
+        stepsSinceStartRef.current += 1;
+      }
+    }, 25);
+
+    return () => clearInterval(timerRef.current);
+  }, [isActive, bpm, beatsPerMeasure, subdivision, accentFirstBeat]);
+
+  const handleTap = () => {
+    const now = Date.now();
+    const taps = tapTimesRef.current.filter(t => now - t < 2000);
+    taps.push(now);
+    tapTimesRef.current = taps;
+    if (taps.length >= 2) {
+      const intervals = taps.slice(1).map((t, i) => t - taps[i]);
+      const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+      const newBpm = Math.round(Math.min(240, Math.max(20, 60000 / avg)));
+      onBpmChange(newBpm);
+    }
+  };
+
+  return (
+    <div className="relative flex items-center gap-1">
+      <button
+        onClick={() => setIsActive(!isActive)}
+        className={`px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 ${isActive ? 'bg-red-600' : 'bg-gray-700'}`}
+      >
+        {isActive ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
+      </button>
+
+      <input
+        type="number"
+        value={bpm}
+        onChange={(e) => {
+          const val = parseInt(e.target.value, 10);
+          onBpmChange(Number.isNaN(val) ? 0 : val);
+        }}
+        onBlur={(e) => onBpmChange(Math.min(240, Math.max(20, parseInt(e.target.value, 10) || 20)))}
+        min="20" max="240" className="w-12 px-1 py-1 bg-gray-700 border border-gray-600 rounded text-xs text-center focus:outline-none text-amber-400 font-bold"
+      />
+      <span className="text-xs text-gray-400">BPM</span>
+
+      <button
+        onClick={handleTap}
+        className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold"
+        title="Tapote au tempo souhaité (2 fois ou plus)"
+      >
+        TAP
+      </button>
+
+      {isActive && (
+        <span className="flex items-center gap-0.5 ml-0.5">
+          {Array.from({ length: beatsPerMeasure }, (_, i) => (
+            <span
+              key={i}
+              className={`w-2 h-2 rounded-full transition-colors ${
+                uiBeat.beat === i + 1 ? (i === 0 ? 'bg-amber-400' : 'bg-amber-600') : 'bg-gray-600'
+              }`}
+            />
+          ))}
+        </span>
+      )}
+
+      <button
+        onClick={() => setSettingsOpen(!settingsOpen)}
+        className="p-1 hover:bg-gray-700 rounded transition"
+        title="Réglages du métronome"
+      >
+        ⚙️
+      </button>
+
+      {settingsOpen && (
+        <div className="absolute top-full mt-1 left-0 z-30 bg-gray-800 border border-gray-600 rounded-lg shadow-xl p-3 w-56 space-y-3">
+          <div>
+            <label className="text-[11px] text-gray-400 block mb-1">Mesure</label>
+            <div className="flex gap-1">
+              {TIME_SIGNATURES.map((ts, i) => (
+                <button
+                  key={ts.label}
+                  onClick={() => {
+                    setTimeSigIndex(i);
+                    if (ts.defaultSubdivision) setSubdivision(ts.defaultSubdivision);
+                  }}
+                  className={`flex-1 px-2 py-1 rounded text-xs font-semibold ${timeSigIndex === i ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+                >
+                  {ts.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-[11px] text-gray-400 block mb-1">Subdivision</label>
+            <div className="flex gap-1">
+              {[1, 2, 3, 4].map(n => (
+                <button
+                  key={n}
+                  onClick={() => setSubdivision(n)}
+                  className={`flex-1 px-2 py-1 rounded text-xs font-semibold ${subdivision === n ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+                  title={n === 1 ? 'Noires' : n === 2 ? 'Croches' : n === 3 ? 'Triolets' : 'Doubles-croches'}
+                >
+                  ×{n}
+                </button>
+              ))}
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+            <input type="checkbox" checked={accentFirstBeat} onChange={(e) => setAccentFirstBeat(e.target.checked)} className="accent-amber-500" />
+            Accent sur le temps 1
+          </label>
+          <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+            <input type="checkbox" checked={preCountEnabled} onChange={(e) => setPreCountEnabled(e.target.checked)} className="accent-amber-500" />
+            Pré-compte visuel au démarrage
+          </label>
+        </div>
+      )}
+
+      {showCountIn && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center pointer-events-none">
+          <span className={`font-bold ${uiBeat.isFirst ? 'text-amber-400 text-9xl' : 'text-white text-8xl'}`}>
+            {uiBeat.beat || beatsPerMeasure}
+          </span>
+        </div>
+      )}
+      <DebugPanel />
+    </div>
+  );
+}
+
 function CenterPanel({ version, updateVersion }) {
   const [scrollSpeed, setScrollSpeed] = useState(2);
   const [isAutoScrolling, setIsAutoScrolling] = useState(false);
-  const [metronomeActive, setMetronomeActive] = useState(false);
   const [bpm, setBpm] = useState(version.bpm || 120);
   const galleryRef = useRef(null);
-  const audioContextRef = useRef(null);
   const images = version?.images || [];
 
   useEffect(() => {
@@ -4993,32 +9010,27 @@ function CenterPanel({ version, updateVersion }) {
     return () => clearInterval(interval);
   }, [isAutoScrolling, scrollSpeed]);
 
-  const playMetronomeClick = () => {
-    if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    const ctx = audioContextRef.current;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.frequency.value = 800;
-    gain.gain.setValueAtTime(0.1, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.1);
-  };
-
-  useEffect(() => {
-    if (!metronomeActive) return;
-    const interval = (60 / bpm) * 1000;
-    const timer = setInterval(playMetronomeClick, interval);
-    return () => clearInterval(timer);
-  }, [metronomeActive, bpm]);
-
   // Hauteur d'affichage des photos empilées : compact / moyen / entier
   const [imgHeight, setImgHeight] = useState('md');
   const HEIGHTS = { sm: 'max-h-64', md: 'max-h-96', full: 'max-h-none' };
+
+  // Numéro de chaque image : discret, à gauche, affichable/masquable selon préférence
+  const [showImgNumbers, setShowImgNumbers] = useState(true);
+  useEffect(() => {
+    (async () => {
+      try {
+        const result = await window.storage.get('guitar-lab:gallery-show-numbers', false);
+        if (result?.value != null) setShowImgNumbers(JSON.parse(result.value));
+      } catch (err) { /* préférence par défaut : affiché */ }
+    })();
+  }, []);
+  const toggleShowImgNumbers = () => {
+    setShowImgNumbers(prev => {
+      const next = !prev;
+      window.storage.set('guitar-lab:gallery-show-numbers', JSON.stringify(next), false).catch(() => {});
+      return next;
+    });
+  };
 
   const addImages = (dataUrls) => {
     if (!dataUrls.length) return;
@@ -5030,6 +9042,35 @@ function CenterPanel({ version, updateVersion }) {
     const files = Array.from(e.target.files || []);
     e.target.value = '';
     readFilesAsDataUrls(files).then(addImages);
+  };
+
+  // Bouton "Coller" explicite : lit directement le presse-papiers (plus fiable que l'événement paste sur iPad)
+  const [pasteStatus, setPasteStatus] = useState(null); // null | 'empty' | 'error'
+  const pasteFromClipboardButton = async () => {
+    setPasteStatus(null);
+    try {
+      if (!navigator.clipboard?.read) {
+        setPasteStatus('error');
+        return;
+      }
+      const clipboardItems = await navigator.clipboard.read();
+      const files = [];
+      for (const item of clipboardItems) {
+        const imgType = item.types.find(t => t.startsWith('image/'));
+        if (imgType) {
+          const blob = await item.getType(imgType);
+          files.push(new File([blob], `collé.${imgType.split('/')[1] || 'png'}`, { type: imgType }));
+        }
+      }
+      if (!files.length) {
+        setPasteStatus('empty');
+        return;
+      }
+      const dataUrls = await readFilesAsDataUrls(files);
+      addImages(dataUrls);
+    } catch (err) {
+      setPasteStatus('error');
+    }
   };
 
   // Coller depuis le presse-papiers : accepte plusieurs images d'un coup
@@ -5072,10 +9113,25 @@ function CenterPanel({ version, updateVersion }) {
   return (
     <>
       <div className="bg-gray-750 border-b border-gray-700 p-2 flex-shrink-0 flex-wrap flex items-center gap-2">
-        <label className="px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold cursor-pointer flex items-center gap-1" title="Importer plusieurs photos à la fois">
+        <label className="px-2 py-1 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold cursor-pointer flex items-center gap-1" title="Importer plusieurs photos à la fois (bibliothèque photo, fichiers ou appareil photo)">
           📁 Importer
           <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="hidden" />
         </label>
+
+        <button
+          onClick={pasteFromClipboardButton}
+          className="px-2 py-1 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded text-xs font-semibold flex items-center gap-1"
+          title="Coller une image copiée (Photos, capture d'écran…)"
+        >
+          📋 Coller
+        </button>
+
+        {pasteStatus === 'empty' && (
+          <span className="text-[10px] text-gray-400">Aucune image dans le presse-papiers</span>
+        )}
+        {pasteStatus === 'error' && (
+          <span className="text-[10px] text-red-400">Collage indisponible ici — utilise Ctrl+V / le geste coller, ou « Importer »</span>
+        )}
 
         <div className="flex items-center gap-1 text-xs">
           <span className="text-gray-400">Taille:</span>
@@ -5092,6 +9148,14 @@ function CenterPanel({ version, updateVersion }) {
         </div>
 
         <button
+          onClick={toggleShowImgNumbers}
+          className={`px-1.5 py-1 rounded text-xs font-semibold ${showImgNumbers ? 'bg-amber-600' : 'bg-gray-700 hover:bg-gray-600'}`}
+          title={showImgNumbers ? 'Masquer le numéro des images' : 'Afficher le numéro des images'}
+        >
+          # {showImgNumbers ? 'affiché' : 'masqué'}
+        </button>
+
+        <button
           onClick={() => setIsAutoScrolling(!isAutoScrolling)}
           className={`px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 ${isAutoScrolling ? 'bg-amber-600 text-white' : 'bg-gray-700'}`}
         >
@@ -5103,56 +9167,40 @@ function CenterPanel({ version, updateVersion }) {
           <input type="range" min="0.5" max="10" step="0.5" value={scrollSpeed} onChange={(e) => setScrollSpeed(parseFloat(e.target.value))} className="w-12 accent-amber-500" />
         </div>
 
-        <button
-          onClick={() => setMetronomeActive(!metronomeActive)}
-          className={`px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 ${metronomeActive ? 'bg-red-600' : 'bg-gray-700'}`}
-        >
-          {metronomeActive ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
-        </button>
-
-        <input
-          type="number"
-          value={bpm}
-          onChange={(e) => {
-            const val = parseInt(e.target.value, 10);
-            setBpm(Number.isNaN(val) ? 0 : val);
-          }}
-          onBlur={() => {
-            const clamped = Math.min(240, Math.max(20, bpm || 20));
-            setBpm(clamped);
-            updateVersion({ bpm: clamped });
-          }}
-          min="20" max="240" className="w-12 px-1 py-1 bg-gray-700 border border-gray-600 rounded text-xs text-center focus:outline-none text-amber-400 font-bold" />
-        <span className="text-xs text-gray-400">BPM</span>
+        <Metronome bpm={bpm} onBpmChange={(v) => { setBpm(v); updateVersion({ bpm: v }); }} />
       </div>
 
-      <div ref={galleryRef} className="flex-1 overflow-y-auto bg-gray-900 p-4 space-y-4" style={{ touchAction: 'pan-y' }} onPaste={handlePaste}>
+      <div ref={galleryRef} className="flex-1 overflow-y-auto bg-gray-900 p-4 space-y-px" style={{ touchAction: 'pan-y' }} onPaste={handlePaste}>
         {images.length > 0 ? (
           images.map((img, idx) => (
-            <div key={img.id} className="relative group" style={{ touchAction: 'pan-y' }}>
-              <img
-                src={img.src}
-                alt={`Tablature ${idx + 1}`}
-                draggable={false}
-                className={`w-full ${HEIGHTS[imgHeight]} object-contain bg-black rounded border border-gray-700 select-none`}
-                style={{ touchAction: 'pan-y' }}
-              />
-              <span className="absolute top-2 left-2 bg-black/70 text-gray-300 text-[10px] px-1.5 py-0.5 rounded">
-                {idx + 1}/{images.length}
-              </span>
-              <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition">
-                <button onClick={() => moveImage(img.id, -1)} disabled={idx === 0} className="bg-gray-800/90 hover:bg-gray-700 disabled:opacity-30 rounded-full p-2" title="Monter">
-                  <ArrowUp className="w-4 h-4" />
-                </button>
-                <button onClick={() => moveImage(img.id, 1)} disabled={idx === images.length - 1} className="bg-gray-800/90 hover:bg-gray-700 disabled:opacity-30 rounded-full p-2" title="Descendre">
-                  <ArrowDown className="w-4 h-4" />
-                </button>
-                <button onClick={() => setEditingImageId(img.id)} className="bg-amber-700 hover:bg-amber-600 rounded-full p-2" title="Éditer cette image">
-                  <Edit2 className="w-4 h-4" />
-                </button>
-                <button onClick={() => deleteImage(img.id)} className="bg-red-900 hover:bg-red-800 rounded-full p-2" title="Supprimer">
-                  <Trash2 className="w-4 h-4" />
-                </button>
+            <div key={img.id} className="flex items-start gap-1.5">
+              {showImgNumbers && (
+                <span className="w-4 flex-shrink-0 text-right text-[9px] leading-none text-gray-600 pt-1.5 select-none">
+                  {idx + 1}
+                </span>
+              )}
+              <div className="relative group flex-1 min-w-0" style={{ touchAction: 'pan-y' }}>
+                <img
+                  src={img.src}
+                  alt={`Tablature ${idx + 1}`}
+                  draggable={false}
+                  className={`w-full ${HEIGHTS[imgHeight]} object-contain bg-black rounded border border-gray-700 select-none`}
+                  style={{ touchAction: 'pan-y' }}
+                />
+                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition">
+                  <button onClick={() => moveImage(img.id, -1)} disabled={idx === 0} className="bg-gray-800/90 hover:bg-gray-700 disabled:opacity-30 rounded-full p-2" title="Monter">
+                    <ArrowUp className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => moveImage(img.id, 1)} disabled={idx === images.length - 1} className="bg-gray-800/90 hover:bg-gray-700 disabled:opacity-30 rounded-full p-2" title="Descendre">
+                    <ArrowDown className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => setEditingImageId(img.id)} className="bg-amber-700 hover:bg-amber-600 rounded-full p-2" title="Éditer cette image">
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => deleteImage(img.id)} className="bg-red-900 hover:bg-red-800 rounded-full p-2" title="Supprimer">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           ))
@@ -5193,6 +9241,41 @@ function ImageEditorModal({ src, onSave, onClose }) {
   const cropStartRef = useRef(null);
   const [cropRect, setCropRect] = useState(null);
   const [textInput, setTextInput] = useState(null); // { x, y, value }
+  const [currentSize, setCurrentSize] = useState(null); // Taille actuelle en octets
+  const [showCompressionMenu, setShowCompressionMenu] = useState(false);
+
+  const updateSize = (dataUrl) => {
+    const sizeBytes = Math.round((dataUrl.length - dataUrl.indexOf(',') - 1) * 0.75);
+    setCurrentSize(sizeBytes);
+  };
+
+  const formatSize = (bytes) => {
+    if (bytes < 1024) return bytes + ' o';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' Ko';
+    return (bytes / (1024 * 1024)).toFixed(2) + ' Mo';
+  };
+
+  const compressImage = (quality) => {
+    // quality: 0.3 à 0.9 (30% à 90%)
+    if (!canvasRef.current) return;
+    const jpegDataUrl = canvasRef.current.toDataURL('image/jpeg', quality);
+    updateSize(jpegDataUrl);
+    // Remplace le contenu du canvas avec l'image JPEG comprimée pour la prévisualisation
+    const img = new Image();
+    img.onload = () => {
+      const ctx = canvasRef.current.getContext('2d');
+      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      ctx.drawImage(img, 0, 0);
+    };
+    img.src = jpegDataUrl;
+  };
+
+  const compressionLevels = [
+    { label: '🐢 Très comprimée (30%)', quality: 0.3, hint: 'Pour économiser au max' },
+    { label: '⭐ Économe (50%)', quality: 0.5, hint: 'Bon compromis' },
+    { label: '✓ Normale (70%)', quality: 0.7, hint: 'Défaut recommandé' },
+    { label: '📷 Haute (85%)', quality: 0.85, hint: 'Meilleure qualité' },
+  ];
 
   const fitToCanvas = (img) => {
     const maxDim = 460;
@@ -5215,6 +9298,9 @@ function ImageEditorModal({ src, onSave, onClose }) {
     img.onload = () => {
       originalImgRef.current = img;
       fitToCanvas(img);
+      // Calculer la taille initiale (PNG par défaut)
+      const pngUrl = canvasRef.current.toDataURL('image/png');
+      updateSize(pngUrl);
       setReady(true);
     };
     img.src = src;
@@ -5224,7 +9310,8 @@ function ImageEditorModal({ src, onSave, onClose }) {
     const rect = canvasRef.current.getBoundingClientRect();
     const scaleX = canvasRef.current.width / rect.width;
     const scaleY = canvasRef.current.height / rect.height;
-    return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+    const point = (e.touches && e.touches[0]) ? e.touches[0] : ((e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : e);
+    return { x: (point.clientX - rect.left) * scaleX, y: (point.clientY - rect.top) * scaleY };
   };
 
   const drawCropOverlay = (rect) => {
@@ -5244,6 +9331,7 @@ function ImageEditorModal({ src, onSave, onClose }) {
   };
 
   const handlePointerDown = (e) => {
+    e.preventDefault?.();
     e.target.setPointerCapture?.(e.pointerId);
     const pos = getPos(e);
     if (mode === 'draw') {
@@ -5265,6 +9353,7 @@ function ImageEditorModal({ src, onSave, onClose }) {
 
   const handlePointerMove = (e) => {
     if (mode === 'draw' && drawingRef.current) {
+      e.preventDefault?.();
       const pos = getPos(e);
       const ctx = canvasRef.current.getContext('2d');
       ctx.strokeStyle = color;
@@ -5277,6 +9366,7 @@ function ImageEditorModal({ src, onSave, onClose }) {
       ctx.stroke();
       lastPosRef.current = pos;
     } else if (mode === 'crop' && cropStartRef.current) {
+      e.preventDefault?.();
       const pos = getPos(e);
       const start = cropStartRef.current;
       const canvas = canvasRef.current;
@@ -5291,7 +9381,8 @@ function ImageEditorModal({ src, onSave, onClose }) {
     }
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e) => {
+    e.preventDefault?.();
     drawingRef.current = false;
     cropStartRef.current = null;
   };
@@ -5346,6 +9437,26 @@ function ImageEditorModal({ src, onSave, onClose }) {
     fitToCanvas(img);
   };
 
+  const supportsPointer = typeof window !== 'undefined' && !!window.PointerEvent;
+
+  const canvasEventProps = supportsPointer
+    ? {
+        onPointerDown: handlePointerDown,
+        onPointerMove: handlePointerMove,
+        onPointerUp: handlePointerUp,
+        onPointerLeave: handlePointerUp,
+      }
+    : {
+        onMouseDown: handlePointerDown,
+        onMouseMove: handlePointerMove,
+        onMouseUp: handlePointerUp,
+        onMouseLeave: handlePointerUp,
+        onTouchStart: handlePointerDown,
+        onTouchMove: handlePointerMove,
+        onTouchEnd: handlePointerUp,
+        onTouchCancel: handlePointerUp,
+      };
+
   return (
     <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
       <div className="bg-gray-800 border border-gray-600 rounded-lg p-4 max-w-full max-h-full flex flex-col gap-3">
@@ -5371,6 +9482,22 @@ function ImageEditorModal({ src, onSave, onClose }) {
               <input type="range" min="1" max="12" value={brushSize} onChange={(e) => setBrushSize(parseInt(e.target.value))} className="w-16 accent-amber-500" />
             </div>
           )}
+          <div className="relative">
+            <button onClick={() => setShowCompressionMenu(!showCompressionMenu)} className="px-2 py-1 rounded font-semibold bg-purple-700 hover:bg-purple-600" title="Compresser l'image">📦 {currentSize ? formatSize(currentSize) : '?'}</button>
+            {showCompressionMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowCompressionMenu(false)} />
+                <div className="absolute top-full left-0 z-50 bg-gray-800 border border-gray-600 rounded mt-1 shadow-lg p-2 flex flex-col gap-1 min-w-[200px]">
+                  {compressionLevels.map((level, i) => (
+                    <button key={i} onClick={() => { compressImage(level.quality); setShowCompressionMenu(false); }} className="text-left px-2 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs transition">
+                      <div className="font-semibold">{level.label}</div>
+                      <div className="text-[10px] text-gray-400">{level.hint}</div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           <button onClick={resetImage} className="px-2 py-1 rounded font-semibold bg-gray-700 hover:bg-gray-600 ml-auto">↺ Recommencer</button>
         </div>
 
@@ -5379,11 +9506,8 @@ function ImageEditorModal({ src, onSave, onClose }) {
           <canvas
             ref={canvasRef}
             className="block"
-            style={{ display: ready ? 'block' : 'none', cursor: mode === 'crop' ? 'crosshair' : mode === 'text' ? 'text' : 'crosshair' }}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerUp}
+            style={{ display: ready ? 'block' : 'none', cursor: mode === 'crop' ? 'crosshair' : mode === 'text' ? 'text' : 'crosshair', touchAction: 'none' }}
+            {...canvasEventProps}
           />
           {textInput && (
             <input
@@ -5401,8 +9525,270 @@ function ImageEditorModal({ src, onSave, onClose }) {
 
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-semibold">Annuler</button>
-          <button onClick={() => onSave(canvasRef.current.toDataURL('image/png'))} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold">Enregistrer</button>
+          <button onClick={() => onSave(canvasRef.current.toDataURL('image/jpeg', 0.7))} className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 rounded text-xs font-semibold">💾 Enregistrer (JPEG 70%)</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Reconstruit les lignes de texte d'une page PDF à partir des items positionnés,
+// en conservant leur position (pour pouvoir ensuite découper une image par section)
+async function extractPageLines(page, viewport) {
+  const textContent = await page.getTextContent();
+  const items = textContent.items.filter(it => (it.str || '').trim() !== '' || it.hasEOL);
+
+  // Regroupe les items par ligne (même ordonnée, à une petite tolérance près)
+  const rows = [];
+  items.forEach(it => {
+    const y = it.transform[5];
+    let row = rows.find(r => Math.abs(r.y - y) < 3);
+    if (!row) { row = { y, items: [] }; rows.push(row); }
+    row.items.push(it);
+  });
+  rows.sort((a, b) => b.y - a.y); // haut de page en premier (PDF: y croît vers le haut)
+
+  return rows.map(row => {
+    const sorted = row.items.slice().sort((a, b) => a.transform[4] - b.transform[4]);
+    let text = '';
+    let lastEndX = null;
+    const points = [];
+    sorted.forEach(it => {
+      const x = it.transform[4];
+      if (lastEndX !== null && x - lastEndX > 3) text += ' ';
+      text += it.str;
+      lastEndX = x + (it.width || 0);
+      try {
+        const p1 = viewport.convertToViewportPoint(x, it.transform[5]);
+        const p2 = viewport.convertToViewportPoint(x + (it.width || 0), it.transform[5] + (it.height || 10));
+        points.push(p1, p2);
+      } catch (err) { /* ignore un item si la conversion échoue */ }
+    });
+    const xs = points.map(p => p[0]);
+    const ys = points.map(p => p[1]);
+    return {
+      text,
+      minX: xs.length ? Math.min(...xs) : 0,
+      maxX: xs.length ? Math.max(...xs) : 0,
+      minY: ys.length ? Math.min(...ys) : 0,
+      maxY: ys.length ? Math.max(...ys) : 0,
+    };
+  });
+}
+
+// Découpe une image nette (sans marge superflue) à partir du canvas de la page, pour une section donnée
+function cropSectionImage(canvas, blockItems, padding = 10) {
+  try {
+    const valid = blockItems.filter(it => it.maxY > it.minY);
+    if (!valid.length) return null;
+    const minX = Math.max(0, Math.min(...valid.map(it => it.minX)) - padding);
+    const maxX = Math.min(canvas.width, Math.max(...valid.map(it => it.maxX)) + padding);
+    const minY = Math.max(0, Math.min(...valid.map(it => it.minY)) - padding);
+    const maxY = Math.min(canvas.height, Math.max(...valid.map(it => it.maxY)) + padding);
+    const w = Math.round(maxX - minX);
+    const h = Math.round(maxY - minY);
+    if (w < 10 || h < 10) return null;
+    const out = document.createElement('canvas');
+    out.width = w;
+    out.height = h;
+    out.getContext('2d').drawImage(canvas, minX, minY, w, h, 0, 0, w, h);
+    return out.toDataURL('image/png');
+  } catch (err) {
+    return null;
+  }
+}
+
+// Modale d'import PDF (ou collage de texte) : analyse une fiche accords/paroles et
+// propose une structure pré-remplie, à valider avant intégration dans la fiche.
+function PdfImportModal({ version, updateVersion, onClose }) {
+  const [status, setStatus] = useState('start'); // start | loading | preview | error
+  const [errorMsg, setErrorMsg] = useState('');
+  const [sections, setSections] = useState([]); // [{ id, name, chords, image, include }]
+  const [manualText, setManualText] = useState('');
+  const [showManual, setShowManual] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const buildSectionsFromParsed = (parsed) => parsed.map((p, i) => ({
+    id: `pdfimp-${i}`,
+    name: p.name,
+    chords: p.chords,
+    image: p.image || null,
+    include: true,
+  }));
+
+  const handlePdfFile = async (file) => {
+    if (!file) return;
+    setStatus('loading');
+    setErrorMsg('');
+    try {
+      if (!window.pdfjsLib) throw new Error('pdfjsLib absent');
+      const buf = await file.arrayBuffer();
+      const doc = await window.pdfjsLib.getDocument({ data: buf }).promise;
+      const allItems = [];
+      const pageBlanks = []; // marqueur de saut de page (ligne vide) entre les pages
+
+      for (let p = 1; p <= doc.numPages; p++) {
+        const page = await doc.getPage(p);
+        const viewport = page.getViewport({ scale: 2 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        try {
+          await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+        } catch (err) { /* le rendu image est facultatif : on continue sans capture si ça échoue */ }
+
+        const lines = await extractPageLines(page, viewport);
+        lines.forEach(l => allItems.push({ ...l, canvas }));
+        if (p < doc.numPages) allItems.push({ text: '', canvas: null }); // sépare les pages comme une ligne vide
+      }
+
+      const parsed = parseChordSheetItems(allItems);
+
+      if (parsed.length === 0) {
+        setStatus('error');
+        setErrorMsg("Aucun accord n'a pu être lu dans ce PDF — il s'agit probablement d'une fiche protégée où le texte est en réalité une image (fréquent sur les sites de paroles/accords). Colle le texte à la main ci-dessous à la place.");
+        setShowManual(true);
+        return;
+      }
+
+      const withImages = parsed.map(sec => {
+        const withCanvas = sec.items.filter(it => it.canvas);
+        const canvas = withCanvas[0]?.canvas;
+        const image = canvas ? cropSectionImage(canvas, withCanvas) : null;
+        return { name: sec.name, chords: sec.chords, image };
+      });
+
+      setSections(buildSectionsFromParsed(withImages));
+      setStatus('preview');
+    } catch (err) {
+      setStatus('error');
+      setErrorMsg("Impossible de lire ce PDF (" + (err?.message || err) + "). Colle le texte à la main ci-dessous à la place.");
+      setShowManual(true);
+    }
+  };
+
+  const handleManualParse = () => {
+    const parsed = parseChordSheetLines(manualText.split('\n'));
+    if (parsed.length === 0) {
+      setErrorMsg("Aucun accord détecté dans ce texte. Vérifie qu'il contient bien une ligne d'accords au-dessus de chaque ligne de paroles.");
+      return;
+    }
+    setErrorMsg('');
+    setSections(buildSectionsFromParsed(parsed));
+    setStatus('preview');
+  };
+
+  const updateSectionField = (id, updates) => {
+    setSections(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
+  };
+
+  const confirmImport = () => {
+    const chosen = sections.filter(s => s.include);
+    if (chosen.length === 0) { onClose?.(); return; }
+    const newStructure = chordSectionsToStructure(chosen);
+    const newImages = chosen.filter(s => s.image).map(s => ({ id: newId(), src: s.image, x: 0, y: 0, scale: 1 }));
+    updateVersion({
+      structure: [...version.structure, ...newStructure],
+      images: [...(version.images || []), ...newImages],
+    });
+    onClose?.();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-800 rounded-lg max-w-lg w-full max-h-[85vh] overflow-y-auto border border-gray-700 shadow-2xl">
+        <div className="p-4 border-b border-gray-700 sticky top-0 bg-gray-800 flex justify-between items-center z-10">
+          <h3 className="font-bold text-sky-400">📄 Importer une fiche accords/paroles</h3>
+          <button onClick={onClose} className="p-1 hover:bg-gray-700 rounded"><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="p-4 space-y-3">
+          {status === 'start' && (
+            <>
+              <p className="text-xs text-gray-400">
+                Choisis un PDF de fiche accords/paroles (accords au-dessus des paroles). J'essaie d'en déduire automatiquement la structure (Intro, Couplet, Refrain...) et les accords de chaque ligne — vérifie et corrige ensuite si besoin.
+              </p>
+              <label className="block w-full text-center px-3 py-3 bg-sky-700 hover:bg-sky-600 rounded cursor-pointer font-semibold text-sm">
+                Choisir un fichier PDF
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/pdf"
+                  className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) handlePdfFile(f); }}
+                />
+              </label>
+              <button onClick={() => setShowManual(!showManual)} className="text-xs text-gray-400 hover:text-gray-200 underline">
+                {showManual ? 'Masquer' : "Ou coller le texte à la main"}
+              </button>
+            </>
+          )}
+
+          {status === 'loading' && (
+            <p className="text-sm text-gray-400 text-center py-6">Lecture du PDF en cours...</p>
+          )}
+
+          {status === 'error' && (
+            <p className="text-xs text-amber-400 bg-amber-900/20 border border-amber-700/40 rounded-lg p-3">{errorMsg}</p>
+          )}
+
+          {(showManual || status === 'error') && status !== 'preview' && (
+            <div className="space-y-2">
+              <textarea
+                value={manualText}
+                onChange={(e) => setManualText(e.target.value)}
+                placeholder={"Colle ici le texte, accords au-dessus des paroles, ex:\nC        G        Am\nLet's dance in style..."}
+                rows={8}
+                className="w-full px-2 py-2 bg-gray-900 border border-gray-600 rounded text-xs font-mono text-gray-200 focus:outline-none focus:border-sky-500"
+              />
+              <button onClick={handleManualParse} className="w-full px-3 py-2 bg-sky-700 hover:bg-sky-600 rounded text-sm font-semibold">
+                Analyser ce texte
+              </button>
+            </div>
+          )}
+
+          {status === 'preview' && (
+            <>
+              <p className="text-xs text-gray-400">{sections.length} section(s) détectée(s) — décoche celles à ignorer, corrige les noms si besoin.</p>
+              <div className="space-y-2">
+                {sections.map(sec => (
+                  <div key={sec.id} className={`rounded-lg border p-2 flex gap-2 ${sec.include ? 'border-sky-600 bg-sky-900/10' : 'border-gray-700 bg-gray-900/30 opacity-60'}`}>
+                    <input
+                      type="checkbox"
+                      checked={sec.include}
+                      onChange={(e) => updateSectionField(sec.id, { include: e.target.checked })}
+                      className="mt-1 flex-shrink-0"
+                    />
+                    {sec.image && (
+                      <img src={sec.image} alt="" className="w-14 h-14 object-cover rounded border border-gray-600 flex-shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <input
+                        type="text"
+                        list="section-name-suggestions"
+                        value={sec.name}
+                        onChange={(e) => updateSectionField(sec.id, { name: e.target.value })}
+                        className="w-full px-1.5 py-0.5 bg-gray-800 border border-gray-600 rounded text-xs font-semibold text-amber-300 mb-1 focus:outline-none focus:border-sky-500"
+                      />
+                      <p className="text-[11px] text-gray-400 font-mono truncate">{sec.chords.join(' - ') || '—'}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        {status === 'preview' && (
+          <div className="p-4 border-t border-gray-700 flex gap-2 sticky bottom-0 bg-gray-800">
+            <button onClick={confirmImport} className="flex-1 px-3 py-2 bg-sky-600 hover:bg-sky-500 rounded font-semibold text-sm">
+              ✓ Importer {sections.filter(s => s.include).length} section(s)
+            </button>
+            <button onClick={onClose} className="flex-1 px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded font-semibold text-sm">
+              ✕ Annuler
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -5456,18 +9842,18 @@ function ChordThumbnailsPanel({ version, updateVersion }) {
       <h3 className="font-semibold text-amber-400 mb-2 text-sm">🎼 Accords ({thumbnails.length}/5)</h3>
       <div className="flex flex-wrap gap-2">
         {thumbnails.map(t => (
-          <div key={t.id} className="relative h-16 bg-gray-900 rounded border border-gray-600 overflow-hidden group flex-shrink-0 flex items-center justify-center" style={{ minWidth: 40, maxWidth: 112 }}>
+          <div key={t.id} className="relative h-32 bg-gray-900 rounded border border-gray-600 overflow-hidden group flex-shrink-0 flex items-center justify-center" style={{ minWidth: 80, maxWidth: 220 }}>
             <img src={t.src} alt="Accord" className="max-w-full max-h-full object-contain" />
             <button
               onClick={() => setEditingId(t.id)}
-              className="absolute bottom-0 left-0 bg-black/70 hover:bg-amber-600 text-white w-5 h-4 flex items-center justify-center text-[9px] leading-none rounded-tr"
+              className="absolute bottom-0 left-0 bg-black/70 hover:bg-amber-600 text-white w-7 h-6 flex items-center justify-center text-xs leading-none rounded-tr"
               title="Éditer cette image"
             >
               ✏️
             </button>
             <button
               onClick={() => removeThumbnail(t.id)}
-              className="absolute top-0 right-0 bg-black/70 hover:bg-red-600 text-white w-4 h-4 flex items-center justify-center text-[10px] leading-none rounded-bl"
+              className="absolute top-0 right-0 bg-black/70 hover:bg-red-600 text-white w-6 h-6 flex items-center justify-center text-sm leading-none rounded-bl"
               title="Retirer cette image"
             >
               ×
@@ -5478,7 +9864,7 @@ function ChordThumbnailsPanel({ version, updateVersion }) {
           <label
             onPaste={handlePaste}
             tabIndex={0}
-            className="w-16 h-16 rounded border border-dashed border-gray-500 hover:border-amber-500 flex-shrink-0 flex flex-col items-center justify-center text-gray-400 hover:text-amber-400 cursor-pointer text-[9px] text-center leading-tight transition"
+            className="w-32 h-32 rounded border border-dashed border-gray-500 hover:border-amber-500 flex-shrink-0 flex flex-col items-center justify-center text-gray-400 hover:text-amber-400 cursor-pointer text-xs text-center leading-tight transition"
             title="Cliquer pour importer (plusieurs possibles), ou coller (Ctrl+V) une image d'accord"
           >
             + / Coller
@@ -5498,7 +9884,316 @@ function ChordThumbnailsPanel({ version, updateVersion }) {
   );
 }
 
-function RightPanel({ song, version, updateVersion, onUpdateSong }) {
+// ============================================================================
+// MODULE BACKING TRACK
+// ============================================================================
+
+// ---------- Partie A : parsing d'accords (Am, F, C7, Gmaj7, Dsus4...) ----------
+const CHORD_NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const FLAT_TO_SHARP = { Db: 'C#', Eb: 'D#', Gb: 'F#', Ab: 'G#', Bb: 'A#' };
+
+// Convertit un symbole d'accord texte en { root, intervals, isMinor }
+// root = index 0-11 (C=0), intervals = liste de demi-tons depuis la fondamentale
+function parseChordSymbol(symbol) {
+  if (!symbol) return null;
+  const clean = symbol.trim().split('/')[0]; // ignore la basse alternative type "C/E" pour l'instant
+  const m = clean.match(/^([A-Ga-g])([#b]?)(.*)$/);
+  if (!m) return null;
+  let root = m[1].toUpperCase() + (m[2] || '');
+  if (FLAT_TO_SHARP[root]) root = FLAT_TO_SHARP[root];
+  const rootIdx = CHORD_NOTE_NAMES.indexOf(root);
+  if (rootIdx === -1) return null;
+
+  const rest = (m[3] || '').toLowerCase();
+  let intervals = [0, 4, 7]; // majeur par défaut
+  let isMinor = false;
+
+  if (rest.includes('dim')) intervals = [0, 3, 6];
+  else if (rest.includes('aug')) intervals = [0, 4, 8];
+  else if (rest.includes('maj7')) intervals = [0, 4, 7, 11];
+  else if (rest.includes('m7') || rest.includes('min7')) { intervals = [0, 3, 7, 10]; isMinor = true; }
+  else if (rest.includes('sus4')) intervals = [0, 5, 7];
+  else if (rest.includes('sus2')) intervals = [0, 2, 7];
+  else if (rest.includes('7')) intervals = [0, 4, 7, 10];
+  else if (rest.startsWith('m') && !rest.startsWith('maj')) { intervals = [0, 3, 7]; isMinor = true; }
+
+  return { root: rootIdx, intervals, isMinor, label: symbol.trim() };
+}
+
+// Aplati la structure du morceau (sections + cellules) en une liste d'accords,
+// un accord = une mesure. Respecte les répétitions de section (`section.repeat`).
+function flattenChordProgression(structure) {
+  const out = [];
+  (structure || []).forEach((section) => {
+    const repeat = section.repeat || 1;
+    for (let r = 0; r < repeat; r++) {
+      (section.cells || []).forEach((cell) => {
+        const symbol = cell.split ? (cell.top || cell.bottom) : cell.chord;
+        if (symbol && symbol.trim()) out.push(symbol.trim());
+      });
+    }
+  });
+  return out;
+}
+
+// ---------- Partie B : moteur audio (Tone.js) ----------
+const BACKING_STYLES = [
+  { id: 'pop', label: '🎵 Pop / Variété', hatDensity: 2, useKick: true },
+  { id: 'ballad', label: '🎹 Ballade', hatDensity: 0, useKick: false },
+  { id: 'rock', label: '🎸 Rock', hatDensity: 4, useKick: true },
+  { id: 'blues', label: '🎷 Blues shuffle', hatDensity: 2, useKick: true },
+];
+
+function BackingTrackGenerator({ version, bpm }) {
+  const [playing, setPlaying] = useState(false);
+  const [style, setStyle] = useState('pop');
+  const [volume, setVolume] = useState(-10);
+  const [currentBar, setCurrentBar] = useState(-1);
+  const [ready, setReady] = useState(false);
+  const [audioError, setAudioError] = useState(null);
+
+  const synthsRef = useRef(null);
+  const loopRef = useRef(null);
+  const barIndexRef = useRef(0);
+  const styleRef = useRef(style);
+  useEffect(() => { styleRef.current = style; }, [style]);
+
+  const chords = useMemo(
+    () => flattenChordProgression(version.structure).map(parseChordSymbol).filter(Boolean),
+    [version.structure]
+  );
+
+  // Initialise les synthés une seule fois (si Tone.js a bien pu se charger)
+  useEffect(() => {
+    if (typeof Tone === 'undefined') {
+      setAudioError("Moteur audio indisponible (Tone.js n'a pas pu se charger — vérifie ta connexion).");
+      return;
+    }
+    synthsRef.current = {
+      pad: new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: 'triangle' },
+        envelope: { attack: 0.05, decay: 0.2, sustain: 0.6, release: 0.9 },
+      }).toDestination(),
+      bass: new Tone.Synth({
+        oscillator: { type: 'sine' },
+        envelope: { attack: 0.01, decay: 0.2, sustain: 0.4, release: 0.3 },
+      }).toDestination(),
+      kick: new Tone.MembraneSynth({ octaves: 4, pitchDecay: 0.02 }).toDestination(),
+      hat: new Tone.NoiseSynth({ envelope: { attack: 0.001, decay: 0.04, sustain: 0 } }).toDestination(),
+    };
+    setReady(true);
+    return () => {
+      Object.values(synthsRef.current || {}).forEach((s) => s.dispose());
+      if (loopRef.current) loopRef.current.dispose();
+    };
+  }, []);
+
+  // Volume global (dB)
+  useEffect(() => {
+    if (!ready) return;
+    Object.values(synthsRef.current).forEach((s) => { if (s.volume) s.volume.value = volume; });
+  }, [volume, ready]);
+
+  // Tempo synchronisé sur le BPM de la version
+  useEffect(() => {
+    if (!ready) return;
+    Tone.Transport.bpm.value = bpm || 120;
+  }, [bpm, ready]);
+
+  const stop = () => {
+    if (typeof Tone === 'undefined') return;
+    Tone.Transport.stop();
+    Tone.Transport.cancel();
+    if (loopRef.current) { loopRef.current.dispose(); loopRef.current = null; }
+    setPlaying(false);
+    setCurrentBar(-1);
+  };
+
+  // Coupe tout si on change de version ou si le composant se démonte
+  useEffect(() => () => stop(), [version.id]);
+
+  const start = async () => {
+    if (!chords.length || !ready) return;
+    await Tone.start(); // débloque l'audio (obligatoire suite à un geste utilisateur)
+    barIndexRef.current = 0;
+    let beatInBar = 0;
+    const s = synthsRef.current;
+
+    loopRef.current = new Tone.Loop((time) => {
+      const chord = chords[barIndexRef.current % chords.length];
+      const cfg = BACKING_STYLES.find((b) => b.id === styleRef.current) || BACKING_STYLES[0];
+      const root = CHORD_NOTE_NAMES[chord.root];
+      const fifthIdx = (chord.root + (chord.intervals[2] || 7)) % 12;
+      const fifth = CHORD_NOTE_NAMES[fifthIdx];
+
+      if (beatInBar === 0) {
+        setCurrentBar(barIndexRef.current % chords.length);
+        const padNotes = chord.intervals.map((iv) => `${CHORD_NOTE_NAMES[(chord.root + iv) % 12]}3`);
+        s.pad.triggerAttackRelease(padNotes, '2n', time);
+        s.bass.triggerAttackRelease(`${root}2`, '4n', time);
+        if (cfg.useKick) s.kick.triggerAttackRelease('C1', '8n', time);
+      } else if (beatInBar === 2) {
+        s.bass.triggerAttackRelease(`${fifth}2`, '4n', time);
+        if (cfg.useKick) s.kick.triggerAttackRelease('C1', '8n', time);
+      }
+      // Charleston : densité variable selon le style (0 = ballade silencieuse, 4 = rock appuyé)
+      if (cfg.hatDensity >= 2 && (beatInBar === 1 || beatInBar === 3)) {
+        s.hat.triggerAttackRelease('16n', time);
+      }
+      if (cfg.hatDensity >= 4) {
+        s.hat.triggerAttackRelease('16n', time + Tone.Time('8n').toSeconds() / 2);
+      }
+
+      beatInBar++;
+      if (beatInBar >= 4) { beatInBar = 0; barIndexRef.current++; }
+    }, '4n').start(0);
+
+    Tone.Transport.start();
+    setPlaying(true);
+  };
+
+  const toggle = () => (playing ? stop() : start());
+
+  if (audioError) {
+    return <p className="text-xs text-red-400">{audioError}</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {chords.length === 0 ? (
+        <p className="text-xs text-gray-500 italic">
+          Ajoute des accords dans la grille (panneau Structure) pour générer un accompagnement.
+        </p>
+      ) : (
+        <>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={toggle}
+              disabled={!ready}
+              className={`px-3 py-1.5 rounded text-xs font-semibold flex items-center gap-1 disabled:opacity-50 ${
+                playing ? 'bg-red-600 hover:bg-red-500' : 'bg-amber-600 hover:bg-amber-500'
+              }`}
+            >
+              {playing ? '⏹ Stop' : '▶ Jouer'}
+            </button>
+            <select
+              value={style}
+              onChange={(e) => setStyle(e.target.value)}
+              className="px-2 py-1.5 bg-gray-700 border border-gray-600 rounded text-xs focus:outline-none focus:border-amber-500"
+            >
+              {BACKING_STYLES.map((b) => (
+                <option key={b.id} value={b.id}>{b.label}</option>
+              ))}
+            </select>
+            <div className="flex items-center gap-1 text-xs">
+              <VolumeX className="w-3 h-3 text-gray-500" />
+              <input
+                type="range" min="-30" max="0" step="1" value={volume}
+                onChange={(e) => setVolume(Number(e.target.value))}
+                className="w-16 accent-amber-500"
+              />
+              <Volume2 className="w-3 h-3 text-gray-500" />
+            </div>
+          </div>
+
+          {/* Grille des accords, avec surbrillance de la mesure jouée */}
+          <div className="flex flex-wrap gap-1">
+            {chords.map((c, i) => (
+              <span
+                key={i}
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold border ${
+                  currentBar === i
+                    ? 'bg-amber-600 border-amber-400 text-white'
+                    : 'bg-gray-800 border-gray-700 text-gray-400'
+                }`}
+              >
+                {c.label}
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---------- Partie C : recherche + lecture d'un backing track YouTube ----------
+function BackingTrackYoutube({ song, onUpdateSong, onPlayVideo }) {
+  const url = song.backingTrackUrl || '';
+  const videoId = extractYoutubeId(url);
+
+  const searchQuery = encodeURIComponent(`${song.artist} ${song.title} backing track`.trim());
+  const searchUrl = `https://www.youtube.com/results?search_query=${searchQuery}`;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-1">
+        <input
+          type="text"
+          placeholder="Colle ici l'URL YouTube du backing track..."
+          value={url}
+          onChange={(e) => onUpdateSong({ ...song, backingTrackUrl: e.target.value })}
+          className="flex-1 min-w-0 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs focus:outline-none focus:border-amber-500"
+        />
+        {videoId && (
+          <button
+            onClick={() => onPlayVideo?.({ id: 'backing-track', url, videoId, bookmarks: [] })}
+            className="flex-shrink-0 px-2 py-1 bg-red-700 hover:bg-red-600 rounded text-xs transition"
+            title="Lire le backing track"
+          >
+            ▶️
+          </button>
+        )}
+      </div>
+      <a
+        href={searchUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-1 px-2 py-1 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded text-xs transition"
+        title="Ouvre une recherche YouTube pré-remplie pour ce morceau"
+      >
+        <Search className="w-3 h-3" /> Chercher sur YouTube
+      </a>
+      <p className="text-[10px] text-gray-500">
+        Trouve une vidéo, copie son URL, colle-la ci-dessus. Elle se relit ensuite comme tes vidéos habituelles (repères inclus).
+      </p>
+    </div>
+  );
+}
+
+// ---------- Partie D : panneau conteneur avec les deux onglets ----------
+function BackingTrackPanel({ song, version, onUpdateSong, onPlayVideo }) {
+  const [tab, setTab] = useState('youtube'); // 'youtube' | 'generate'
+
+  return (
+    <div className="p-3 border-b border-gray-700">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="font-semibold text-amber-400 text-sm">🎧 Backing Track</h3>
+        <div className="flex bg-gray-900 rounded p-0.5 border border-gray-700">
+          <button
+            onClick={() => setTab('youtube')}
+            className={`px-2 py-1 rounded text-[10px] font-semibold transition ${tab === 'youtube' ? 'bg-amber-600' : 'hover:bg-gray-700'}`}
+          >
+            📺 Vidéo
+          </button>
+          <button
+            onClick={() => setTab('generate')}
+            className={`px-2 py-1 rounded text-[10px] font-semibold transition ${tab === 'generate' ? 'bg-amber-600' : 'hover:bg-gray-700'}`}
+          >
+            🎛️ Générer
+          </button>
+        </div>
+      </div>
+      {tab === 'youtube' ? (
+        <BackingTrackYoutube song={song} onUpdateSong={onUpdateSong} onPlayVideo={onPlayVideo} />
+      ) : (
+        <BackingTrackGenerator version={version} bpm={version.bpm || 120} />
+      )}
+    </div>
+  );
+}
+
+function RightPanel({ song, version, updateVersion, onUpdateSong, onPlayVideo }) {
   const [notesOpen, setNotesOpen] = useState(false);
 
   return (
@@ -5506,26 +10201,52 @@ function RightPanel({ song, version, updateVersion, onUpdateSong }) {
       <div className="bg-gray-750 border-b border-gray-700 p-3 flex-shrink-0">
         <h3 className="font-semibold text-amber-400 mb-3 text-sm">🎥 YouTube</h3>
         <div className="space-y-2">
-          {song.youtubeUrls?.map(url => (
-            <input
-              key={url.id}
-              type="text"
-              placeholder="URL YouTube..."
-              value={url.url}
-              onChange={(e) => {
-                const updated = {
-                  ...song,
-                  youtubeUrls: song.youtubeUrls.map(u => u.id === url.id ? { ...u, url: e.target.value } : u),
-                };
-                onUpdateSong(updated);
-              }}
-              className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs focus:outline-none focus:border-amber-500"
-            />
-          ))}
+          {song.youtubeUrls?.map(url => {
+            const videoId = extractYoutubeId(url.url);
+            return (
+              <div key={url.id} className="flex items-center gap-1">
+                <input
+                  type="text"
+                  placeholder="URL YouTube..."
+                  value={url.url}
+                  onChange={(e) => {
+                    const updated = {
+                      ...song,
+                      youtubeUrls: song.youtubeUrls.map(u => u.id === url.id ? { ...u, url: e.target.value } : u),
+                    };
+                    onUpdateSong(updated);
+                  }}
+                  className="flex-1 min-w-0 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs focus:outline-none focus:border-amber-500"
+                />
+                {videoId && (
+                  <button
+                    onClick={() => onPlayVideo?.({ id: url.id, url: url.url, videoId, bookmarks: url.bookmarks })}
+                    className="flex-shrink-0 px-2 py-1 bg-red-700 hover:bg-red-600 rounded text-xs transition"
+                    title="Voir la vidéo"
+                  >
+                    ▶️
+                  </button>
+                )}
+                {url.url ? (
+                  <a
+                    href={url.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex-shrink-0 px-2 py-1 bg-gray-700 border border-gray-600 rounded text-xs hover:bg-gray-600"
+                    title="Ouvrir dans YouTube"
+                  >
+                    ↗
+                  </a>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       </div>
 
       <ChordThumbnailsPanel version={version} updateVersion={updateVersion} />
+
+      <BackingTrackPanel song={song} version={version} onUpdateSong={onUpdateSong} onPlayVideo={onPlayVideo} />
 
       <div className={notesOpen ? 'flex-1 flex flex-col overflow-hidden p-3' : 'flex-shrink-0 p-3'}>
         <button
@@ -5548,3 +10269,7 @@ function RightPanel({ song, version, updateVersion, onUpdateSong }) {
     </>
   );
 }
+
+      const bootEl = document.getElementById('boot');
+      if (bootEl) bootEl.remove();
+      ReactDOM.createRoot(document.getElementById('root')).render(<GuitarApp />);
