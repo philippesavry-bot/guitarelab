@@ -922,9 +922,9 @@ function YoutubeMiniPlayer({
     className: "fixed inset-0 bg-black z-40",
     onClick: () => setFocusBackdrop(false)
   }), /*#__PURE__*/React.createElement("div", {
-    className: "fixed bottom-4 right-4 z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-2xl overflow-hidden flex flex-col",
+    className: `fixed bottom-4 z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-2xl overflow-hidden flex flex-col ${captureOpen ? 'left-4' : 'right-4'}`,
     style: {
-      width: playerSize.width,
+      width: captureOpen ? Math.max(playerSize.width, 560) : playerSize.width,
       height: playerSize.height,
       maxWidth: 'calc(100vw - 32px)',
       maxHeight: 'calc(100vh - 32px)'
@@ -981,22 +981,11 @@ function YoutubeMiniPlayer({
     className: "p-3 bg-gray-850 border-b border-gray-700 space-y-2"
   }, /*#__PURE__*/React.createElement("p", {
     className: "text-[10px] text-gray-400 leading-relaxed"
-  }, "1. Tape « ⛶ Plein écran net » puis mets la vidéo en pause sur l'accord voulu \xA0•\xA0 2. Capture d'écran iPad \xA0•\xA0 3. Colle-la ci-dessous (n'importe où sur cet écran)"), /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center gap-1.5 flex-wrap"
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "px-2 py-1 bg-purple-700 hover:bg-purple-600 rounded text-[10px] font-semibold cursor-pointer flex items-center gap-1"
-  }, "📁 Importer la capture", /*#__PURE__*/React.createElement("input", {
-    ref: capFileInputRef,
-    type: "file",
-    accept: "image/*",
-    onChange: handleCaptureFileInput,
-    className: "hidden"
-  })), /*#__PURE__*/React.createElement("button", {
-    onClick: captureFromClipboardButton,
-    className: "px-2 py-1 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded text-[10px] font-semibold"
-  }, "📋 Coller depuis le presse-papiers"), capHasImage && /*#__PURE__*/React.createElement("span", {
-    className: `ml-auto text-[10px] px-1.5 py-0.5 rounded ${capFrameLocked ? 'bg-purple-500/20 text-purple-300' : 'bg-amber-500/20 text-amber-300'}`
-  }, capFrameLocked ? '🔒 verrouillé — coller/importer = capture auto' : '🔓 ajuste le cadre')), /*#__PURE__*/React.createElement("div", {
+  }, "1. Tape « ⛶ Plein écran net » puis mets la vidéo en pause sur l'accord voulu \xA0•\xA0 2. Capture d'écran iPad \xA0•\xA0 3. Colle n'importe où sur cet écran"), /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-3 items-start"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex-1 min-w-0"
+  }, !capHasImage ? /*#__PURE__*/React.createElement("div", {
     contentEditable: true,
     suppressContentEditableWarning: true,
     inputMode: "none",
@@ -1004,10 +993,10 @@ function YoutubeMiniPlayer({
     onInput: e => {
       e.currentTarget.textContent = '';
     },
-    className: "w-full px-2 py-3 bg-gray-900 border border-dashed border-gray-600 rounded text-center text-[10px] text-gray-500 focus:outline-none focus:border-purple-500"
-  }, "Appuie ici puis « Coller », ou colle directement où tu veux sur cet écran"), capHasImage && /*#__PURE__*/React.createElement("div", {
+    className: "w-full h-44 flex items-center justify-center px-3 py-3 bg-gray-900 border-2 border-dashed border-gray-600 rounded-lg text-center text-xs text-gray-500 focus:outline-none focus:border-purple-500"
+  }, "Colle ta capture ici") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     ref: capStageRef,
-    className: "relative w-full bg-black rounded border border-gray-600 overflow-hidden"
+    className: "relative w-full bg-black rounded-lg border border-gray-600 overflow-hidden"
   }, /*#__PURE__*/React.createElement("img", {
     ref: capImgElRef,
     src: capImgSrc,
@@ -1042,33 +1031,59 @@ function YoutubeMiniPlayer({
       cursor: corner === 'tl' || corner === 'br' ? 'nwse-resize' : 'nesw-resize',
       touchAction: 'none'
     }
-  })))), capHasImage && /*#__PURE__*/React.createElement("div", {
-    className: "flex items-center gap-1.5"
-  }, /*#__PURE__*/React.createElement("button", {
+  })))), /*#__PURE__*/React.createElement("div", {
+    contentEditable: true,
+    suppressContentEditableWarning: true,
+    inputMode: "none",
+    onPaste: handleCapturePasteEvent,
+    onInput: e => {
+      e.currentTarget.textContent = '';
+    },
+    className: "mt-2 w-full px-2 py-2 bg-gray-900 border border-dashed border-gray-700 rounded text-center text-[10px] text-gray-500 focus:outline-none focus:border-purple-500"
+  }, "Coller une nouvelle capture ici"))), /*#__PURE__*/React.createElement("div", {
+    className: "w-36 flex-shrink-0 flex flex-col gap-2"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "px-3 py-2.5 bg-purple-700 hover:bg-purple-600 rounded-lg text-xs font-semibold cursor-pointer flex items-center justify-center gap-1.5 text-center"
+  }, "📁 Importer", /*#__PURE__*/React.createElement("input", {
+    ref: capFileInputRef,
+    type: "file",
+    accept: "image/*",
+    onChange: handleCaptureFileInput,
+    className: "hidden"
+  })), /*#__PURE__*/React.createElement("button", {
+    onClick: captureFromClipboardButton,
+    className: "px-3 py-2.5 bg-gray-700 hover:bg-gray-600 border border-gray-600 rounded-lg text-xs font-semibold"
+  }, "📋 Coller"), capHasImage && /*#__PURE__*/React.createElement("button", {
     onClick: () => doCapture(capImgElRef.current, capNormSel),
-    className: "flex-1 px-2 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-[10px] font-semibold"
+    className: "px-3 py-2.5 bg-purple-600 hover:bg-purple-500 rounded-lg text-xs font-semibold"
   }, "📷 Capturer"), capFrameLocked && /*#__PURE__*/React.createElement("button", {
     onClick: unlockCaptureFrame,
-    className: "px-2 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-[10px] font-semibold"
-  }, "🔓 Réajuster")), capCaptures.length > 0 && /*#__PURE__*/React.createElement("div", {
-    className: "flex gap-1.5 overflow-x-auto pb-1"
+    className: "px-3 py-2.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs font-semibold"
+  }, "🔓 Réajuster"), capHasImage && /*#__PURE__*/React.createElement("span", {
+    className: `text-[10px] px-2 py-1 rounded text-center ${capFrameLocked ? 'bg-purple-500/20 text-purple-300' : 'bg-amber-500/20 text-amber-300'}`
+  }, capFrameLocked ? '🔒 verrouillé' : '🔓 ajuste le cadre'), capCaptures.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "pt-2 border-t border-gray-700"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "text-[10px] text-gray-400 mb-1.5"
+  }, `Capturées (${capCaptures.length})`), /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-col gap-1.5 max-h-40 overflow-y-auto"
   }, capCaptures.map((c, i) => /*#__PURE__*/React.createElement("div", {
     key: c.id,
-    className: "relative flex-shrink-0"
+    className: "relative"
   }, /*#__PURE__*/React.createElement("img", {
     src: c.src,
     alt: "",
-    className: "h-14 rounded border border-gray-600 bg-black"
+    className: "w-full h-14 object-cover rounded border border-gray-600 bg-black"
   }), /*#__PURE__*/React.createElement("button", {
     onClick: () => removeCapture(c.id),
-    className: "absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-700 hover:bg-red-600 rounded-full flex items-center justify-center text-[9px] leading-none",
+    className: "absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-700 hover:bg-red-600 rounded-full flex items-center justify-center text-[10px] leading-none",
     title: "Retirer"
-  }, "×")))), capMessage && /*#__PURE__*/React.createElement("p", {
+  }, "×"))))))), capMessage && /*#__PURE__*/React.createElement("p", {
     className: "text-center text-[10px] text-green-400 font-semibold"
   }, capMessage), /*#__PURE__*/React.createElement("button", {
     onClick: applyCaptures,
     disabled: capCaptures.length === 0,
-    className: "w-full px-2 py-1.5 bg-green-700 hover:bg-green-600 disabled:opacity-40 rounded text-[10px] font-semibold"
+    className: "w-full px-3 py-2.5 bg-green-700 hover:bg-green-600 disabled:opacity-40 rounded-lg text-xs font-semibold"
   }, "✓ Ajouter ", capCaptures.length > 0 ? `(${capCaptures.length})` : '', " à la fiche")), resumeChoice === null && bookmarks.length > 0 ? /*#__PURE__*/React.createElement("div", {
     className: "p-4 flex flex-col items-center gap-2 text-center bg-gray-900 border-b border-gray-700"
   }, /*#__PURE__*/React.createElement("p", {
