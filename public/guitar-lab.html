@@ -7810,15 +7810,18 @@ function WorkScreen({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackSongData, setFeedbackSongData] = useState(null);
+  const [startPromptOpen, setStartPromptOpen] = useState(false);
   useEffect(() => {
     if (!timerRunning) return;
     const interval = setInterval(() => setTimerSeconds(s => s + 1), 1000);
     return () => clearInterval(interval);
   }, [timerRunning]);
-  // Arrête et remet à zéro le chrono si on change de morceau (démarre automatiquement en mode session)
+  // Arrête et remet à zéro le chrono si on change de morceau (démarre automatiquement en mode session,
+  // sinon demande confirmation à l'ouverture)
   useEffect(() => {
     setTimerRunning(isSessionActive);
     setTimerSeconds(0);
+    setStartPromptOpen(!isSessionActive);
   }, [song.id, isSessionActive]);
   const formatTimer = sec => {
     const m = Math.floor(sec / 60).toString().padStart(2, '0');
@@ -8140,7 +8143,27 @@ function WorkScreen({
     currentProgress: feedbackSongData.currentProgress,
     onFeedback: handleFeedbackSubmit,
     onCancel: () => { setFeedbackOpen(false); setFeedbackSongData(null); }
-  }), /*#__PURE__*/React.createElement("div", {
+  }), startPromptOpen && /*#__PURE__*/React.createElement("div", {
+    className: "fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4",
+    onClick: () => setStartPromptOpen(false)
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "bg-gray-800 rounded-lg max-w-sm w-full border border-gray-700 shadow-2xl p-6 text-center",
+    onClick: (e) => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-4xl mb-3"
+  }, "🎸"), /*#__PURE__*/React.createElement("h3", {
+    className: "text-lg font-bold text-white mb-1"
+  }, song.title), /*#__PURE__*/React.createElement("p", {
+    className: "text-sm text-gray-400 mb-5"
+  }, "Lancer le chrono de pratique ?"), /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-3"
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setStartPromptOpen(false),
+    className: "flex-1 px-4 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold transition text-sm"
+  }, "Non"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => { setTimerRunning(true); setStartPromptOpen(false); },
+    className: "flex-1 px-4 py-3 bg-green-600 hover:bg-green-500 rounded-lg font-semibold transition text-sm text-white"
+  }, "▶️ Oui")))), /*#__PURE__*/React.createElement("div", {
     className: "flex-1 flex overflow-hidden gap-0.5 bg-gray-900 p-0.5 relative"
   }, isCompact && !leftCollapsed && /*#__PURE__*/React.createElement("div", {
     className: "fixed inset-0 bg-black/60 z-30",
