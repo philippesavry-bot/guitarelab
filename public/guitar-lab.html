@@ -4658,7 +4658,7 @@ function GuitarApp() {
     })();
   }, []);
   const logPracticeSession = (songId, songTitle, durationSec) => {
-    if (durationSec < 5) return; // ignore les sessions trop courtes (déclenchement accidentel)
+    if (durationSec < 1) return; // ignore les déclenchements accidentels (<1s)
     const entry = {
       id: newId(),
       songId,
@@ -7843,22 +7843,22 @@ function WorkScreen({
     const s = (sec % 60).toString().padStart(2, '0');
     return `${m}:${s}`;
   };
-  const stopAndLogTimer = () => {
-    setTimerRunning(false);
-    if (timerSeconds > 0) {
-      setFeedbackSongData({ id: song.id, title: song.title, duration: timerSeconds, currentProgress: song.progress || 0 });
-      setFeedbackOpen(true);
-    }
-    setTimerSeconds(0);
-  };
-  const handleFeedbackSubmit = (newProgress) => {
-    if (feedbackSongData) {
-      onLogPracticeSession?.(feedbackSongData.id, feedbackSongData.title, feedbackSongData.duration);
-      onUpdateSong({ ...song, progress: newProgress });
-    }
-    setFeedbackOpen(false);
-    setFeedbackSongData(null);
-  };
+const stopAndLogTimer = () => {
+  setTimerRunning(false);
+  if (timerSeconds >= 1) {
+    onLogPracticeSession?.(song.id, song.title, timerSeconds);
+    setFeedbackSongData({ id: song.id, title: song.title, duration: timerSeconds, currentProgress: song.progress || 0 });
+    setFeedbackOpen(true);
+  }
+  setTimerSeconds(0);
+};
+const handleFeedbackSubmit = (newProgress) => {
+  if (feedbackSongData) {
+    onUpdateSong({ ...song, progress: newProgress });
+  }
+  setFeedbackOpen(false);
+  setFeedbackSongData(null);
+};
   const goToNextInSession = () => {
     stopAndLogTimer();
     onSessionNext?.();
