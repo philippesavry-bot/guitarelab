@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { SongList } from "../components/SongList";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -24,13 +25,18 @@ export const Route = createFileRoute("/")({
 
 function Index() {
   return (
-    <main className="h-screen w-screen bg-background">
-      <h1 className="sr-only">Guitar Lab — gestion de mes fiches de formation à la guitare</h1>
-      <iframe
-        src="/guitar-lab.html"
-        title="Guitar Lab"
-        className="h-full w-full border-0"
-      />
+    <main className="min-h-screen w-screen bg-slate-950 text-slate-50">
+      <header className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 backdrop-blur-sm sticky top-0 z-10">
+        <div>
+          <h1 className="text-2xl font-bold text-white tracking-tight">Guitar Lab</h1>
+          <p className="text-sm text-slate-400">Mon atelier de formation guitare</p>
+        </div>
+        <div className="flex gap-2">
+          {/* Future action buttons like "Add Song" or "Sync" */}
+        </div>
+      </header>
+
+      <SongList />
     </main>
   );
 }

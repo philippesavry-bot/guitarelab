@@ -10,11 +10,17 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SongSongIdRouteImport } from './routes/song.$songId'
 import { Route as ApiPublicYoutubeMetaRouteImport } from './routes/api/public/youtube-meta'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SongSongIdRoute = SongSongIdRouteImport.update({
+  id: '/song/$songId',
+  path: '/song/$songId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPublicYoutubeMetaRoute = ApiPublicYoutubeMetaRouteImport.update({
@@ -25,27 +31,31 @@ const ApiPublicYoutubeMetaRoute = ApiPublicYoutubeMetaRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/song/$songId': typeof SongSongIdRoute
   '/api/public/youtube-meta': typeof ApiPublicYoutubeMetaRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/song/$songId': typeof SongSongIdRoute
   '/api/public/youtube-meta': typeof ApiPublicYoutubeMetaRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/song/$songId': typeof SongSongIdRoute
   '/api/public/youtube-meta': typeof ApiPublicYoutubeMetaRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/public/youtube-meta'
+  fullPaths: '/' | '/song/$songId' | '/api/public/youtube-meta'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/public/youtube-meta'
-  id: '__root__' | '/' | '/api/public/youtube-meta'
+  to: '/' | '/song/$songId' | '/api/public/youtube-meta'
+  id: '__root__' | '/' | '/song/$songId' | '/api/public/youtube-meta'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  SongSongIdRoute: typeof SongSongIdRoute
   ApiPublicYoutubeMetaRoute: typeof ApiPublicYoutubeMetaRoute
 }
 
@@ -56,6 +66,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/song/$songId': {
+      id: '/song/$songId'
+      path: '/song/$songId'
+      fullPath: '/song/$songId'
+      preLoaderRoute: typeof SongSongIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/youtube-meta': {
@@ -70,6 +87,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  SongSongIdRoute: SongSongIdRoute,
   ApiPublicYoutubeMetaRoute: ApiPublicYoutubeMetaRoute,
 }
 export const routeTree = rootRouteImport
