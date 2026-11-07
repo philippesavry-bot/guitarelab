@@ -662,7 +662,7 @@ function songRow(song, idx, total, inRoadmap){
   </div>`;
 }
 function moveSong(id,dir){
-  const i=lib.roadmap.indexOf(id), j=i+direction;
+  const i=lib.roadmap.indexOf(id), j=i+dir;
   if(j<0||j>=lib.roadmap.length) return;
   [lib.roadmap[i],lib.roadmap[j]]=[lib.roadmap[j],lib.roadmap[i]]; save(); render();
 }
