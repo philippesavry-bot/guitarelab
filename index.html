@@ -933,3 +933,34 @@ function renderDetail(){
           ${(y.bookmarks||[]).length?`<span class="pill">📍${y.bookmarks.length}</span>`:""}
           <button class="mini" onclick="delYt(${i})">✕</button></div>`).join("")}
         <div style="display:flex;gap:6px">
+          <input class="search" id="yt-in" placeholder="Coller une URL..." style="padding:8px 10px;font-size:12px" onkeydown="if(event.key==='Enter')addYt()">
+          <button class="btn ghost sm" onclick="addYt()">+</button>
+        </div>
+        <h3 style="margin-top:8px">🎹 Accords complexes</h3>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${v.chords.map((c,i)=>`<span class="chordtag">${esc(c)}<button onclick="delChord(${i})">✕</button></span>`).join("") || `<span style="font-size:12px;color:var(--dim);font-style:italic">Aucun accord noté.</span>`}
+        </div>
+        <div style="display:flex;gap:6px">
+          <input class="search" id="chord-in" placeholder="ex. F#m7, Bm..." style="padding:8px 10px;font-size:12px" onkeydown="if(event.key==='Enter')addChord()">
+          <button class="btn ghost sm" onclick="addChord()">+</button>
+        </div>
+        <h3 style="margin-top:8px">📝 Notes</h3>
+        <textarea class="notecard" style="min-height:90px" placeholder="Positions, astuces, repères..." oninput="curVer().notes=this.value" onblur="save()">${esc(v.notes||"")}</textarea>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:18px">
+      <button class="btn primary" style="flex:1;padding:14px" onclick="startSession('${s.id}')">▶ Démarrer une session</button>
+    </div>`;
+}
+
+/* ---------- Rendu ---------- */
+const TABS=[["biblio","📚 Bibliothèque"],["roadmap","🗺️ Feuille de route"],["journal","📖 Journal"],["parcours","🧭 Parcours"]];
+function renderApp(){
+  $("#tabs").innerHTML = TABS.map(([k,l])=>`<button class="tab ${tab===k?'active':''}" onclick="tab='${k}';detail=null;renderApp();window.scrollTo(0,0)">${l}</button>`).join("");
+  $("#app").innerHTML = detail ? renderDetail() : tab==="biblio"?renderBiblio():tab==="roadmap"?renderRoadmap():tab==="journal"?renderJournal():renderParcours();
+}
+function render(){ renderApp(); }
+window.addEventListener("DOMContentLoaded",()=>renderApp());
+</script>
+</body>
+</html>
