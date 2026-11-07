@@ -398,6 +398,9 @@ function renderBiblio(){
     if(sortMode==="title")    return a.title.localeCompare(b.title,"fr");
     if(sortMode==="progress")  return b.progress-a.progress;
     if(sortMode==="time")     return b.totalPracticeTime-a.totalPracticeTime;
+    if(sortMode==="artist")   return (a.artist||"").localeCompare(b.artist||"","fr") || a.title.localeCompare(b.title,"fr");
+    if(sortMode==="classification") return ((a.classifications||[])[0]||"zzz").localeCompare((b.classifications||[])[0]||"zzz","fr") || a.title.localeCompare(b.title,"fr");
+    if(sortMode==="favorite") return (b.favorite?1:0)-(a.favorite?1:0) || a.title.localeCompare(b.title,"fr");
     return 0;
   });
   const list = view==="grid"
@@ -427,6 +430,9 @@ function renderBiblio(){
       <option value="title" ${lib.sortBy==="title"?"selected":""}>🔤 Titre A→Z</option>
       <option value="progress" ${lib.sortBy==="progress"?"selected":""}>📈 Progression</option>
       <option value="time" ${lib.sortBy==="time"?"selected":""}>⏱ Temps de pratique</option>
+      <option value="artist" ${lib.sortBy==="artist"?"selected":""}>🎤 Artiste A→Z</option>
+      <option value="classification" ${lib.sortBy==="classification"?"selected":""}>🏷 Classification</option>
+      <option value="favorite" ${lib.sortBy==="favorite"?"selected":""}>❤️ Favoris d'abord</option>
     </select>
     <button class="btn ghost" onclick="view=view==='grid'?'list':'grid';lib.viewMode=view;save();renderApp()">${view==="grid"?"☰ Liste":"▦ Grille"}</button>
     <button class="btn sm ghost" style="font-size:11px" onclick="exportJson()">⬇ Exporter</button>
