@@ -577,18 +577,29 @@ let YT_THUMB = "";
 const YT_JUNK = /\(?(official|officiel(le)?|video|vid[eé]o|lyrics?|paroles|hd|4k|hq|remaster(ed|is[ée])?|audio|mv|mv4k|live|full song|with (lyrics?|paroles)|sub\s?(fr|fra|español|en)?|guitar (lesson|tutorial)|lesson|tutorial|tuto(riel)?|how to play|comment jouer|learn(ing)? to play|play ?along|backing track|cover|fingerstyle|acoustic|electric guitar|tab(lature)?s?|chords?( ?lesson)?|decomposed|fait pour la guitare)\)?/gi;
 function parseYtTitle(raw){
   let t = (raw||"").replace(/\s+/g," ").trim();
+  t = t.split(/\s*\|\s*/)[0].trim(); // « Morceau - Artiste | descriptif » → on garde la partie utile
   // « How to play X by Y » / « Comment jouer X par Y » → morceau X, artiste Y (pas le formateur !)
   const m1 = t.match(/^(?:how to play|comment jouer(?: à| de| la guitare)?|tuto(?:riel)?|guitar lesson|cours de guitare|learn(ing)? to play)\s+(.+?)\s+(?:by|de|par)\s+(.+)$/i);
-  if(m1) return { artist: m1[3].replace(YT_JUNK,"").trim(), title: m1[2].replace(YT_JUNK,"").trim() };
+  if(m1) return { artist: m1[3].replace(YT_JUNK,"").replace(/[\s\-–—]+$/,"").trim(), title: m1[2].replace(YT_JUNK,"").trim() };
   // « X by Y »
   const m2 = t.match(/^(.+?)\s+(?:by|par|de)\s+([A-ZÉÀÂÎÔÛ][\w&.'’\- ]{1,40})$/);
   if(m2 && !/lesson|tuto|how to/i.test(m2[1])) return { artist: m2[2].replace(YT_JUNK,"").trim(), title: m2[1].replace(YT_JUNK,"").trim() };
-  // « Artiste - Morceau »
+  // « A - B » : on devine qui est l'artiste (les noms d'artistes = peu de mots, tout en majuscule, pas de mots-outils)
   const parts = t.split(/\s+[-–—]\s+/);
   if(parts.length >= 2){
     const a = parts[0].replace(YT_JUNK,"").trim();
     const b = parts.slice(1).join(" - ").replace(YT_JUNK,"").trim();
-    if(a && b) return { artist: a, title: b };
+    if(a && b){
+      const artistScore = s => { s=s.trim(); if(!s) return -9;
+        let sc = 0; const w = s.split(/\s+/);
+        if(w.length<=3) sc+=2;
+        sc -= w.slice(1).filter(x=>/^[a-zà-ÿ]/.test(x)).length*2; // mots-outils internes → plutôt un titre
+        if(/\d/.test(s)) sc-=1; if(/\b(feat|ft)\b/i.test(s)) sc+=2;
+        return sc; };
+      if(/^["“'].*["”']$/.test(a)) return { artist:b, title:a };
+      if(/^["“'].*["”']$/.test(b)) return { artist:a, title:b };
+      return artistScore(b) >= artistScore(a) ? { artist:b, title:a } : { artist:a, title:b };
+    }
   }
   return { artist: "", title: t.replace(YT_JUNK,"").replace(/\s{2,}/g," ").trim() };
 }
@@ -597,6 +608,22 @@ function guessStyle(t){
   const map = [["fingerstyle","Fingerstyle"],["picking","Fingerstyle"],["blues","Blues"],["jazz","Jazz"],["classical|classique|étude|nocturne|sonate","Classique"],["metal|métal|riff lourd","Métal"],["folk|acoustic","Folk"],["rock","Rock"],["rap|trap","Non défini"],["chanson|français","Non défini"]];
   for(const [k,v] of map){ if(new RegExp(k).test(s)) return v; }
   return "";
+}
+async function refineWithItunes(parsed){
+  try{
+    const q = ((parsed.title||"") + " " + (parsed.artist||"")).trim();
+    if(!q) return null;
+    const r = await fetch("https://itunes.apple.com/search?media=music&limit=5&term=" + encodeURIComponent(q));
+    if(!r.ok) return null;
+    const j = await r.json();
+    const T = (parsed.title||"").toLowerCase(), A = (parsed.artist||"").toLowerCase();
+    for(const res of (j.results||[])){
+      const rt = (res.trackName||"").toLowerCase(), ra = (res.artistName||"").toLowerCase();
+      const ok = (T && (rt.includes(T)||T.includes(rt))) || (A && (ra.includes(A)||A.includes(ra)));
+      if(ok) return { title: res.trackName, artist: res.artistName, genre: res.primaryGenreName };
+    }
+  }catch(e){}
+  return null;
 }
 async function ytFill(){
   const url = $("#n-url").value.trim();
@@ -615,6 +642,9 @@ async function ytFill(){
   if(g) $("#n-style").value = g;
   if(data.thumbnail_url) YT_THUMB = data.thumbnail_url;
   toast("Rempli ✔ — vérifie le titre et l'artiste");
+  const ref = await refineWithItunes(parsed);
+  if(ref){ $("#n-title").value = ref.title; $("#n-artist").value = ref.artist;
+    if(!g && ref.genre) $("#n-style").value = ref.genre; toast("Vérifié via iTunes ✔ — titre et artiste corrigés"); }
 }
 
 /* ---------- Ajout morceau ---------- */
@@ -662,7 +692,7 @@ function songRow(song, idx, total, inRoadmap){
   </div>`;
 }
 function moveSong(id,dir){
-  const i=lib.roadmap.indexOf(id), j=i+dir;
+  const i=lib.roadmap.indexOf(id), j=i+direction;
   if(j<0||j>=lib.roadmap.length) return;
   [lib.roadmap[i],lib.roadmap[j]]=[lib.roadmap[j],lib.roadmap[i]]; save(); render();
 }
