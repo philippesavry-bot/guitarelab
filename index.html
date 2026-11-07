@@ -190,7 +190,7 @@ const DEFAULT = {songs:seedSongs,roadmap:["s8","s7","s6"],sessions:seedSessions,
 const KEY = "guitar-lab-demo";
 let lib = load();
 function load(){ try{ const s=localStorage.getItem(KEY); if(s) return JSON.parse(s);}catch(e){} return JSON.parse(JSON.stringify(DEFAULT)); }
-function save(){ try{localStorage.setItem(KEY,JSON.stringify(lib));}catch(e){} }
+function save(){ try{ localStorage.setItem(KEY,JSON.stringify(lib)); }catch(e){ try{ toast("⚠️ Stockage plein : les pochettes ne seront pas conservées après fermeture"); }catch(_){} } }
 function reset(){ localStorage.removeItem(KEY); lib = JSON.parse(JSON.stringify(DEFAULT)); save(); render(); }
 
 /* ---------- Helpers ---------- */
@@ -330,6 +330,7 @@ function fromLegacyHtml(raw){
     }) : [{id:s.id+"-v1",label:"Version originale",sections:[],images:[],youtube:yts,chords:[],notes:""}];
     return {
       id:String(s.id), title:s.title||"Sans titre", artist:s.artist||"—",
+      imageUrl:(typeof s.imageUrl==="string"&&s.imageUrl.startsWith("data:image"))?s.imageUrl:"",
       style:s.style||"Non défini", difficulty:diffFr(s.difficulty),
       progress: lastProg[s.id] ?? (+s.progress||0),
       totalPracticeTime:cumul[s.id]||0, tempo:0,
