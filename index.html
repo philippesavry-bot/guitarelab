@@ -63,7 +63,8 @@
   .pbar{height:6px;border-radius:99px;background:var(--panel2);overflow:hidden}
   .pbar>i{display:block;height:100%;background:var(--amber2);border-radius:99px}
 
-  .row{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;background:rgba(15,23,42,.6);border:1px solid var(--border)}
+  .row{position:relative;overflow:hidden;display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;background:rgba(15,23,42,.6);border:1px solid var(--border)}
+  .row .grow,.row .mini-pbar,.row span,.row button{position:relative}
   .row .grow{flex:1;min-width:0}
   .row .t{font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .row .a{color:var(--muted);font-size:12px}
@@ -202,7 +203,7 @@ function toast(msg){ const t=document.createElement("div");t.className="toast";t
 
 /* ---------- État UI ---------- */
 let tab = "biblio";
-let search=""; let filtStyle=""; let filtDiff=""; let view="grid"; let cat="challenges";
+let search=""; let filtStyle=""; let filtDiff=""; let view = lib.viewMode || "grid"; let cat="challenges";
 let detail=null; let rng="7d"; let session=null; // {songId, elapsed, paused, acc, timer}
 
 const songById = id => lib.songs.find(s=>s.id===id);
@@ -366,12 +367,13 @@ function addSong(){
 /* ---------- Pages ---------- */
 function statCard(icon,lbl,val,color){ return `<div class="card stat"><span class="ic">${icon}</span><div><div class="lbl">${lbl}</div><div class="val" style="color:${color||'#fff'}">${val}</div></div></div>`; }
 function songRow(song, idx, total, inRoadmap){
-  return `<div class="row">
+  const hue = Math.round(song.progress*1.2);
+  return `<div class="row" style="background:linear-gradient(90deg,hsla(${hue},70%,45%,.35) ${song.progress}%,rgba(15,23,42,.6) ${song.progress}%)">
     ${inRoadmap?`<button class="arrow" onclick="moveSong('${song.id}',-1)" ${idx===0?"disabled":""}>↑</button>
     <button class="arrow" onclick="moveSong('${song.id}',1)" ${idx===total-1?"disabled":""}>↓</button>`:""}
     <div class="grow"><div class="t">${esc(song.title)}</div><div class="a">${esc(song.artist)} · ${esc(song.style)}</div></div>
     <div class="mini-pbar"><div class="pbar"><i style="width:${song.progress}%"></i></div></div>
-    <span style="font-size:12px;color:var(--amber2);font-weight:700;width:38px;text-align:right">${song.progress}%</span>
+    <span style="font-size:12px;color:hsl(${hue},70%,65%);font-weight:700;width:38px;text-align:right">${song.progress}%</span>
     <button class="btn sm primary" onclick="startSession('${song.id}');openDetail('${song.id}')">▶ Travailler</button>
   </div>`;
 }
@@ -385,6 +387,19 @@ function renderBiblio(){
   let songs = lib.songs.filter(s =>
     (!search || (s.title+" "+s.artist).toLowerCase().includes(search.toLowerCase())) &&
     (!filtStyle || s.style===filtStyle) && (!filtDiff || s.difficulty===filtDiff));
+  // Tri : dernier pratiqué (défaut), dernier ajouté, titre, progression, temps
+  const lastPracticed = {};
+  lib.sessions.forEach(se => (se.songs||[]).forEach(id => { if(!lastPracticed[id] || se.date > lastPracticed[id]) lastPracticed[id]=se.date; }));
+  const tsOf = id => +String(id).replace(/\D/g,"")||0;
+  const sortMode = lib.sortBy || "practice";
+  songs.sort((a,b)=>{
+    if(sortMode==="practice")  return (lastPracticed[b.id]||"").localeCompare(lastPracticed[a.id]||"");
+    if(sortMode==="added")    return tsOf(b.id)-tsOf(a.id);
+    if(sortMode==="title")    return a.title.localeCompare(b.title,"fr");
+    if(sortMode==="progress")  return b.progress-a.progress;
+    if(sortMode==="time")     return b.totalPracticeTime-a.totalPracticeTime;
+    return 0;
+  });
   const list = view==="grid"
     ? `<div class="grid">${songs.map(s=>{
         const hue = Math.round(s.progress*1.2); // 0% = rouge (0°) → 100% = vert (120°)
@@ -406,9 +421,16 @@ function renderBiblio(){
     <input class="search" placeholder="🔍 Rechercher un morceau ou un artiste..." value="${esc(search)}" oninput="search=this.value;renderApp()">
     <select class="filt" onchange="filtStyle=this.value;renderApp()"><option value="">Tous styles</option>${STYLES.map(s=>`<option ${s===filtStyle?"selected":""}>${s}</option>`).join("")}</select>
     <select class="filt" onchange="filtDiff=this.value;renderApp()"><option value="">Toutes difficultés</option><option ${filtDiff==="Facile"?"selected":""}>Facile</option><option ${filtDiff==="Moyen"?"selected":""}>Moyen</option><option ${filtDiff==="Difficile"?"selected":""}>Difficile</option></select>
-    <button class="btn ghost" onclick="view=view==='grid'?'list':'grid';renderApp()">${view==="grid"?"☰ Liste":"▦ Grille"}</button>
-    <button class="btn ghost" onclick="exportJson()">⬇ Exporter</button>
-    <button class="btn ghost" onclick="$('#imp-file').click()">⬆ Importer</button>
+    <select class="filt" onchange="lib.sortBy=this.value;save();renderApp()">
+      <option value="practice" ${(lib.sortBy||"practice")==="practice"?"selected":""}>🕐 Dernier pratiqué</option>
+      <option value="added" ${lib.sortBy==="added"?"selected":""}>✨ Dernier ajouté</option>
+      <option value="title" ${lib.sortBy==="title"?"selected":""}>🔤 Titre A→Z</option>
+      <option value="progress" ${lib.sortBy==="progress"?"selected":""}>📈 Progression</option>
+      <option value="time" ${lib.sortBy==="time"?"selected":""}>⏱ Temps de pratique</option>
+    </select>
+    <button class="btn ghost" onclick="view=view==='grid'?'list':'grid';lib.viewMode=view;save();renderApp()">${view==="grid"?"☰ Liste":"▦ Grille"}</button>
+    <button class="btn sm ghost" style="font-size:11px" onclick="exportJson()">⬇ Exporter</button>
+    <button class="btn sm ghost" style="font-size:11px" onclick="$('#imp-file').click()">⬆ Importer</button>
     <input type="file" id="imp-file" accept=".json,application/json" style="display:none" onchange="importJson(this)">
     <button class="btn primary" onclick="openAddModal()">+ Nouveau morceau</button>
   </div>
