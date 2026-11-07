@@ -1,0 +1,651 @@
+
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Guitar Lab</title>
+<style>
+  :root{
+    --bg:#020617; --panel:#0f172a; --panel2:#1e293b; --border:#1e293b; --border2:#334155;
+    --text:#f1f5f9; --muted:#94a3b8; --dim:#64748b; --amber:#d97706; --amber2:#f59e0b; --amber-soft:#fef3c7;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+  button{cursor:pointer;font-family:inherit}
+  input,select{font-family:inherit}
+
+  /* Header */
+  header.app{position:sticky;top:0;z-index:30;background:rgba(15,23,42,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+  .hbar{max-width:1100px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:16px}
+  .logo{font-size:20px;font-weight:800;display:flex;align-items:center;gap:10px}
+  .logo .gg{font-size:24px}
+  .logo em{color:var(--amber2);font-style:normal}
+  .tabs{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
+  .tab{padding:8px 16px;border-radius:10px;font-size:13px;font-weight:600;color:var(--muted);background:transparent;border:1px solid transparent;transition:.15s}
+  .tab:hover{color:#fff;background:var(--panel2)}
+  .tab.active{background:var(--amber);color:#fff;border-color:var(--amber)}
+
+  .wrap{max-width:1100px;margin:0 auto;padding:28px 20px 80px}
+  .page-title{font-size:26px;font-weight:800;display:flex;align-items:center;gap:12px}
+  .page-sub{color:var(--muted);font-size:13px;margin-top:6px}
+
+  .card{background:rgba(15,23,42,.6);border:1px solid var(--border);border-radius:16px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}
+  .stat{padding:16px 18px;display:flex;align-items:center;gap:12px}
+  .stat .ic{font-size:20px}
+  .stat .lbl{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+  .stat .val{font-size:20px;font-weight:800;margin-top:2px}
+
+  /* Library */
+  .toolbar{display:flex;gap:10px;margin:22px 0 18px;flex-wrap:wrap;align-items:center}
+  .search{flex:1;min-width:200px;padding:10px 14px;border-radius:10px;background:#020617;border:1px solid var(--border2);color:var(--text);font-size:13px;outline:none}
+  .search:focus{border-color:var(--amber)}
+  select.filt{padding:10px 12px;border-radius:10px;background:#020617;border:1px solid var(--border2);color:var(--muted);font-size:13px}
+  .btn{padding:10px 16px;border-radius:10px;font-size:13px;font-weight:600;border:1px solid transparent;transition:.15s}
+  .btn.primary{background:var(--amber);color:#fff}
+  .btn.primary:hover{background:#b45309}
+  .btn.ghost{background:var(--panel2);color:var(--muted);border-color:var(--border2)}
+  .btn.ghost:hover{color:#fff}
+  .btn.sm{padding:6px 10px;font-size:12px;border-radius:8px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+  .song{position:relative;overflow:hidden;padding:16px;border-radius:16px;background:rgba(15,23,42,.6);border:1px solid var(--border);display:flex;flex-direction:column;gap:8px;transition:.15s;text-align:left;width:100%}
+  .song:hover{border-color:var(--amber);transform:translateY(-2px)}
+  .song .fill{position:absolute;inset:0;width:var(--fill,0%);transition:width .6s}
+  .song .body{position:relative;display:flex;flex-direction:column;gap:8px}
+  .song .t{font-weight:700;font-size:15px;color:var(--text)}
+  .song .a{color:var(--muted);font-size:13px}
+  .cover{flex-shrink:0;width:52px;height:52px;border-radius:10px;background:var(--panel2);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;font-size:24px;overflow:hidden}
+  .song .head{position:relative;display:flex;gap:12px;align-items:center}
+  .song .meta{display:flex;gap:8px;font-size:11px;color:var(--dim);flex-wrap:wrap}
+  .pill{padding:2px 8px;border-radius:999px;background:var(--panel2);border:1px solid var(--border2)}
+  .pbar{height:6px;border-radius:99px;background:var(--panel2);overflow:hidden}
+  .pbar>i{display:block;height:100%;background:var(--amber2);border-radius:99px}
+
+  .row{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;background:rgba(15,23,42,.6);border:1px solid var(--border)}
+  .row .grow{flex:1;min-width:0}
+  .row .t{font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .row .a{color:var(--muted);font-size:12px}
+  .mini-pbar{width:120px}
+
+  /* Modal */
+  .overlay{position:fixed;inset:0;background:rgba(2,6,23,.75);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .modal{width:100%;max-width:440px;background:#0f172a;border:1px solid var(--border2);border-radius:18px;padding:24px;max-height:90vh;overflow:auto}
+  .modal h3{font-size:17px;color:var(--amber2);margin-bottom:8px}
+  .modal p{font-size:13px;color:var(--muted);margin-bottom:16px}
+  .modal label{display:block;font-size:12px;color:var(--muted);margin:12px 0 4px}
+  .modal input[type=text],.modal input[type=number],.modal select{width:100%;padding:10px 12px;border-radius:10px;background:#020617;border:1px solid var(--border2);color:var(--text);font-size:13px}
+  .mfoot{display:flex;gap:10px;margin-top:20px}
+  .mfoot .btn{flex:1;padding:12px}
+
+  /* Session banner */
+  .session{position:fixed;top:0;left:0;right:0;z-index:60;background:rgba(120,53,15,.97);border-bottom:1px solid #b45309;padding:10px 20px}
+  .session .in{max-width:1100px;margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .session .time{font-family:ui-monospace,monospace;font-weight:800;font-size:17px}
+  .session .lbl{font-size:10px;color:var(--amber-soft)}
+
+  /* Journal */
+  .rng{display:flex;gap:8px;margin:22px 0}
+  .rng button{flex:1;padding:14px;font-size:13px;font-weight:700;border-radius:12px;border:1px solid var(--border2);background:var(--panel2);color:var(--muted)}
+  .rng button.on{background:var(--amber);color:#fff;border-color:var(--amber)}
+  .hbar2{height:12px;border-radius:99px;background:var(--panel2);overflow:hidden}
+  .hbar2>i{display:block;height:100%;background:var(--amber2);transition:width 1s}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+  @media(max-width:720px){.two{grid-template-columns:1fr}}
+  .bars{display:flex;align-items:flex-end;justify-content:space-between;height:120px;gap:10px;padding:0 6px}
+  .bar{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
+  .bar .b{width:100%;border-radius:6px 6px 0 0;background:linear-gradient(180deg,#f59e0b,#b45309)}
+  .bar .l{font-size:11px;color:var(--dim)}
+  .srow{display:flex;align-items:center;gap:12px;padding:6px 0;font-size:13px}
+  .srow .n{width:110px;color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .srow .t{flex:1;height:8px;border-radius:99px;background:var(--panel2);overflow:hidden}
+  .srow .t>i{display:block;height:100%;background:var(--amber)}
+  .srow .c{font-size:11px;color:var(--muted);font-weight:700;width:20px;text-align:right}
+
+  .cat-tabs{display:flex;gap:8px;border-bottom:1px solid var(--border);padding-bottom:14px;margin-bottom:18px;flex-wrap:wrap}
+  .cat-tabs button{padding:8px 14px;font-size:12px;font-weight:700;border-radius:10px;border:1px solid var(--border2);background:var(--panel);color:var(--muted)}
+  .cat-tabs button.on{background:var(--amber);color:#fff;border-color:var(--amber)}
+
+  .idea{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:10px;font-size:13px;color:#cbd5e1;margin-top:8px}
+  .empty{padding:28px;text-align:center;color:var(--dim);font-style:italic}
+  .sect{margin-top:28px;padding-top:24px;border-top:1px solid var(--border)}
+  .sect h2{font-size:18px;font-weight:800;display:flex;align-items:center;gap:10px;margin-bottom:14px}
+
+  /* Song detail */
+  .detail-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .backlink{background:none;border:none;color:var(--muted);font-size:13px;font-weight:600}
+  .backlink:hover{color:#fff}
+  .versions{display:flex;gap:8px;padding:12px 0;flex-wrap:wrap}
+  .versions button{padding:6px 14px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--border2);background:transparent;color:var(--muted)}
+  .versions button.on{background:var(--amber);color:#fff;border-color:var(--amber)}
+
+  /* Workspace 3 panneaux */
+  .pgrid{display:grid;grid-template-columns:210px minmax(0,1fr) 290px;gap:14px;margin-top:14px;align-items:start}
+  @media(max-width:900px){.pgrid{grid-template-columns:1fr}}
+  .panel{background:rgba(15,23,42,.6);border:1px solid var(--border);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+  .panel h3{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--amber2);display:flex;align-items:center;gap:6px}
+  .sec{background:#020617;border:1px solid var(--border2);border-radius:10px;padding:8px 10px;font-size:12px}
+  .sec .nm{font-weight:700;display:flex;align-items:center;gap:6px}
+  .sec .ch{color:var(--muted);font-size:11px;margin-top:3px;line-height:1.4}
+  .sec .mini{background:none;border:none;color:var(--dim);font-size:11px;padding:0 2px}
+  .sec .mini:hover{color:#fff}
+  .imgstack{display:flex;flex-direction:column;gap:10px}
+  .imgwrap{position:relative}
+  .imgwrap img{width:100%;border-radius:10px;border:1px solid var(--border2);cursor:zoom-in;display:block}
+  .imgwrap .tools{position:absolute;top:6px;right:6px;display:flex;gap:4px;opacity:0;transition:.15s}
+  .imgwrap:hover .tools{opacity:1}
+  .imgwrap .tools button{background:rgba(2,6,23,.85);border:1px solid var(--border2);color:#fff;border-radius:8px;width:26px;height:26px;font-size:11px}
+  .chordtag{display:inline-flex;align-items:center;gap:6px;background:#020617;border:1px solid var(--border2);border-radius:8px;padding:4px 10px;font-size:13px;font-weight:700;color:#fbbf24}
+  .chordtag button{background:none;border:none;color:var(--dim);font-size:11px}
+  .ytitem{background:#020617;border:1px solid var(--border2);border-radius:10px;padding:8px 10px;display:flex;align-items:center;gap:8px;font-size:12px}
+  .ytitem a{color:#3ea6ff;text-decoration:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .det-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
+  @media(max-width:720px){.det-grid{grid-template-columns:1fr}}
+  .det-grid .card{padding:18px}
+  .kv{display:flex;justify-content:space-between;font-size:13px;padding:6px 0;color:#cbd5e1}
+  .kv b{color:#fff}
+  .notecard{width:100%;min-height:120px;background:#020617;border:1px solid var(--border2);border-radius:12px;color:var(--text);padding:12px;font-size:13px;resize:vertical;font-family:inherit}
+  .arrow{background:var(--panel2);border:1px solid var(--border2);color:var(--muted);border-radius:8px;width:30px;height:30px;font-size:13px}
+  .arrow:hover{color:#fff}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--amber);color:#fff;font-size:13px;font-weight:600;padding:10px 18px;border-radius:12px;z-index:99;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+</style>
+</head>
+<body>
+<header class="app">
+  <div class="hbar">
+    <div class="logo"><span class="gg">🎸</span> Guitar <em>Lab</em></div>
+    <nav class="tabs" id="tabs"></nav>
+  </div>
+</header>
+<div id="session"></div>
+<main id="app" class="wrap"></main>
+<div id="modal-root"></div>
+
+<script>
+/* ---------- Données ---------- */
+const STYLES = ["Blues","Rock","Folk","Métal","Jazz","Classique"];
+const seedSongs = [
+  {id:"s1",title:"Sultans of Swing",artist:"Dire Straits",style:"Rock",difficulty:"Moyen",progress:65,totalPracticeTime:420,tempo:145},
+  {id:"s2",title:"Blackbird",artist:"The Beatles",style:"Folk",difficulty:"Moyen",progress:30,totalPracticeTime:180,tempo:96},
+  {id:"s3",title:"Nothing Else Matters",artist:"Metallica",style:"Métal",difficulty:"Facile",progress:85,totalPracticeTime:560,tempo:71},
+  {id:"s4",title:"Hey Joe",artist:"Jimi Hendrix",style:"Blues",difficulty:"Moyen",progress:10,totalPracticeTime:60,tempo:120},
+  {id:"s5",title:"Wonderwall",artist:"Oasis",style:"Folk",difficulty:"Facile",progress:92,totalPracticeTime:640,tempo:87},
+  {id:"s6",title:"Tears in Heaven",artist:"Eric Clapton",style:"Folk",difficulty:"Difficile",progress:15,totalPracticeTime:110,tempo:74},
+  {id:"s7",title:"Johnny B. Goode",artist:"Chuck Berry",style:"Rock",difficulty:"Moyen",progress:0,totalPracticeTime:0,tempo:168},
+  {id:"s8",title:"Stairway to Heaven",artist:"Led Zeppelin",style:"Rock",difficulty:"Difficile",progress:5,totalPracticeTime:40,tempo:76},
+  {id:"s9",title:"Autumn Leaves",artist:"Joseph Kosma",style:"Jazz",difficulty:"Difficile",progress:20,totalPracticeTime:95,tempo:120},
+  {id:"s10",title:"Asturias",artist:"Isaac Albéniz",style:"Classique",difficulty:"Difficile",progress:45,totalPracticeTime:230,tempo:100},
+  {id:"s11",title:"Crossroads",artist:"Robert Johnson",style:"Blues",difficulty:"Moyen",progress:55,totalPracticeTime:290,tempo:132},
+  {id:"s12",title:"Wish You Were Here",artist:"Pink Floyd",style:"Rock",difficulty:"Facile",progress:78,totalPracticeTime:380,tempo:60},
+];
+const daysAgo = n => new Date(Date.now()-n*864e5).toISOString().slice(0,10);
+const seedSessions = [
+  {date:daysAgo(0),duration:25*60,songs:["s1"]},{date:daysAgo(1),duration:40*60,songs:["s3","s12"]},
+  {date:daysAgo(2),duration:15*60,songs:["s2"]},{date:daysAgo(3),duration:35*60,songs:["s5"]},
+  {date:daysAgo(4),duration:20*60,songs:["s9"]},{date:daysAgo(6),duration:30*60,songs:["s11","s4"]},
+  {date:daysAgo(8),duration:45*60,songs:["s10"]},{date:daysAgo(10),duration:28*60,songs:["s6"]},
+];
+const DEFAULT = {songs:seedSongs,roadmap:["s8","s7","s6"],sessions:seedSessions,weeklyGoal:120,ideas:["Apprendre le fingerpicking de Babe I'm Gonna Leave You","Transcrire le solo de Comfortably Sound"],notes:{}};
+const KEY = "guitar-lab-demo";
+let lib = load();
+function load(){ try{ const s=localStorage.getItem(KEY); if(s) return JSON.parse(s);}catch(e){} return JSON.parse(JSON.stringify(DEFAULT)); }
+function save(){ try{localStorage.setItem(KEY,JSON.stringify(lib));}catch(e){} }
+function reset(){ localStorage.removeItem(KEY); lib = JSON.parse(JSON.stringify(DEFAULT)); save(); render(); }
+
+/* ---------- Helpers ---------- */
+const $ = s => document.querySelector(s);
+const esc = s => String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmtH = min => min>=60 ? Math.floor(min/60)+"h "+Math.round(min%60)+"min" : Math.round(min)+" min";
+const DAYL = ["dim.","lun.","mar.","mer.","jeu.","ven.","sam."];
+function toast(msg){ const t=document.createElement("div");t.className="toast";t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),2200); }
+
+/* ---------- État UI ---------- */
+let tab = "biblio";
+let search=""; let filtStyle=""; let filtDiff=""; let view="grid"; let cat="challenges";
+let detail=null; let rng="7d"; let session=null; // {songId, elapsed, paused, acc, timer}
+
+const songById = id => lib.songs.find(s=>s.id===id);
+
+/* ---------- Session tracker ---------- */
+function startSession(id){
+  session = {songId:id, elapsed:0, acc:0, start:Date.now(), timer:null, paused:false};
+  session.timer = setInterval(tick, 1000);
+  renderSession();
+}
+function tick(){ if(!session||session.paused) return; session.elapsed = Math.floor(session.acc + (Date.now()-session.start)/1000); renderSession(); }
+function pauseSession(){ if(!session) return; if(session.paused){ session.start=Date.now(); session.paused=false; } else { session.acc += (Date.now()-session.start)/1000; session.paused=true; } renderSession(); }
+function stopSession(){
+  if(!session) return;
+  if(!session.paused) session.acc += (Date.now()-session.start)/1000;
+  const secs = Math.floor(session.acc);
+  clearInterval(session.timer);
+  const song = songById(session.songId);
+  if(secs>0){ song.totalPracticeTime += secs; lib.sessions.push({date:new Date().toISOString().slice(0,10),duration:secs,songs:[session.songId]}); save(); }
+  const songId = session.songId, el = session.elapsed;
+  session = null; renderSession();
+  openFinishModal(songId, el);
+}
+function renderSession(){
+  const el = $("#session");
+  if(!session){ el.innerHTML=""; document.body.style.paddingTop="0"; return; }
+  const song = songById(session.songId);
+  const m = String(Math.floor(session.elapsed/60)).padStart(2,"0"), s = String(session.elapsed%60).padStart(2,"0");
+  el.innerHTML = `<div class="session"><div class="in">
+    <button class="btn sm ${session.paused?'':'btn primary'}" style="${session.paused?'background:#16a34a;color:#fff':''}" onclick="pauseSession()">${session.paused?"▶ Reprendre":"⏸ Pause"}</button>
+    <button class="btn sm" style="background:#b91c1c;color:#fff" onclick="stopSession()">⏹ Arrêt</button>
+    <div><div class="lbl">Session active — ${esc(song.title)}</div><div class="time">${m}:${s}</div></div>
+  </div></div>`;
+  document.body.style.paddingTop="56px";
+}
+function openFinishModal(id, elapsed){
+  const song = songById(id);
+  const m=Math.floor(elapsed/60), s=String(elapsed%60).padStart(2,"0");
+  modal(`<h3>🎯 Fin de session</h3>
+    <p>Tu as pratiqué <strong style="color:#fff">${esc(song.title)}</strong> pendant <strong style="color:#fff">${m}:${s}</strong>. As-tu progressé ? Ajuste la maîtrise du morceau.</p>
+    <label>Maîtrise actuelle : ${song.progress}%</label>
+    <label>Nouvelle maîtrise : <b id="pv" style="color:var(--amber2)">${song.progress}%</b></label>
+    <input type="range" min="0" max="100" value="${song.progress}" style="width:100%;accent-color:var(--amber2)" oninput="document.getElementById('pv').textContent=this.value+'%'">
+    <div style="margin-top:12px;padding:10px;background:rgba(30,41,59,.5);border:1px solid var(--border2);border-radius:10px;font-size:12px;color:var(--muted)">Le temps de pratique (${m}:${s}) a été ajouté au morceau.</div>
+    <div class="mfoot">
+      <button class="btn ghost" onclick="closeModal()">Passer</button>
+      <button class="btn primary" onclick="confirmProgress('${id}')">Enregistrer</button>
+    </div>`);
+}
+function confirmProgress(id){
+  const v = +document.querySelector('.modal input[type=range]').value;
+  songById(id).progress = v; save(); closeModal(); toast("Maîtrise mise à jour ✔"); render();
+}
+
+/* ---------- Modal ---------- */
+function modal(html){
+  $("#modal-root").innerHTML = `<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal">${html}</div></div>`;
+}
+function closeModal(){ $("#modal-root").innerHTML=""; }
+
+/* ---------- Import / Export JSON ---------- */
+function exportJson(){
+  const data = {format:"guitar-lab-library",version:2,exportedAt:new Date().toISOString(),library:lib};
+  const blob = new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "guitar-lab-bibliotheque-"+new Date().toISOString().slice(0,10)+".json";
+  a.click(); URL.revokeObjectURL(a.href);
+  toast("Bibliothèque exportée ⬇");
+}
+function importJson(input){
+  const file = input.files && input.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try{
+      const raw = JSON.parse(reader.result);
+      const imported = normalize(raw);
+      if(!imported || !Array.isArray(imported.songs) || !imported.songs.length) throw new Error("format");
+      // Tentative de sauvegarde ; si quota localStorage dépassé (images lourdes), on garde en mémoire
+      lib = imported; save();
+      render(); toast("Bibliothèque importée ✔ ("+lib.songs.length+" morceaux)");
+    }catch(e){ toast("❌ Fichier JSON invalide ou format non reconnu"); }
+    input.value = "";
+  };
+  reader.readAsText(file);
+}
+
+/* Reconnaît : format v2 ({library:{...}}), export brut, ou export HTML ancien ({app:"guitar-lab", data:{...}}) */
+function normalize(raw){
+  if(raw && raw.data && raw.data["guitar-lab-html:guitar-lab:songs:v2"]) return fromLegacyHtml(raw);
+  const base = raw.library || raw;
+  if(!Array.isArray(base.songs)) return null;
+  return {
+    songs: base.songs.map(s => ({id:String(s.id||("s"+Math.random().toString(36).slice(2))),title:s.title||"Sans titre",artist:s.artist||"—",style:s.style||"Non défini",difficulty:diffFr(s.difficulty),progress:+s.progress||0,totalPracticeTime:+s.totalPracticeTime||0,tempo:+s.tempo||0,favorite:!!s.isFavorite,technique:s.technique||"",classifications:Array.isArray(s.classifications)?s.classifications:[],progressHistory:Array.isArray(s.progressHistory)?s.progressHistory:[]})),
+    roadmap: Array.isArray(base.roadmap)?base.roadmap.map(String):[],
+    sessions: (Array.isArray(base.sessions)?base.sessions:[]).map(x=>({date:(x.date||"").slice(0,10)||new Date().toISOString().slice(0,10),duration:+(x.duration??x.durationSec)||0,songs:(Array.isArray(x.songs)?x.songs:(x.songsPracticed||[]).map(sp=>sp.songId)).map(String)})),
+    weeklyGoal: +base.weeklyGoal||120,
+    ideas: Array.isArray(base.ideas)?base.ideas:[],
+    notes: base.notes||{},
+  };
+}
+function diffFr(d){ d=String(d||"").toLowerCase(); return d.includes("fac")||d==="easy"?"Facile":d.includes("diff")||d==="hard"?"Difficile":"Moyen"; }
+
+/* Export de l'ancienne appli HTML (localStorage dump) */
+function fromLegacyHtml(raw){
+  const D = raw.data;
+  const songs = JSON.parse(D["guitar-lab-html:guitar-lab:songs:v2"] || "[]");
+  const sessions = JSON.parse(D["guitar-lab-html:guitar-lab:practice-sessions"] || "[]");
+  const history = JSON.parse(D["guitar-lab-html:guitar-lab:progress-history"] || "[]");
+  const roadmap = (JSON.parse(D["guitar-lab-html:guitar-lab:roadmap-order"] || "{}").challenges) || [];
+  if(!songs.length) return null;
+  // Dernière progression connue par morceau + temps de pratique cumulé
+  const lastProg = {}, cumul = {};
+  history.forEach(h => { lastProg[h.songId] = +h.progress||0; });
+  sessions.forEach(s => { cumul[s.songId] = (cumul[s.songId]||0) + (+s.durationSec||0); });
+  const mapped = songs.map(s => {
+    const lv = Array.isArray(s.versions)?s.versions:[];
+    const yts = (s.youtubeUrls||[]).map(u=>({id:u.id||("y"+Math.random().toString(36).slice(2)),url:u.url}));
+    const versions = lv.length ? lv.map(ver=>{
+      const secs = (ver.structure||[]).map(sec=>({id:sec.id||("s"+Math.random().toString(36).slice(2)),name:sec.section||"Section",repeats:1,chords:(sec.cells||[]).map(c=>c.chord).filter(Boolean)}));
+      const allChords = [...new Set(secs.flatMap(x=>x.chords))];
+      return {id:ver.id||("v"+Math.random().toString(36).slice(2)),label:ver.label||"Version",sections:secs,
+        images:[],youtube:yts,chords:allChords,notes:"",capo:ver.capo||0,bpm:ver.bpm||0};
+    }) : [{id:s.id+"-v1",label:"Version originale",sections:[],images:[],youtube:yts,chords:[],notes:""}];
+    return {
+      id:String(s.id), title:s.title||"Sans titre", artist:s.artist||"—",
+      style:s.style||"Non défini", difficulty:diffFr(s.difficulty),
+      progress: lastProg[s.id] ?? (+s.progress||0),
+      totalPracticeTime:cumul[s.id]||0, tempo:0,
+      favorite:!!s.isFavorite, technique:s.technique||"",
+      classifications:Array.isArray(s.classifications)?s.classifications:[],
+      progressHistory:history.filter(h=>h.songId===s.id).map(h=>({date:(h.date||"").slice(0,10),value:+h.progress||0})),
+      versions,
+    };
+  });
+  return { songs:mapped, roadmap:roadmap.map(String), sessions:sessions.map(s=>({date:(s.date||"").slice(0,10),duration:+s.durationSec||0,songs:[String(s.songId)]})), weeklyGoal:120, ideas:[], notes:{} };
+}
+
+/* ---------- Ajout morceau ---------- */
+function openAddModal(){
+  modal(`<h3>➕ Nouveau morceau</h3><p>Ajoute un morceau à ta bibliothèque.</p>
+    <label>Titre *</label><input id="n-title" type="text" placeholder="ex. Hotel California">
+    <label>Artiste</label><input id="n-artist" type="text" placeholder="ex. Eagles">
+    <label>Style</label><select id="n-style">${STYLES.map(s=>`<option>${s}</option>`).join("")}</select>
+    <label>Difficulté</label><select id="n-diff"><option>Facile</option><option>Moyen</option><option>Difficile</option></select>
+    <label>Tempo</label><input id="n-tempo" type="number" value="100">
+    <div class="mfoot">
+      <button class="btn ghost" onclick="closeModal()">Annuler</button>
+      <button class="btn primary" onclick="addSong()">Ajouter</button>
+    </div>`);
+}
+function addSong(){
+  const t = $("#n-title").value.trim();
+  if(!t){ $("#n-title").focus(); return; }
+  lib.songs.unshift({id:"s"+Date.now(),title:t,artist:$("#n-artist").value||"—",style:$("#n-style").value,difficulty:$("#n-diff").value,progress:0,totalPracticeTime:0,tempo:+$("#n-tempo").value||100});
+  save(); closeModal(); toast("Morceau ajouté ✔"); render();
+}
+
+/* ---------- Pages ---------- */
+function statCard(icon,lbl,val,color){ return `<div class="card stat"><span class="ic">${icon}</span><div><div class="lbl">${lbl}</div><div class="val" style="color:${color||'#fff'}">${val}</div></div></div>`; }
+function songRow(song, idx, total, inRoadmap){
+  return `<div class="row">
+    ${inRoadmap?`<button class="arrow" onclick="moveSong('${song.id}',-1)" ${idx===0?"disabled":""}>↑</button>
+    <button class="arrow" onclick="moveSong('${song.id}',1)" ${idx===total-1?"disabled":""}>↓</button>`:""}
+    <div class="grow"><div class="t">${esc(song.title)}</div><div class="a">${esc(song.artist)} · ${esc(song.style)}</div></div>
+    <div class="mini-pbar"><div class="pbar"><i style="width:${song.progress}%"></i></div></div>
+    <span style="font-size:12px;color:var(--amber2);font-weight:700;width:38px;text-align:right">${song.progress}%</span>
+    <button class="btn sm primary" onclick="startSession('${song.id}');openDetail('${song.id}')">▶ Travailler</button>
+  </div>`;
+}
+function moveSong(id,dir){
+  const i=lib.roadmap.indexOf(id), j=i+direction;
+  if(j<0||j>=lib.roadmap.length) return;
+  [lib.roadmap[i],lib.roadmap[j]]=[lib.roadmap[j],lib.roadmap[i]]; save(); render();
+}
+
+function renderBiblio(){
+  let songs = lib.songs.filter(s =>
+    (!search || (s.title+" "+s.artist).toLowerCase().includes(search.toLowerCase())) &&
+    (!filtStyle || s.style===filtStyle) && (!filtDiff || s.difficulty===filtDiff));
+  const list = view==="grid"
+    ? `<div class="grid">${songs.map(s=>{
+        const hue = Math.round(s.progress*1.2); // 0% = rouge (0°) → 100% = vert (120°)
+        return `<button class="song" style="--fill:${s.progress}%" onclick="openDetail('${s.id}')">
+        <div class="fill" style="background:linear-gradient(90deg,hsla(${hue},70%,45%,.40),hsla(${hue},70%,45%,.18))"></div>
+        <div class="body">
+          <div class="head">
+            <span class="cover">${s.imageUrl?`<img src="${s.imageUrl}" alt="" style="width:100%;height:100%;object-fit:cover">`:s.favorite?"❤️":"💿"}</span>
+            <span style="min-width:0"><div class="t">${esc(s.title)}</div><div class="a">${esc(s.artist)}</div></span>
+          </div>
+          <div class="meta"><span class="pill">${esc(s.style)}</span><span class="pill">${esc(s.difficulty)}</span><span class="pill">♩ ${s.tempo||"—"}</span></div>
+          <div class="meta"><span style="color:hsl(${hue},70%,65%)">${s.progress}% maîtrisé</span><span style="margin-left:auto">⏱ ${fmtH(s.totalPracticeTime/60)}</span></div>
+        </div>
+      </button>`}).join("")}</div>`
+    : `<div style="display:flex;flex-direction:column;gap:10px">${songs.map((s,i)=>songRow(s,i,songs.length,false)).join("")}</div>`;
+  return `<div class="page-title">📚 Bibliothèque</div>
+  <div class="page-sub">Ta collection de morceaux — clique sur un morceau pour travailler.</div>
+  <div class="toolbar">
+    <input class="search" placeholder="🔍 Rechercher un morceau ou un artiste..." value="${esc(search)}" oninput="search=this.value;renderApp()">
+    <select class="filt" onchange="filtStyle=this.value;renderApp()"><option value="">Tous styles</option>${STYLES.map(s=>`<option ${s===filtStyle?"selected":""}>${s}</option>`).join("")}</select>
+    <select class="filt" onchange="filtDiff=this.value;renderApp()"><option value="">Toutes difficultés</option><option ${filtDiff==="Facile"?"selected":""}>Facile</option><option ${filtDiff==="Moyen"?"selected":""}>Moyen</option><option ${filtDiff==="Difficile"?"selected":""}>Difficile</option></select>
+    <button class="btn ghost" onclick="view=view==='grid'?'list':'grid';renderApp()">${view==="grid"?"☰ Liste":"▦ Grille"}</button>
+    <button class="btn ghost" onclick="exportJson()">⬇ Exporter</button>
+    <button class="btn ghost" onclick="$('#imp-file').click()">⬆ Importer</button>
+    <input type="file" id="imp-file" accept=".json,application/json" style="display:none" onchange="importJson(this)">
+    <button class="btn primary" onclick="openAddModal()">+ Nouveau morceau</button>
+  </div>
+  ${songs.length?list:`<div class="card empty">Aucun morceau ne correspond à ta recherche.</div>`}`;
+}
+
+function renderRoadmap(){
+  const roadmapSongs = lib.roadmap.map(songById).filter(Boolean);
+  const inProg = lib.songs.filter(s=>s.progress>0 && s.progress<80);
+  const mastered = lib.songs.filter(s=>s.progress>=80);
+  const totalTime = lib.songs.reduce((a,s)=>a+s.totalPracticeTime,0);
+  const weekAgo = Date.now()-7*864e5;
+  const thisWeek = lib.sessions.filter(s=>new Date(s.date)>=weekAgo).reduce((a,s)=>a+s.duration/60,0);
+  let content;
+  if(cat==="challenges") content = roadmapSongs.length? roadmapSongs.map((s,i)=>songRow(s,i,roadmapSongs.length,true)).join("") : `<div class="card empty">Aucun défi dans la feuille de route.</div>`;
+  else if(cat==="in_progress") content = inProg.length? inProg.map((s,i)=>songRow(s,i,inProg.length,false)).join("") : `<div class="card empty">Aucun morceau en cours de travail (0% &lt; progression &lt; 80%).</div>`;
+  else content = mastered.length? mastered.map((s,i)=>songRow(s,i,mastered.length,false)).join("") : `<div class="card empty">Aucun morceau maîtrisé pour le moment (≥ 80%).</div>`;
+  return `<div class="page-title">🗺️ Feuille de route</div>
+  <div class="page-sub">Ton programme de travail. Organise tes défis et suis tes progrès.</div>
+  <div class="stats" style="margin-top:22px">
+    ${statCard("🎵","Défis actifs",roadmapSongs.length,"#fbbf24")}
+    ${statCard("✅","Maîtrisés",mastered.length,"#4ade80")}
+    ${statCard("⏰","Temps total",fmtH(totalTime/60),"#60a5fa")}
+    ${statCard("📊","Cette semaine",Math.round(thisWeek)+" min","#c084fc")}
+  </div>
+  <div class="cat-tabs" style="margin-top:22px">
+    <button class="${cat==='challenges'?'on':''}" onclick="cat='challenges';renderApp()">🎯 Prochains défis (${roadmapSongs.length})</button>
+    <button class="${cat==='in_progress'?'on':''}" onclick="cat='in_progress';renderApp()">⏳ En cours (${inProg.length})</button>
+    <button class="${cat==='mastered'?'on':''}" onclick="cat='mastered';renderApp()">🏆 Maîtrisés (${mastered.length})</button>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:10px">${content}</div>
+  <div class="sect"><h2>💡 Carnet d'idées &amp; envies</h2>
+    <div class="card" style="padding:20px">
+      <div style="display:flex;gap:10px">
+        <input class="search" id="idea-in" placeholder="Ajouter une idée de morceau, un riff ou un exercice à tester..." onkeydown="if(event.key==='Enter')addIdea()">
+        <button class="btn primary" onclick="addIdea()">+ Ajouter</button>
+      </div>
+      ${lib.ideas.length? lib.ideas.map((idea,i)=>`<div class="idea"><span>${esc(idea)}</span><button class="btn sm ghost" onclick="lib.ideas.splice(${i},1);save();renderApp()">🗑</button></div>`).join("") : `<p style="font-size:12px;color:var(--dim);font-style:italic;margin-top:12px">Aucune idée enregistrée pour l'instant.</p>`}
+    </div>
+  </div>`;
+}
+function addIdea(){
+  const el=$("#idea-in"); const v=el.value.trim(); if(!v) return;
+  lib.ideas.push(v); save(); renderApp(); toast("Idée ajoutée 💡");
+}
+
+function renderJournal(){
+  const now = Date.now();
+  const cutoff = rng==="7d"?7:rng==="30d"?30:Infinity;
+  const sessions = lib.sessions.filter(s=> (now-new Date(s.date).getTime())/864e5 <= cutoff);
+  const totalMin = sessions.reduce((a,s)=>a+s.duration/60,0);
+  const songsPracticed = new Set(sessions.flatMap(s=>s.songs)).size;
+  const weekStart = new Date(); weekStart.setDate(weekStart.getDate()-((weekStart.getDay()+6)%7)); weekStart.setHours(0,0,0,0);
+  const weekMin = lib.sessions.filter(s=>new Date(s.date)>=weekStart).reduce((a,s)=>a+s.duration/60,0);
+  // série
+  const dates = [...new Set(lib.sessions.map(s=>s.date))].sort().reverse();
+  let streak=0, check=new Date();
+  for(const d of dates){ const dd=new Date(d+"T12:00"); const diff=(check-dd)/864e5; if(diff<=1.5){streak++;check=dd;} else break; }
+  // 7 derniers jours
+  const daily = []; for(let i=6;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); d.setHours(12,0,0,0);
+    daily.push({label:DAYL[d.getDay()], val: lib.sessions.filter(s=>{const x=new Date(s.date+"T12:00");return x.getFullYear()===d.getFullYear()&&x.getMonth()===d.getMonth()&&x.getDate()===d.getDate();}).reduce((a,s)=>a+s.duration/60,0)}); }
+  const max = Math.max(...daily.map(d=>d.val), 60);
+  // styles
+  const styles = {}; lib.songs.forEach(s=>{ const k=s.style||"Non défini"; styles[k]=(styles[k]||0)+1; });
+  const styleRows = Object.entries(styles).sort((a,b)=>b[1]-a[1]).map(([st,c])=>
+    `<div class="srow"><span class="n">${esc(st)}</span><div class="t"><i style="width:${c/lib.songs.length*100}%"></i></div><span class="c">${c}</span></div>`).join("");
+  const top5 = [...lib.songs].sort((a,b)=>b.totalPracticeTime-a.totalPracticeTime).slice(0,5).map(s=>
+    `<div class="srow"><span class="n" title="${esc(s.title)}">${esc(s.title)}</span><span style="flex:1;text-align:right;color:var(--amber2);font-family:ui-monospace,monospace;font-weight:700">${Math.floor(s.totalPracticeTime/60)}h${String(Math.round(s.totalPracticeTime%60)).padStart(2,"0")}</span></div>`).join("");
+  return `<div class="page-title">📖 Journal</div>
+  <div class="page-sub">Ton carnet de suivi — temps passé, styles joués, tendances.</div>
+  <div class="rng">
+    ${["7 jours","30 jours","Tout"].map((l,i)=>`<button class="${rng===["7d","30d","all"][i]?'on':''}" onclick="rng='${["7d","30d","all"][i]}';renderApp()">${l}</button>`).join("")}
+  </div>
+  <div class="stats">
+    ${statCard("⏰","Temps",totalMin?fmtH(totalMin):"&lt; 1 min","#60a5fa")}
+    ${statCard("⚡","Sessions",sessions.length,"#fbbf24")}
+    ${statCard("🎵","Morceaux",songsPracticed,"#4ade80")}
+    ${statCard("🔥","Série",streak+" j","#f87171")}
+  </div>
+  <div class="sect">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10px">
+      <span style="color:var(--muted);font-size:13px;font-weight:600">Objectif hebdomadaire</span>
+      <div><input type="number" value="${lib.weeklyGoal}" style="width:60px;padding:4px;background:var(--panel);border:1px solid var(--border2);border-radius:8px;color:#fff;text-align:center" onchange="lib.weeklyGoal=+this.value||60;save();renderApp()"> <span style="font-size:11px;color:var(--dim)">min</span></div>
+    </div>
+    <div class="hbar2"><i style="width:${Math.min(100,weekMin/lib.weeklyGoal*100)}%"></i></div>
+    <p style="font-size:11px;color:var(--muted);text-align:right;margin-top:6px">${Math.round(weekMin)} / ${lib.weeklyGoal} min cette semaine</p>
+  </div>
+  <div class="sect two">
+    <div><h2 style="font-size:17px;font-weight:800;margin-bottom:12px">🥧 Répartition par style</h2><div class="card" style="padding:18px">${styleRows}</div></div>
+    <div><h2 style="font-size:17px;font-weight:800;margin-bottom:12px">🏅 Top 5 pratiqués</h2><div class="card" style="padding:18px">${top5}</div></div>
+  </div>
+  <div class="sect"><h2 style="font-size:17px;font-weight:800;margin-bottom:12px">Minutes par jour (7 derniers jours)</h2>
+    <div class="card" style="padding:20px"><div class="bars">
+      ${daily.map(d=>`<div class="bar"><div class="b" style="height:${d.val/max*100}%" title="${Math.round(d.val)} min"></div><span class="l">${d.label}</span></div>`).join("")}
+    </div></div>
+  </div>`;
+}
+
+function renderParcours(){
+  const levels=[["Palier 1","Open chords, rythmes simples","#4ade80",25],["Palier 2","Fingerpicking, barrés","#fbbf24",50],["Palier 3","Solo de base, bending","#f97316",75],["Palier 4","Improvisation, modes","#ef4444",100],["Palier 5","Maîtrise scénique","#a855f7",100]];
+  return `<div class="page-title">🧭 Parcours</div>
+  <div class="page-sub">Ta progression pédagogique, palier par palier.</div>
+  <div style="display:flex;flex-direction:column;gap:14px;margin-top:22px">
+    ${levels.map((l,i)=>`<div class="card" style="padding:18px;display:flex;align-items:center;gap:16px">
+      <div style="width:44px;height:44px;border-radius:12px;background:var(--panel2);display:flex;align-items:center;justify-content:center;font-size:20px">${["🌱","🌿","🌳","⛰️","🏔️"][i]}</div>
+      <div style="flex:1"><div style="font-weight:800">${l[0]}</div><div style="font-size:12px;color:var(--muted)">${l[1]}</div>
+        <div class="pbar" style="margin-top:8px"><i style="width:${l[3]}%;background:${l[2]}"></i></div></div>
+      <span style="font-weight:800;color:${l[2]}">${l[3]}%</span>
+    </div>`).join("")}
+  </div>`;
+}
+
+function openDetail(id){ detail=id; activeVerId=null; renderApp(); window.scrollTo(0,0); showStartModal(id); }
+function closeDetail(){ detail=null; renderApp(); }
+function showStartModal(id){
+  const song = songById(id);
+  modal(`<h3>🎯 Démarrer la session de travail</h3>
+    <p>Souhaites-tu lancer le chronomètre pour le morceau <strong style="color:#fff">${esc(song.title)}</strong> ?</p>
+    <div class="mfoot">
+      <button class="btn ghost" onclick="closeModal()">Non merci</button>
+      <button class="btn primary" onclick="closeModal();startSession('${id}')">Démarrer le chrono</button>
+    </div>`);
+}
+function verOf(song){
+  if(!song.versions || !song.versions.length){
+    song.versions = [{id:song.id+"-v1",label:"Version originale",
+      sections:[{id:Date.now()+"a",name:"Intro",repeats:1,chords:[]},{id:Date.now()+"b",name:"Couplet",repeats:1,chords:[]},{id:Date.now()+"c",name:"Refrain",repeats:1,chords:[]}],
+      images:[],youtube:[],chords:[],notes:lib.notes[song.id]||""}];
+  }
+  if(!activeVerId || !song.versions.find(v=>v.id===activeVerId)) activeVerId = song.versions[0].id;
+  return song.versions.find(v=>v.id===activeVerId);
+}
+const curVer = () => verOf(songById(detail));
+function setVer(id){ activeVerId=id; renderApp(); }
+function addVersion(){
+  const s = songById(detail);
+  const v = {id:"v"+Date.now(),label:"Version "+(s.versions.length+1),sections:[],images:[],youtube:[],chords:[],notes:""};
+  s.versions.push(v); activeVerId=v.id; save(); renderApp();
+}
+/* Structure */
+function addSection(){ const v=curVer(); v.sections.push({id:Date.now(),name:"Nouvelle section",repeats:1,chords:[]}); save(); renderApp(); }
+function renSection(i){ const v=curVer(); const n=prompt("Nom de la section :",v.sections[i].name); if(n!==null&&n.trim()){ v.sections[i].name=n.trim(); save(); renderApp(); } }
+function delSection(i){ curVer().sections.splice(i,1); save(); renderApp(); }
+function moveSection(i,d){ const v=curVer(); const j=i+d; if(j<0||j>=v.sections.length) return; [v.sections[i],v.sections[j]]=[v.sections[j],v.sections[i]]; save(); renderApp(); }
+/* Accords complexes */
+function addChord(){ const el=$("#chord-in"); const c=el.value.trim(); if(!c) return; curVer().chords.push(c); save(); renderApp(); }
+function delChord(i){ curVer().chords.splice(i,1); save(); renderApp(); }
+/* YouTube */
+function addYt(){ const el=$("#yt-in"); const url=el.value.trim(); if(!url) return; curVer().youtube.push({id:"y"+Date.now(),url}); save(); renderApp(); }
+function delYt(i){ curVer().youtube.splice(i,1); save(); renderApp(); }
+/* Images */
+function addImg(input){
+  const f = input.files && input.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = () => { curVer().images.push({id:"i"+Date.now(),src:r.result}); try{save();}catch(e){} renderApp(); };
+  r.readAsDataURL(f); input.value="";
+}
+function delImg(i){ curVer().images.splice(i,1); save(); renderApp(); }
+function moveImg(i,d){ const v=curVer(); const j=i+d; if(j<0||j>=v.images.length) return; [v.images[i],v.images[j]]=[v.images[j],v.images[i]]; save(); renderApp(); }
+function viewImg(src){ modal(`<h3>🖼️ Aperçu</h3><img src="${src}" style="width:100%;border-radius:12px">`); }
+
+function renderDetail(){
+  const s = songById(detail); if(!s){ detail=null; return renderBiblio(); }
+  const v = verOf(s);
+  if(lib.notes[s.id] && !v.notes){ v.notes = lib.notes[s.id]; }
+  return `<div class="detail-head">
+      <button class="backlink" onclick="closeDetail()">‹ Retour</button>
+      <div style="text-align:right"><div style="font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em">Progression</div><div style="font-weight:800;color:var(--amber2)">${s.progress}%</div></div>
+    </div>
+    <div style="margin-top:14px"><h1 style="font-size:24px;font-weight:800;color:var(--text)">${esc(s.title)}</h1><p style="color:var(--muted);font-size:16px">${esc(s.artist)}</p></div>
+    <div class="versions">
+      ${s.versions.map(ver=>`<button class="${ver.id===v.id?'on':''}" onclick="setVer('${ver.id}')">${esc(ver.label)}</button>`).join("")}
+      <button onclick="addVersion()">+ Version</button>
+    </div>
+    ${v.capo||v.bpm?`<p style="font-size:12px;color:var(--muted);margin-top:2px">${v.capo?"Capo en case "+v.capo+" · ":""}${v.bpm?"♩ "+v.bpm+" bpm":""}</p>`:""}
+    <div class="pgrid">
+      <div class="panel"><h3>🎼 Structure</h3>
+        ${v.sections.length? v.sections.map((sec,i)=>`<div class="sec">
+          <div class="nm">${esc(sec.name)}${sec.repeats>1?` <span style="color:var(--amber2)">×${sec.repeats}</span>`:""}
+            <span style="margin-left:auto;display:flex;gap:2px">
+              <button class="mini" onclick="moveSection(${i},-1)" ${i===0?"disabled":""}>↑</button>
+              <button class="mini" onclick="moveSection(${i},1)" ${i===v.sections.length-1?"disabled":""}>↓</button>
+              <button class="mini" onclick="delSection(${i})">✕</button>
+            </span>
+          </div>
+          <div class="ch">${sec.chords.length?sec.chords.map(esc).join(" · "):`<button class="mini" onclick="renSection(${i})">✎ Renommer / définir</button>`}</div>
+        </div>`).join("") : `<p style="font-size:12px;color:var(--dim);font-style:italic">Aucune section.</p>`}
+        <button class="btn ghost sm" onclick="addSection()">+ Ajouter une section</button>
+      </div>
+      <div class="panel"><h3>🖼️ Mes captures YouTube</h3>
+        <div class="imgstack">
+          ${v.images.map((img,i)=>`<div class="imgwrap">
+            <img src="${img.src}" alt="capture ${i+1}" onclick="viewImg('${img.src}')">
+            <div class="tools">
+              <button onclick="moveImg(${i},-1)" ${i===0?"disabled":""}>↑</button>
+              <button onclick="moveImg(${i},1)" ${i===v.images.length-1?"disabled":""}>↓</button>
+              <button onclick="delImg(${i})">✕</button>
+            </div>
+          </div>`).join("")}
+        </div>
+        ${v.images.length?"":`<p style="font-size:12px;color:var(--dim);font-style:italic">Colle ici tes captures d'écran, elles s'empilent l'une sous l'autre.</p>`}
+        <label class="btn ghost sm" style="text-align:center;cursor:pointer">+ Ajouter une image
+          <input type="file" accept="image/*" style="display:none" onchange="addImg(this)">
+        </label>
+      </div>
+      <div class="panel"><h3>🎬 Liens YouTube</h3>
+        ${v.youtube.map((y,i)=>`<div class="ytitem">
+          <span>▶</span><a href="${esc(y.url)}" target="_blank" rel="noopener">${esc(y.url)}</a>
+          <button class="mini" onclick="delYt(${i})">✕</button></div>`).join("")}
+        <div style="display:flex;gap:6px">
+          <input class="search" id="yt-in" placeholder="Coller une URL..." style="padding:8px 10px;font-size:12px" onkeydown="if(event.key==='Enter')addYt()">
+          <button class="btn ghost sm" onclick="addYt()">+</button>
+        </div>
+        <h3 style="margin-top:8px">🎹 Accords complexes</h3>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${v.chords.map((c,i)=>`<span class="chordtag">${esc(c)}<button onclick="delChord(${i})">✕</button></span>`).join("") || `<span style="font-size:12px;color:var(--dim);font-style:italic">Aucun accord noté.</span>`}
+        </div>
+        <div style="display:flex;gap:6px">
+          <input class="search" id="chord-in" placeholder="ex. F#m7, Bm..." style="padding:8px 10px;font-size:12px" onkeydown="if(event.key==='Enter')addChord()">
+          <button class="btn ghost sm" onclick="addChord()">+</button>
+        </div>
+        <h3 style="margin-top:8px">📝 Notes</h3>
+        <textarea class="notecard" style="min-height:90px" placeholder="Positions, astuces, repères..." oninput="curVer().notes=this.value" onblur="save()">${esc(v.notes||"")}</textarea>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:18px">
+      <button class="btn primary" style="flex:1;padding:14px" onclick="startSession('${s.id}')">▶ Démarrer une session</button>
+    </div>`;
+}
+
+/* ---------- Rendu ---------- */
+const TABS=[["biblio","📚 Bibliothèque"],["roadmap","🗺️ Feuille de route"],["journal","📖 Journal"],["parcours","🧭 Parcours"]];
+function renderApp(){
+  $("#tabs").innerHTML = TABS.map(([k,l])=>`<button class="tab ${tab===k?'active':''}" onclick="tab='${k}';detail=null;renderApp();window.scrollTo(0,0)">${l}</button>`).join("");
+  $("#app").innerHTML = detail ? renderDetail() : tab==="biblio"?renderBiblio():tab==="roadmap"?renderRoadmap():tab==="journal"?renderJournal():renderParcours();
+}
+function render(){ renderApp(); }
+window.addEventListener("DOMContentLoaded",()=>renderApp());
+</script>
+</body>
+</html>
