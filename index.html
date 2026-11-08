@@ -692,7 +692,7 @@ function songRow(song, idx, total, inRoadmap){
   </div>`;
 }
 function moveSong(id,dir){
-  const i=lib.roadmap.indexOf(id), j=i+direction;
+  const i=lib.roadmap.indexOf(id), j=i+dir;
   if(j<0||j>=lib.roadmap.length) return;
   [lib.roadmap[i],lib.roadmap[j]]=[lib.roadmap[j],lib.roadmap[i]]; save(); render();
 }
@@ -936,3 +936,61 @@ function renderDetail(){
               <button class="mini" onclick="delSection(${i})">✕</button>
             </span>
           </div>
+          <div class="ch">${sec.chords.length?sec.chords.map(esc).join(" · "):`<button class="mini" onclick="renSection(${i})">✎ Renommer / définir</button>`}</div>
+        </div>`).join("") : `<p style="font-size:12px;color:var(--dim);font-style:italic">Aucune section.</p>`}
+        <button class="btn ghost sm" onclick="addSection()">+ Ajouter une section</button>
+      </div>
+      <div class="panel"><h3>🖼️ Mes captures YouTube</h3>
+        <div class="imgstack">
+          ${v.images.map((img,i)=>`<div class="imgwrap">
+            <img src="${img.src}" alt="capture ${i+1}" onclick="viewImg('${img.src}')">
+            <div class="tools">
+              <button onclick="moveImg(${i},-1)" ${i===0?"disabled":""}>↑</button>
+              <button onclick="moveImg(${i},1)" ${i===v.images.length-1?"disabled":""}>↓</button>
+              <button onclick="delImg(${i})">✕</button>
+            </div>
+          </div>`).join("")}
+        </div>
+        ${v.images.length?"":`<p style="font-size:12px;color:var(--dim);font-style:italic">Colle ici tes captures d'écran, elles s'empilent l'une sous l'autre.</p>`}
+        <label class="btn ghost sm" style="text-align:center;cursor:pointer">+ Ajouter une image
+          <input type="file" accept="image/*" style="display:none" onchange="addImg(this)">
+        </label>
+      </div>
+      <div class="panel"><h3>🎬 Liens YouTube</h3>
+        ${v.youtube.map((y,i)=>`<div class="ytitem">
+          <button class="mini" style="background:var(--amber);color:#fff;border-radius:8px;width:22px;height:22px;font-size:10px" onclick="openYtPlayer('${y.id}')" title="Ouvrir le lecteur + capture">▶</button>
+          <a href="${esc(y.url)}" target="_blank" rel="noopener">${esc(y.title||y.url)}</a>
+          ${(y.bookmarks||[]).length?`<span class="pill">📍${y.bookmarks.length}</span>`:""}
+          <button class="mini" onclick="delYt(${i})">✕</button></div>`).join("")}
+        <div style="display:flex;gap:6px">
+          <input class="search" id="yt-in" placeholder="Coller une URL..." style="padding:8px 10px;font-size:12px" onkeydown="if(event.key==='Enter')addYt()">
+          <button class="btn ghost sm" onclick="addYt()">+</button>
+        </div>
+        <h3 style="margin-top:8px">🎹 Accords complexes</h3>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${v.chords.map((c,i)=>`<span class="chordtag">${esc(c)}<button onclick="delChord(${i})">✕</button></span>`).join("") || `<span style="font-size:12px;color:var(--dim);font-style:italic">Aucun accord noté.</span>`}
+        </div>
+        <div style="display:flex;gap:6px">
+          <input class="search" id="chord-in" placeholder="ex. F#m7, Bm..." style="padding:8px 10px;font-size:12px" onkeydown="if(event.key==='Enter')addChord()">
+          <button class="btn ghost sm" onclick="addChord()">+</button>
+        </div>
+        <h3 style="margin-top:8px">📝 Notes</h3>
+        <textarea class="notecard" style="min-height:90px" placeholder="Positions, astuces, repères..." oninput="curVer().notes=this.value" onblur="save()">${esc(v.notes||"")}</textarea>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:18px">
+      <button class="btn primary" style="flex:1;padding:14px" onclick="startSession('${s.id}')">▶ Démarrer une session</button>
+    </div>`;
+}
+
+/* ---------- Rendu ---------- */
+const TABS=[["biblio","📚 Bibliothèque"],["roadmap","🗺️ Feuille de route"],["journal","📖 Journal"],["parcours","🧭 Parcours"]];
+function renderApp(){
+  $("#tabs").innerHTML = TABS.map(([k,l])=>`<button class="tab ${tab===k?'active':''}" onclick="tab='${k}';detail=null;renderApp();window.scrollTo(0,0)">${l}</button>`).join("");
+  $("#app").innerHTML = detail ? renderDetail() : tab==="biblio"?renderBiblio():tab==="roadmap"?renderRoadmap():tab==="journal"?renderJournal():renderParcours();
+}
+function render(){ renderApp(); }
+window.addEventListener("DOMContentLoaded",()=>renderApp());
+</script>
+</body>
+</html>
