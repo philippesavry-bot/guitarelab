@@ -152,7 +152,7 @@
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--amber);color:#fff;font-size:13px;font-weight:600;padding:10px 18px;border-radius:12px;z-index:99;box-shadow:0 8px 24px rgba(0,0,0,.4)}
 
   /* Atelier vidéo plein écran */
-  .ytoverlay{position:fixed;inset:0;background:#020617;z-index:70;display:flex;flex-direction:column;padding:14px;gap:14px}
+  .ytoverlay{position:fixed;inset:0;background:#020617;z-index:70;display:flex;flex-direction:column;padding:14px;gap:14px;overflow:auto}
   .ythead{display:flex;align-items:center;gap:12px;flex-shrink:0;flex-wrap:wrap}
   .ythead h2{font-size:15px;font-weight:800;color:var(--amber2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .btn.big{min-width:48px;min-height:48px;font-size:19px;border-radius:14px;display:inline-flex;align-items:center;justify-content:center;padding:0 16px;font-weight:700;gap:8px}
@@ -168,7 +168,7 @@
   .capstage.locked{border-style:solid;border-color:var(--amber)}
   .capstage img{width:100%;display:block;pointer-events:none}
   .capsel{position:absolute;border:3px solid var(--amber2);background:rgba(245,158,11,.15);cursor:move;box-shadow:0 0 0 2000px rgba(2,6,23,.55)}
-  .capsel .h{position:absolute;width:22px;height:22px;background:var(--amber2);border-radius:6px}
+  .capsel .h{position:absolute;width:32px;height:32px;background:var(--amber2);border:2px solid #020617;border-radius:10px;touch-action:none;box-shadow:0 2px 8px rgba(0,0,0,.5)}
   .capbig{display:flex;gap:10px;flex-shrink:0}
   .capbig .btn.big{flex:1;font-size:16px}
   .filmstrip{display:flex;gap:10px;overflow-x:auto;overflow-y:hidden;min-height:96px;max-height:96px;flex-shrink:0;padding:2px;align-items:center}
@@ -554,7 +554,7 @@ function paintSel(){
   if(el && st && yt){ el.style.left = (yt.sel.x*100)+"%"; el.style.top = (yt.sel.y*100)+"%"; el.style.width = (yt.sel.w*100)+"%"; el.style.height = (yt.sel.h*100)+"%"; }
 }
 function doCapture(){
-  if(!yt || !yt.cap) return;
+  if(!yt || !yt.cap){ toast("Colle d'abord une image : Cmd/Ctrl+V, 📋 ou 📁"); return; }
   const img = document.getElementById("cap-img");
   if(!img || !img.naturalWidth) return;
   const nw = img.naturalWidth, nh = img.naturalHeight;
@@ -616,24 +616,27 @@ function renderYt(){
         </div>
       </div>
       <div class="ytzone">
-        <div class="capstage ${yt.frameLocked?'locked':''}" id="cap-stage">
-          ${yt.cap ? `<img id="cap-img" src="${yt.cap}" alt="" ${yt.autoCap?'onload="yt.autoCap=false;doCapture()"':''}>
-            <div class="capsel" id="cap-sel" style="left:${sel.x*100}%;top:${sel.y*100}%;width:${sel.w*100}%;height:${sel.h*100}%">
-              <span class="h" style="left:-11px;top:-11px" onpointerdown="capDrag('resize','tl')(event)"></span>
-              <span class="h" style="right:-11px;top:-11px" onpointerdown="capDrag('resize','tr')(event)"></span>
-              <span class="h" style="left:-11px;bottom:-11px" onpointerdown="capDrag('resize','bl')(event)"></span>
-              <span class="h" style="right:-11px;bottom:-11px" onpointerdown="capDrag('resize','br')(event)"></span>
-            </div>` : `<div style="padding:20px;text-align:center;color:var(--dim);font-size:14px;max-width:340px">Colle ici ta capture d'écran (Cmd/Ctrl+V)<br>ou importe une image.<br><br>Une fois le cadre réglé, chaque collage sera <strong style="color:var(--amber2)">capturé automatiquement</strong>.</div>`}
-        </div>
-        <p class="capmsg">${esc(yt.msg||"")}</p>
         <div class="capbig">
-          <button class="btn big primary" ${yt.cap?"":"disabled style='opacity:.4'"} onclick="doCapture()">📸 Capturer</button>
+          <button class="btn big primary" ${yt.cap?"":"style='opacity:.45'"} onclick="doCapture()">📸 Capturer</button>
           <label class="btn big ghost" style="cursor:pointer" title="Importer une image">📁
             <input type="file" accept="image/*" style="display:none" onchange="capFromFile(this)">
           </label>
           <button class="btn big ghost" title="Coller depuis le presse-papiers" onclick="capFromClipboard()">📋</button>
-          ${yt.frameLocked?`<button class="btn big ghost" title="Réajuster le cadre" onclick="yt.frameLocked=false;renderYt()">🔓</button>`:""}
+          ${yt.cap ? (yt.frameLocked
+            ? `<button class="btn big ghost" title="Réajuster le cadre" onclick="yt.frameLocked=false;renderYt()">🔓</button>`
+            : `<button class="btn big ghost" title="Verrouiller le cadre : les prochains collages seront capturés automatiquement" onclick="yt.frameLocked=true;yt.msg='Cadre verrouillé 🔒 — colle la prochaine image, elle sera capturée automatiquement';renderYt()">🔒</button>`)
+          : ""}
         </div>
+        <div class="capstage ${yt.frameLocked?'locked':''}" id="cap-stage">
+          ${yt.cap ? `<img id="cap-img" src="${yt.cap}" alt="" ${yt.autoCap?'onload="yt.autoCap=false;doCapture()"':''}>
+            <div class="capsel" id="cap-sel" style="left:${sel.x*100}%;top:${sel.y*100}%;width:${sel.w*100}%;height:${sel.h*100}%">
+              <span class="h" style="left:-16px;top:-16px" onpointerdown="event.stopPropagation();capDrag('resize','tl')(event)"></span>
+              <span class="h" style="right:-16px;top:-16px" onpointerdown="event.stopPropagation();capDrag('resize','tr')(event)"></span>
+              <span class="h" style="left:-16px;bottom:-16px" onpointerdown="event.stopPropagation();capDrag('resize','bl')(event)"></span>
+              <span class="h" style="right:-16px;bottom:-16px" onpointerdown="event.stopPropagation();capDrag('resize','br')(event)"></span>
+            </div>` : `<div style="padding:20px;text-align:center;color:var(--dim);font-size:14px;max-width:340px">Colle ici ta capture d'écran (Cmd/Ctrl+V)<br>ou importe une image.<br><br>Une fois le cadre réglé, chaque collage sera <strong style="color:var(--amber2)">capturé automatiquement</strong>.</div>`}
+        </div>
+        <p class="capmsg">${esc(yt.msg||"")}</p>
         <div class="filmstrip">
           ${yt.captures.map((cp,i)=>`<div class="thumb">
             <img src="${cp.src}">
@@ -647,7 +650,10 @@ function renderYt(){
   const slot = document.getElementById("yt-slot");
   if(videoNode && slot && !slot.contains(videoNode)) slot.appendChild(videoNode);
   const selEl = document.getElementById("cap-sel");
-  if(selEl) selEl.addEventListener("pointerdown", capDrag("move", null));
+  if(selEl) selEl.addEventListener("pointerdown", e => {
+    if(e.target && e.target.classList && e.target.classList.contains("h")) return;
+    capDrag("move", null)(e);
+  });
 }
 
 /* ---------- Import d'un titre depuis un lien YouTube ---------- */
