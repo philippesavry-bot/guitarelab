@@ -169,8 +169,9 @@
   .vsel.set{border-color:#4ade80}
   .vsel .h{position:absolute;width:32px;height:32px;background:var(--amber2);border:2px solid #020617;border-radius:10px;touch-action:none;box-shadow:0 2px 8px rgba(0,0,0,.5)}
   .vsel.set .h{background:#4ade80}
-  /* Zone de collage (résultat découpé) */
-  .pastestage{position:relative;width:100%;flex:1;min-height:120px;background:#020617;border:2px dashed var(--border2);border-radius:14px;overflow:auto;display:flex;align-items:center;justify-content:center}
+  /* Zone de collage (résultat découpé) — directement collable (appui long → Coller) */
+  .pastestage{position:relative;width:100%;flex:1;min-height:120px;background:#020617;border:2px dashed var(--border2);border-radius:14px;overflow:auto;display:flex;align-items:center;justify-content:center;-webkit-user-select:none;user-select:none}
+  .pastestage.armed{border-color:var(--amber2)}
   .pastestage img{max-width:100%;max-height:100%;border-radius:10px;display:block}
   .capbig{display:flex;gap:10px;flex-shrink:0}
   .capbig .btn.big{flex:1;font-size:16px}
@@ -474,15 +475,16 @@ function jumpBm(t){ try{ yt.player.seekTo(t, true); yt.player.playVideo(); }catc
    Flux utilisateur :
    1. lancer la vidéo jusqu'au moment voulu, 2. pause,
    3. cadre visible sur la vidéo → le déplacer / redimensionner sur la zone à garder,
-   4. 📸 Capturer (valide le cadre), 5. capture d'écran iPad,
-   6. 📋 Coller → l'image est découpée selon la position du cadre à l'écran
-      et placée dans la zone de collage (à droite).
+   4. 📸 Capturer (valide le cadre + arme la zone de collage),
+   5. capture d'écran iPad,
+   6. coller (appui long sur la zone de collage, Cmd/Ctrl+V, 📋 ou 📁)
+      → l'image est découpée selon le cadre et placée dans la zone de collage.
 ---------------------------------------------------------------- */
 function doCapture(){
   if(!yt) return;
   try{ yt.player && yt.player.pauseVideo && yt.player.pauseVideo(); }catch(_){}
   yt.frameSet = true;
-  yt.msg = "Cadre réglé ✔ — prends ta capture d'écran iPad, puis clique 📋 Coller";
+  yt.msg = "Cadre validé ✔ — capture d'écran iPad, copie-la, puis appui long sur la zone de collage → Coller";
   renderYt();
 }
 /* Découpe l'image collée (capture d'écran de tout l'écran) selon la position du cadre */
@@ -534,7 +536,7 @@ function capFromFile(input){
   r.readAsDataURL(f); input.value = "";
 }
 function capFromClipboard(){
-  if(!navigator.clipboard || !navigator.clipboard.read){ toast("Prends ta capture d'écran iPad puis Cmd/Ctrl+V, ou 📁"); return; }
+  if(!navigator.clipboard || !navigator.clipboard.read){ toast("Appui long sur la zone de collage → Coller, ou 📁"); return; }
   navigator.clipboard.read().then(items => {
     for(const item of items){
       const imgType = (item.types||[]).find(t => t.startsWith("image/"));
@@ -544,9 +546,10 @@ function capFromClipboard(){
         r.readAsDataURL(blob);
       });
     }
-    toast("Aucune image dans le presse-papiers");
-  }).catch(() => toast("Erreur de collage — prends ta capture d'écran iPad puis Cmd/Ctrl+V, ou 📁"));
+    toast("Aucune image copiée — copie d'abord ta capture d'écran (coin → Copier)");
+  }).catch(() => toast("Copie d'abord ta capture d'écran, puis appui long sur la zone de collage → Coller"));
 }
+/* Réception des collages, où que they se produisent dans l'atelier */
 document.addEventListener("paste", e => {
   if(!yt) return;
   const items = Array.from(e.clipboardData?.items || []);
@@ -671,21 +674,20 @@ function renderYt(){
       <div class="ytzone">
         <div class="capbig">
           <button class="btn big primary" onclick="doCapture()">📸 Capturer</button>
-          <button class="btn big ghost" title="Coller la capture d'écran prise" onclick="capFromClipboard()">📋 Coller</button>
-          <label class="btn big ghost" style="cursor:pointer" title="Importer une image">📁
+          <button class="btn big ghost" title="Coller l'image copiée" onclick="capFromClipboard()">📋 Coller</button>
+          <label class="btn big ghost" style="cursor:pointer" title="Choisir une image (photothèque)">📁
             <input type="file" accept="image/*" style="display:none" onchange="capFromFile(this)">
           </label>
           ${yt.lastRaw?`<button class="btn big ghost" title="Garder l'image entière (sans découpe)" onclick="useFullPaste()">↩ Entière</button>`:""}
         </div>
-        <div class="pastestage" id="paste-zone">
+        <div class="pastestage ${yt.frameSet?'armed':''}" id="paste-zone" contenteditable="true" inputmode="none">
           ${yt.last ? `<img src="${yt.last}" alt="Dernière capture">`
-            : `<div style="padding:20px;text-align:center;color:var(--dim);font-size:14px;max-width:360px;line-height:1.7">
-                1. ▶ Lance la vidéo jusqu'au bon moment<br>
-                2. ⏸ Pause<br>
-                3. Déplace le <strong style="color:var(--amber2)">cadre</strong> sur la zone à garder<br>
-                4. 📸 Capturer<br>
-                5. Capture d'écran iPad<br>
-                6. 📋 Coller → l'image arrive ici, découpée
+            : `<div style="padding:20px;text-align:center;color:var(--dim);font-size:14px;max-width:380px;line-height:1.8;pointer-events:none">
+                ${yt.frameSet
+                  ? `📲 <strong style="color:var(--amber2)">Appui long ici → Coller</strong><br>(après avoir copié ta capture d'écran)`
+                  : `1. ▶ Lance la vidéo jusqu'au bon moment<br>
+                2. ⏸ Pause · 3. Place le <strong style="color:var(--amber2)">cadre</strong> sur la zone<br>
+                4. 📸 Capturer · 5. Capture d'écran iPad · 6. Colle ici`}
               </div>`}
         </div>
         <p class="capmsg">${esc(yt.msg||"")}</p>
@@ -706,6 +708,13 @@ function renderYt(){
     if(e.target && e.target.classList && e.target.classList.contains("h")) return;
     capDrag("move", null, "yt-slot")(e);
   });
+  /* la zone de collage reçoit aussi les collages faits directement dessus (appui long iPad) :
+     le paste événement remonte au document, mais on bloque l'insertion native de texte */
+  const pz = document.getElementById("paste-zone");
+  if(pz){
+    pz.addEventListener("paste", e => { e.preventDefault(); }, true);
+    pz.addEventListener("input", () => { if(!yt.last) pz.innerHTML = ""; });
+  }
 }
 
 /* ---------- Import d'un titre depuis un lien YouTube ---------- */
