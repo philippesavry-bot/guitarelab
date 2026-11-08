@@ -165,7 +165,7 @@
   .transport input[type=range]{flex:1;min-width:100px;accent-color:var(--amber2);height:8px}
   .transport .tcur{font-family:ui-monospace,monospace;font-size:13px;color:var(--muted);white-space:nowrap}
   /* Cadre de découpe posé SUR la vidéo */
-  .vsel{position:absolute;z-index:3;border:3px solid var(--amber2);background:rgba(245,158,11,.14);cursor:move;touch-action:none;box-shadow:0 4px 18px rgba(0,0,0,.45)}
+  .vsel{position:absolute;z-index:3;border:3px solid var(--amber2);background:transparent;cursor:move;touch-action:none;box-shadow:0 4px 18px rgba(0,0,0,.45)}
   .vsel.set{border-color:#4ade80}
   .vsel .h{position:absolute;width:32px;height:32px;background:var(--amber2);border:2px solid #020617;border-radius:10px;touch-action:none;box-shadow:0 2px 8px rgba(0,0,0,.5)}
   .vsel.set .h{background:#4ade80}
@@ -495,10 +495,11 @@ function handlePastedImage(src){
     const r = stage.getBoundingClientRect();
     const W = window.innerWidth || r.width, H = window.innerHeight || r.height;
     const clamp01 = v => Math.max(0, Math.min(1, v));
-    const fx1 = clamp01((r.left + yt.sel.x * r.width) / W);
-    const fy1 = clamp01((r.top  + yt.sel.y * r.height) / H);
-    const fx2 = clamp01((r.left + (yt.sel.x + yt.sel.w) * r.width) / W);
-    const fy2 = clamp01((r.top  + (yt.sel.y + yt.sel.h) * r.height) / H);
+    const PAD = 7; // marge pour éliminer les bords du cadre présents dans la capture d'écran
+    const fx1 = clamp01((r.left + yt.sel.x * r.width + PAD) / W);
+    const fy1 = clamp01((r.top  + yt.sel.y * r.height + PAD) / H);
+    const fx2 = clamp01((r.left + (yt.sel.x + yt.sel.w) * r.width - PAD) / W);
+    const fy2 = clamp01((r.top  + (yt.sel.y + yt.sel.h) * r.height - PAD) / H);
     const nw = img.naturalWidth, nh = img.naturalHeight;
     let out = src;
     if(fx2 - fx1 > 0.02 && fy2 - fy1 > 0.02 && nw > 0 && nh > 0){
