@@ -191,7 +191,7 @@
 <body>
 <header class="app">
   <div class="hbar">
-    <div class="logo"><span class="gg">🎸</span> Guitar <em>Lab</em> <span style="font-size:10px;font-weight:700;color:var(--dim);border:1px solid var(--border2);border-radius:8px;padding:2px 8px" title="Version de l'appli">v3</span></div>
+    <div class="logo"><span class="gg">🎸</span> Guitar <em>Lab</em> <span style="font-size:10px;font-weight:700;color:var(--dim);border:1px solid var(--border2);border-radius:8px;padding:2px 8px" title="Version de l'appli">v4</span></div>
     <nav class="tabs" id="tabs"></nav>
   </div>
 </header>
@@ -517,6 +517,7 @@ function handlePastedImage(src){
     yt.captures.push({ id: "c"+Date.now(), src: out });
     yt.msg = "Image placée dans la zone de collage ✔ — ↩ Entière si la découpe est incorrecte";
     updateYt();
+    try{ toast("Capture découpée et placée ✔"); }catch(_){}
   };
   img.onerror = () => toast("❌ Image illisible");
   img.src = src;
@@ -559,12 +560,15 @@ document.addEventListener("paste", e => {
   const cd = e.clipboardData;
   let file = null;
   if(cd){
-    const it = Array.from(cd.items||[]).find(i => i.kind === "file" && i.type && i.type.startsWith("image/"));
+    const items = Array.from(cd.items||[]);
+    try{ toast("Collage détecté : " + (items.length ? items.map(i=>i.type||"?").join(", ") : "aucune donnée")); }catch(_){}
+    const it = items.find(i => i.type && i.type.startsWith("image/") && (i.kind === "file" || i.getAsFile));
     if(it) file = it.getAsFile();
     if(!file && cd.files && cd.files.length) file = Array.from(cd.files).find(f => f.type && f.type.startsWith("image/")) || null;
   }
-  if(!file) return; // pas d'image détectée → on laisse Safari insérer nativement (secours « input »)
+  if(!file) return; // pas d'image détectée → Safari insérera nativement (secours input / MutationObserver)
   e.preventDefault();
+  try{ toast("Image reçue ✔ — découpe…"); }catch(_){}
   const r = new FileReader();
   r.onload = () => handlePastedImage(r.result);
   r.readAsDataURL(file);
@@ -697,12 +701,29 @@ function renderYt(){
         const src = inserted[inserted.length-1].getAttribute("src");
         pz.innerHTML = "";
         pz.dataset.state = "";
-        if(src) handlePastedImage(src);
+        if(src){ try{ toast("Image insérée détectée ✔"); }catch(_){} handlePastedImage(src); }
       } else if(!yt.last){
         pz.innerHTML = "";
         pz.dataset.state = "";
       }
     });
+    /* SECOURS RENFORCÉ : même si Safari n'émet ni paste ni input exploitable,
+       toute image apparaissant dans la zone (insertion native) est détectée ici. */
+    const mo = new MutationObserver(() => {
+      try{
+        const inserted = pz.querySelectorAll("img");
+        if(inserted.length){
+          const src = inserted[inserted.length-1].getAttribute("src");
+          if(src && src !== yt.last && src !== yt.lastRaw){
+            pz.innerHTML = "";
+            pz.dataset.state = "";
+            toast("Image insérée détectée ✔");
+            handlePastedImage(src);
+          }
+        }
+      }catch(_){}
+    });
+    mo.observe(pz, {childList:true, subtree:true});
   }
   updateYt();
 }
