@@ -169,8 +169,9 @@
   .vsel.set{border-color:#4ade80}
   .vsel .h{position:absolute;width:32px;height:32px;background:var(--amber2);border:2px solid #020617;border-radius:10px;touch-action:none;box-shadow:0 2px 8px rgba(0,0,0,.5)}
   .vsel.set .h{background:#4ade80}
-  /* Zone de collage (résultat découpé) — directement collable (appui long → Coller) */
-  .pastestage{position:relative;width:100%;flex:1;min-height:120px;background:#020617;border:2px dashed var(--border2);border-radius:14px;overflow:auto;display:flex;align-items:center;justify-content:center;-webkit-user-select:none;user-select:none}
+  /* Zone de collage (résultat découpé) — directement collable (appui long → Coller).
+     NB : pas de user-select:none ici, il empêche le menu « Coller » d'apparaître sur iPad. */
+  .pastestage{position:relative;width:100%;flex:1;min-height:120px;background:#020617;border:2px dashed var(--border2);border-radius:14px;overflow:auto;display:flex;align-items:center;justify-content:center}
   .pastestage.armed{border-color:var(--amber2)}
   .pastestage img{max-width:100%;max-height:100%;border-radius:10px;display:block}
   .capbig{display:flex;gap:10px;flex-shrink:0}
@@ -549,16 +550,24 @@ function capFromClipboard(){
     toast("Aucune image copiée — copie d'abord ta capture d'écran (coin → Copier)");
   }).catch(() => toast("Copie d'abord ta capture d'écran, puis appui long sur la zone de collage → Coller"));
 }
-/* Réception des collages, où que they se produisent dans l'atelier */
+/* Réception des collages, où qu'ils se produisent dans l'atelier.
+   Sur iPad, le menu « Coller » peut insérer l'image SANS événement paste exploitable :
+   dans ce cas l'image arrive nativement dans la zone de collage et le secours
+   « input » de renderYt (détection d'une <img> insérée) prend le relais. */
 document.addEventListener("paste", e => {
   if(!yt) return;
-  const items = Array.from(e.clipboardData?.items || []);
-  const item = items.find(i => i.type && i.type.startsWith("image/"));
-  if(!item) return;
+  const cd = e.clipboardData;
+  let file = null;
+  if(cd){
+    const it = Array.from(cd.items||[]).find(i => i.kind === "file" && i.type && i.type.startsWith("image/"));
+    if(it) file = it.getAsFile();
+    if(!file && cd.files && cd.files.length) file = Array.from(cd.files).find(f => f.type && f.type.startsWith("image/")) || null;
+  }
+  if(!file) return; // pas d'image détectée → on laisse Safari insérer nativement (secours « input »)
   e.preventDefault();
   const r = new FileReader();
   r.onload = () => handlePastedImage(r.result);
-  r.readAsDataURL(item.getAsFile());
+  r.readAsDataURL(file);
 }, true);
 
 /* Raccourcis clavier de l'atelier : espace = lecture/pause, ←→ = ±5s */
@@ -708,12 +717,23 @@ function renderYt(){
     if(e.target && e.target.classList && e.target.classList.contains("h")) return;
     capDrag("move", null, "yt-slot")(e);
   });
-  /* la zone de collage reçoit aussi les collages faits directement dessus (appui long iPad) :
-     le paste événement remonte au document, mais on bloque l'insertion native de texte */
+  /* Zone de collage — deux façons de recevoir l'image :
+     1) événement paste classique (traité au niveau document ci-dessus) ;
+     2) SECOURS iPad : le menu « Coller » insère l'image nativement dans la zone
+        sans événement paste exploitable → on détecte l'<img> insérée ici,
+        on la récupère et on lance la découpe. */
   const pz = document.getElementById("paste-zone");
   if(pz){
-    pz.addEventListener("paste", e => { e.preventDefault(); }, true);
-    pz.addEventListener("input", () => { if(!yt.last) pz.innerHTML = ""; });
+    pz.addEventListener("input", () => {
+      const inserted = pz.querySelectorAll("img");
+      if(inserted.length){
+        const src = inserted[inserted.length-1].getAttribute("src");
+        pz.innerHTML = "";
+        if(src) handlePastedImage(src);
+      } else if(!yt.last){
+        pz.innerHTML = "";
+      }
+    });
   }
 }
 
