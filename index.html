@@ -414,7 +414,7 @@ function openYtPlayer(linkId){
   const link = ytLinkObj(linkId);
   if(!link) return;
   yt = { linkId, videoId: extractYtId(link.url), captures: [], frameSet: false, last: null, lastRaw: null,
-         sel: {x:.1, y:.5, w:.8, h:.38}, msg: "", bmName: "", bmOpen: false, failed: false, player: null,
+         sel: {x:.1, y:.5, w:.8, h:.38}, msg: "", bmName: "", bmOpen: false, player: null,
          playing: false, cur: 0, dur: 0, poll: null,
          bookmarks: link.bookmarks || (link.bookmarks = []) };
   renderYt();
@@ -437,14 +437,14 @@ function startYt(startAt){
       events: {
         onReady: () => { if(!yt) return; yt.apiReady = true; try{ yt.dur = yt.player.getDuration()||0; yt.player.playVideo(); }catch(_){} paintTransport(); },
         onStateChange: e => { if(!yt) return; yt.playing = (e.data === 1); try{ yt.dur = yt.player.getDuration()||0; }catch(_){} paintTransport(); },
-        onError: () => { if(yt){ yt.failed = true; renderYt(); } }
+        onError: () => { if(yt){ yt.msg = "❌ Vidéo indisponible"; updateYt(); } }
       }
     });
     if(yt) yt.poll = setInterval(() => {
       if(!yt || !yt.player || !yt.player.getCurrentTime) return;
       try{ yt.cur = yt.player.getCurrentTime()||0; paintTransport(); }catch(_){}
     }, 400);
-  }).catch(() => { if(yt){ yt.failed = true; renderYt(); } });
+  }).catch(() => { if(yt){ yt.msg = "❌ Lecteur YouTube indisponible (connexion ?)"; updateYt(); } });
 }
 function closeYt(){
   if(yt && yt.poll) clearInterval(yt.poll);
@@ -461,15 +461,15 @@ function paintTransport(){
 function ytToggle(){ if(!yt||!yt.player) return; try{ yt.playing ? yt.player.pauseVideo() : yt.player.playVideo(); }catch(_){} }
 function ytSeek(d){ if(!yt||!yt.player) return; try{ yt.player.seekTo(Math.max(0, Math.min(yt.dur||1e9, yt.cur + d)), true); }catch(_){} }
 function ytSeekTo(v){ if(!yt||!yt.player) return; try{ yt.player.seekTo(v, true); }catch(_){} }
-function addBmUI(){ yt.bmOpen = !yt.bmOpen; renderYt(); }
+function addBmUI(){ yt.bmOpen = !yt.bmOpen; updateYt(); }
 function addBm(){
   if(!yt || !yt.player || !yt.player.getCurrentTime) return;
   const t = Math.floor(yt.player.getCurrentTime());
   if(!(t > 0)) return;
   yt.bookmarks.push({ id: "b"+Date.now(), time: t, name: yt.bmName.trim() || ("Point " + (yt.bookmarks.length+1)) });
-  yt.bmName = ""; yt.bmOpen = false; save(); renderYt(); toast("Repère créé 📍");
+  yt.bmName = ""; yt.bmOpen = false; save(); updateYt(); toast("Repère créé 📍");
 }
-function delBm(id){ yt.bookmarks = yt.bookmarks.filter(b => b.id !== id); ytLinkObj(yt.linkId).bookmarks = yt.bookmarks; save(); renderYt(); }
+function delBm(id){ yt.bookmarks = yt.bookmarks.filter(b => b.id !== id); ytLinkObj(yt.linkId).bookmarks = yt.bookmarks; save(); updateYt(); }
 function jumpBm(t){ try{ yt.player.seekTo(t, true); yt.player.playVideo(); }catch(_){} }
 
 /* ---------- Capture : cadre réglé SUR LA VIDÉO ----------
@@ -486,7 +486,7 @@ function doCapture(){
   try{ yt.player && yt.player.pauseVideo && yt.player.pauseVideo(); }catch(_){}
   yt.frameSet = true;
   yt.msg = "Cadre validé ✔ — capture d'écran iPad, copie-la, puis appui long sur la zone de collage → Coller";
-  renderYt();
+  updateYt();
 }
 /* Découpe l'image collée (capture d'écran de tout l'écran) selon la position du cadre */
 function handlePastedImage(src){
@@ -516,7 +516,7 @@ function handlePastedImage(src){
     yt.last = out;
     yt.captures.push({ id: "c"+Date.now(), src: out });
     yt.msg = "Image placée dans la zone de collage ✔ — ↩ Entière si la découpe est incorrecte";
-    renderYt();
+    updateYt();
   };
   img.onerror = () => toast("❌ Image illisible");
   img.src = src;
@@ -528,7 +528,7 @@ function useFullPaste(){
   else yt.captures.push(full);
   yt.last = yt.lastRaw;
   yt.msg = "Image entière conservée (sans découpe)";
-  renderYt();
+  updateYt();
 }
 function capFromFile(input){
   const f = input.files && input.files[0]; if(!f || !yt) return;
@@ -610,10 +610,8 @@ function capDrag(kind, corner, stageId){
       window.removeEventListener("touchmove", onMove); window.removeEventListener("touchend", onUp);
       if(yt){
         yt.frameSet = false;
-        const vselEl = document.getElementById("vsel");
-        if(vselEl) vselEl.classList.remove("set");
-        const m = document.querySelector(".capmsg");
-        if(m) m.textContent = "Cadre déplacé — clique 📸 Capturer pour le valider";
+        yt.msg = "Cadre déplacé — clique 📸 Capturer pour le valider";
+        updateYt();
       }
     };
     window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
@@ -622,10 +620,9 @@ function capDrag(kind, corner, stageId){
 }
 function paintSel(){
   const el = document.getElementById("vsel");
-  const st = document.getElementById("yt-slot");
-  if(el && st && yt){ el.style.left = (yt.sel.x*100)+"%"; el.style.top = (yt.sel.y*100)+"%"; el.style.width = (yt.sel.w*100)+"%"; el.style.height = (yt.sel.h*100)+"%"; }
+  if(el && yt){ el.style.left = (yt.sel.x*100)+"%"; el.style.top = (yt.sel.y*100)+"%"; el.style.width = (yt.sel.w*100)+"%"; el.style.height = (yt.sel.h*100)+"%"; }
 }
-function delCap(i){ yt.captures.splice(i,1); renderYt(); }
+function delCap(i){ yt.captures.splice(i,1); updateYt(); }
 function addCapsToSong(){
   if(!yt || !yt.captures.length) return;
   const v = curVer();
@@ -633,27 +630,24 @@ function addCapsToSong(){
   save(); closeYt(); renderApp(); toast("Captures ajoutées à « Mes captures YouTube » ✔");
 }
 function renderYt(){
+  /* L'atelier est construit UNE SEULE fois, à l'ouverture. Le lecteur YouTube
+     (iframe) n'est ensuite JAMAIS déplacé ni recréé : un iframe recréé recharge
+     la vidéo depuis le début. Toutes les mises à jour passent par updateYt(),
+     qui ne touche qu'aux zones dynamiques, jamais à #yt-slot. */
   const root = $("#yt-root");
   if(!yt){ root.innerHTML = ""; return; }
-  const link = ytLinkObj(yt.linkId);
-  const sel = yt.sel;
-  // préserver le lecteur vidéo à travers les re-renderings (la vidéo ne redémarre jamais)
-  let videoNode = null;
-  const oldSlot = document.getElementById("yt-slot");
-  if(oldSlot) videoNode = oldSlot.querySelector("iframe,#yt-embed");
   root.innerHTML = `<div class="ytoverlay">
     <div class="ythead">
       <span style="font-size:22px">🎬</span>
-      <h2>${esc(link.title || "Atelier vidéo")}</h2>
+      <h2 id="yt-title"></h2>
       <button class="btn big" style="background:var(--amber);color:#fff" onclick="addBmUI()">📍 Marquer ici</button>
       <button class="btn big" style="background:#b91c1c;color:#fff" onclick="closeYt()">✕</button>
     </div>
     <div class="ytgrid">
       <div class="ytzone">
-        <div class="ytvideo" id="yt-slot">${videoNode ? "" : (yt.failed || !yt.videoId
-          ? `<iframe src="https://www.youtube-nocookie.com/embed/${yt.videoId||""}?rel=0&playsinline=1" allow="autoplay; encrypted-media" allowfullscreen></iframe>`
-          : `<div id="yt-embed" style="position:absolute;inset:0"></div>`)}
-          <div class="vsel ${yt.frameSet?'set':''}" id="vsel" style="left:${sel.x*100}%;top:${sel.y*100}%;width:${sel.w*100}%;height:${sel.h*100}%" title="Cadre de découpe — déplace-le sur la zone à capturer">
+        <div class="ytvideo" id="yt-slot">
+          <div id="yt-embed" style="position:absolute;inset:0"></div>
+          <div class="vsel" id="vsel" title="Cadre de découpe — déplace-le sur la zone à capturer">
             <span class="h" style="left:-16px;top:-16px" onpointerdown="event.stopPropagation();capDrag('resize','tl','yt-slot')(event)"></span>
             <span class="h" style="right:-16px;top:-16px" onpointerdown="event.stopPropagation();capDrag('resize','tr','yt-slot')(event)"></span>
             <span class="h" style="left:-16px;bottom:-16px" onpointerdown="event.stopPropagation();capDrag('resize','bl','yt-slot')(event)"></span>
@@ -662,23 +656,12 @@ function renderYt(){
         </div>
         <div class="transport">
           <button class="btn big ghost" onclick="ytSeek(-5)">⏪ 5s</button>
-          <button class="btn big primary" id="yt-play" onclick="ytToggle()">${yt.playing?"⏸":"▶"}</button>
+          <button class="btn big primary" id="yt-play" onclick="ytToggle()">▶</button>
           <button class="btn big ghost" onclick="ytSeek(5)">⏩ 5s</button>
-          <input id="yt-seek" type="range" min="0" max="${yt.dur||100}" step="0.1" value="${yt.cur||0}" oninput="ytSeekTo(+this.value)">
-          <span class="tcur" id="yt-cur">${fmtBm(yt.cur)} / ${fmtBm(yt.dur)}</span>
+          <input id="yt-seek" type="range" min="0" max="100" step="0.1" value="0" oninput="ytSeekTo(+this.value)">
+          <span class="tcur" id="yt-cur"></span>
         </div>
-        <div style="display:flex;flex-direction:column;gap:6px;overflow:auto;max-height:26vh;flex-shrink:0">
-          ${yt.bmOpen ? `<div style="display:flex;gap:8px">
-            <input class="search" placeholder="Nom du repère (ex. Solo…)" value="${esc(yt.bmName)}" oninput="yt.bmName=this.value" onkeydown="if(event.key==='Enter')addBm()">
-            <button class="btn primary" style="min-height:44px" onclick="addBm()">Créer</button>
-          </div>`:""}
-          ${(link.bookmarks||[]).map(b=>`<div class="bm">
-            <button class="btn ghost" style="min-height:40px;min-width:44px" onclick="jumpBm(${b.time})" title="Aller à ce moment">▶</button>
-            <span class="t">${fmtBm(b.time)}</span>
-            <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.name)}</span>
-            <button onclick="delBm('${b.id}')" title="Supprimer">✕</button>
-          </div>`).join("")}
-        </div>
+        <div id="yt-bm-box" style="display:flex;flex-direction:column;gap:6px;overflow:auto;max-height:26vh;flex-shrink:0"></div>
       </div>
       <div class="ytzone">
         <div class="capbig">
@@ -687,31 +670,15 @@ function renderYt(){
           <label class="btn big ghost" style="cursor:pointer" title="Choisir une image (photothèque)">📁
             <input type="file" accept="image/*" style="display:none" onchange="capFromFile(this)">
           </label>
-          ${yt.lastRaw?`<button class="btn big ghost" title="Garder l'image entière (sans découpe)" onclick="useFullPaste()">↩ Entière</button>`:""}
+          <span id="yt-entiere"></span>
         </div>
-        <div class="pastestage ${yt.frameSet?'armed':''}" id="paste-zone" contenteditable="true" inputmode="none">
-          ${yt.last ? `<img src="${yt.last}" alt="Dernière capture">`
-            : `<div style="padding:20px;text-align:center;color:var(--dim);font-size:14px;max-width:380px;line-height:1.8;pointer-events:none">
-                ${yt.frameSet
-                  ? `📲 <strong style="color:var(--amber2)">Appui long ici → Coller</strong><br>(après avoir copié ta capture d'écran)`
-                  : `1. ▶ Lance la vidéo jusqu'au bon moment<br>
-                2. ⏸ Pause · 3. Place le <strong style="color:var(--amber2)">cadre</strong> sur la zone<br>
-                4. 📸 Capturer · 5. Capture d'écran iPad · 6. Colle ici`}
-              </div>`}
-        </div>
-        <p class="capmsg">${esc(yt.msg||"")}</p>
-        <div class="filmstrip">
-          ${yt.captures.map((cp,i)=>`<div class="thumb">
-            <img src="${cp.src}">
-            <div class="tools"><button onclick="delCap(${i})">✕</button></div>
-          </div>`).join("") || `<div style="color:var(--dim);font-size:12px;font-style:italic;padding:8px">Aucune capture pour l'instant</div>`}
-        </div>
-        ${yt.captures.length?`<button class="btn big" style="background:#15803d;color:#fff" onclick="addCapsToSong()">➕ Ajouter ${yt.captures.length} capture${yt.captures.length>1?"s":""} au morceau</button>`:""}
+        <div class="pastestage" id="paste-zone" contenteditable="true" inputmode="none"></div>
+        <p class="capmsg" id="yt-msg"></p>
+        <div class="filmstrip" id="yt-film"></div>
+        <div id="yt-addbtn"></div>
       </div>
     </div>
   </div>`;
-  const slot = document.getElementById("yt-slot");
-  if(videoNode && slot && !slot.contains(videoNode)) slot.appendChild(videoNode);
   const vsel = document.getElementById("vsel");
   if(vsel) vsel.addEventListener("pointerdown", e => {
     if(e.target && e.target.classList && e.target.classList.contains("h")) return;
@@ -729,12 +696,71 @@ function renderYt(){
       if(inserted.length){
         const src = inserted[inserted.length-1].getAttribute("src");
         pz.innerHTML = "";
+        pz.dataset.state = "";
         if(src) handlePastedImage(src);
       } else if(!yt.last){
         pz.innerHTML = "";
+        pz.dataset.state = "";
       }
     });
   }
+  updateYt();
+}
+/* Rafraîchit uniquement les zones dynamiques — JAMAIS le lecteur vidéo */
+function updateYt(){
+  if(!yt) return;
+  const link = ytLinkObj(yt.linkId);
+  const sel = yt.sel;
+  const title = document.getElementById("yt-title");
+  if(title) title.textContent = link.title || "Atelier vidéo";
+  const vsel = document.getElementById("vsel");
+  if(vsel){
+    vsel.style.left = (sel.x*100)+"%"; vsel.style.top = (sel.y*100)+"%";
+    vsel.style.width = (sel.w*100)+"%"; vsel.style.height = (sel.h*100)+"%";
+    vsel.classList.toggle("set", !!yt.frameSet);
+  }
+  const ent = document.getElementById("yt-entiere");
+  if(ent) ent.innerHTML = yt.lastRaw ? `<button class="btn big ghost" title="Garder l'image entière (sans découpe)" onclick="useFullPaste()">↩ Entière</button>` : "";
+  const pz = document.getElementById("paste-zone");
+  if(pz){
+    pz.classList.toggle("armed", !!yt.frameSet);
+    const wanted = yt.last ? "img"+yt.last.length : (yt.frameSet ? "guide:on" : "guide:off");
+    if(pz.dataset.state !== wanted){
+      pz.dataset.state = wanted;
+      pz.innerHTML = yt.last ? `<img src="${yt.last}" alt="Dernière capture">`
+        : `<div style="padding:20px;text-align:center;color:var(--dim);font-size:14px;max-width:380px;line-height:1.8;pointer-events:none">
+            ${yt.frameSet
+              ? `📲 <strong style="color:var(--amber2)">Appui long ici → Coller</strong><br>(après avoir copié ta capture d'écran)`
+              : `1. ▶ Lance la vidéo jusqu'au bon moment<br>
+            2. ⏸ Pause · 3. Place le <strong style="color:var(--amber2)">cadre</strong> sur la zone<br>
+            4. 📸 Capturer · 5. Capture d'écran iPad · 6. Colle ici`}
+          </div>`;
+    }
+  }
+  const m = document.getElementById("yt-msg");
+  if(m) m.textContent = yt.msg || "";
+  const box = document.getElementById("yt-bm-box");
+  if(box){
+    box.innerHTML = (yt.bmOpen ? `<div style="display:flex;gap:8px">
+        <input class="search" placeholder="Nom du repère (ex. Solo…)" value="${esc(yt.bmName)}" oninput="yt.bmName=this.value" onkeydown="if(event.key==='Enter')addBm()">
+        <button class="btn primary" style="min-height:44px" onclick="addBm()">Créer</button>
+      </div>`:"") +
+      ((link.bookmarks||[]).map(b=>`<div class="bm">
+        <button class="btn ghost" style="min-height:40px;min-width:44px" onclick="jumpBm(${b.time})" title="Aller à ce moment">▶</button>
+        <span class="t">${fmtBm(b.time)}</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.name)}</span>
+        <button onclick="delBm('${b.id}')" title="Supprimer">✕</button>
+      </div>`).join(""));
+  }
+  const film = document.getElementById("yt-film");
+  if(film){
+    film.innerHTML = yt.captures.map((cp,i)=>`<div class="thumb">
+        <img src="${cp.src}">
+        <div class="tools"><button onclick="delCap(${i})">✕</button></div>
+      </div>`).join("") || `<div style="color:var(--dim);font-size:12px;font-style:italic;padding:8px">Aucune capture pour l'instant</div>`;
+  }
+  const addbtn = document.getElementById("yt-addbtn");
+  if(addbtn) addbtn.innerHTML = yt.captures.length ? `<button class="btn big" style="background:#15803d;color:#fff" onclick="addCapsToSong()">➕ Ajouter ${yt.captures.length} capture${yt.captures.length>1?"s":""} au morceau</button>` : "";
 }
 
 /* ---------- Import d'un titre depuis un lien YouTube ---------- */
