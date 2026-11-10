@@ -191,7 +191,7 @@
 <body>
 <header class="app">
   <div class="hbar">
-    <div class="logo"><span class="gg">🎸</span> Guitar <em>Lab</em> <span style="font-size:10px;font-weight:700;color:var(--dim);border:1px solid var(--border2);border-radius:8px;padding:2px 8px" title="Version de l'appli">v4</span></div>
+    <div class="logo"><span class="gg">🎸</span> Guitar <em>Lab</em> <span style="font-size:10px;font-weight:700;color:var(--dim);border:1px solid var(--border2);border-radius:8px;padding:2px 8px" title="Version de l'appli">v5</span></div>
     <nav class="tabs" id="tabs"></nav>
   </div>
 </header>
@@ -413,8 +413,8 @@ function fmtBm(t){ return String(Math.floor((t||0)/60)).padStart(2,"0")+":"+Stri
 function openYtPlayer(linkId){
   const link = ytLinkObj(linkId);
   if(!link) return;
-  yt = { linkId, videoId: extractYtId(link.url), captures: [], frameSet: false, last: null, lastRaw: null,
-         sel: {x:.1, y:.5, w:.8, h:.38}, msg: "", bmName: "", bmOpen: false, player: null,
+  yt = { linkId, videoId: extractYtId(link.url), captures: [], stage: null, locked: false,
+         sel: {x:.15, y:.40, w:.70, h:.22}, msg: "", bmName: "", bmOpen: false, player: null,
          playing: false, cur: 0, dur: 0, poll: null,
          bookmarks: link.bookmarks || (link.bookmarks = []) };
   renderYt();
@@ -472,63 +472,68 @@ function addBm(){
 function delBm(id){ yt.bookmarks = yt.bookmarks.filter(b => b.id !== id); ytLinkObj(yt.linkId).bookmarks = yt.bookmarks; save(); updateYt(); }
 function jumpBm(t){ try{ yt.player.seekTo(t, true); yt.player.playVideo(); }catch(_){} }
 
-/* ---------- Capture : cadre réglé SUR LA VIDÉO ----------
-   Flux utilisateur :
-   1. lancer la vidéo jusqu'au moment voulu, 2. pause,
-   3. cadre visible sur la vidéo → le déplacer / redimensionner sur la zone à garder,
-   4. 📸 Capturer (valide le cadre + arme la zone de collage),
-   5. capture d'écran iPad,
-   6. coller (appui long sur la zone de collage, Cmd/Ctrl+V, 📋 ou 📁)
-      → l'image est découpée selon le cadre et placée dans la zone de collage.
+/* ---------- Capture : flux de l'ancienne appli ----------
+   1. Colle la capture d'écran → elle s'affiche dans la zone,
+   2. règle le cadre SUR l'image collée,
+   3. ✂️ Capturer découpe selon le cadre ;
+   ensuite, chaque nouveau collage est découpé automatiquement (cadre verrouillé).
 ---------------------------------------------------------------- */
 function doCapture(){
   if(!yt) return;
-  try{ yt.player && yt.player.pauseVideo && yt.player.pauseVideo(); }catch(_){}
-  yt.frameSet = true;
-  yt.msg = "Cadre validé ✔ — capture d'écran iPad, copie-la, puis appui long sur la zone de collage → Coller";
-  updateYt();
-}
-/* Découpe l'image collée (capture d'écran de tout l'écran) selon la position du cadre */
-function handlePastedImage(src){
-  if(!yt) return;
+  if(!yt.stage){ yt.msg = "Colle d'abord une capture d'écran dans la zone en bas à droite"; updateYt(); return; }
   const img = new Image();
   img.onload = () => {
-    const stage = document.getElementById("yt-slot");
-    if(!stage) return;
-    const r = stage.getBoundingClientRect();
-    const W = window.innerWidth || r.width, H = window.innerHeight || r.height;
-    const clamp01 = v => Math.max(0, Math.min(1, v));
-    const PAD = 7; // marge pour éliminer les bords du cadre présents dans la capture d'écran
-    const fx1 = clamp01((r.left + yt.sel.x * r.width + PAD) / W);
-    const fy1 = clamp01((r.top  + yt.sel.y * r.height + PAD) / H);
-    const fx2 = clamp01((r.left + (yt.sel.x + yt.sel.w) * r.width - PAD) / W);
-    const fy2 = clamp01((r.top  + (yt.sel.y + yt.sel.h) * r.height - PAD) / H);
+    const stage = document.getElementById("cap-stage");
+    const cimg = document.getElementById("cap-img");
+    if(!stage || !cimg) return;
+    const sr = stage.getBoundingClientRect();
+    const ir = cimg.getBoundingClientRect();
     const nw = img.naturalWidth, nh = img.naturalHeight;
-    let out = src;
-    if(fx2 - fx1 > 0.02 && fy2 - fy1 > 0.02 && nw > 0 && nh > 0){
+    if(!nw || !nh || !ir.width || !ir.height){ yt.msg = "❌ Image pas encore affichée — réessaie"; updateYt(); return; }
+    // position du cadre (en % de la zone) convertie en pixels de l'image affichée
+    const PAD = 6; // marge pour éliminer les bords du cadre présents dans la capture d'écran
+    const toImgX = v => (v * sr.width - (ir.left - sr.left) - PAD) / ir.width * nw;
+    const toImgY = v => (v * sr.height - (ir.top - sr.top) - PAD) / ir.height * nh;
+    const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+    const x1 = clamp(toImgX(yt.sel.x), 0, nw), y1 = clamp(toImgY(yt.sel.y), 0, nh);
+    const x2 = clamp(toImgX(yt.sel.x + yt.sel.w), 0, nw), y2 = clamp(toImgY(yt.sel.y + yt.sel.h), 0, nh);
+    let out = yt.stage;
+    if(x2 - x1 > 8 && y2 - y1 > 8){
       const c = document.createElement("canvas");
-      c.width = Math.max(1, Math.round((fx2 - fx1) * nw));
-      c.height = Math.max(1, Math.round((fy2 - fy1) * nh));
-      c.getContext("2d").drawImage(img, fx1*nw, fy1*nh, c.width, c.height, 0, 0, c.width, c.height);
+      c.width = Math.round(x2 - x1); c.height = Math.round(y2 - y1);
+      c.getContext("2d").drawImage(img, x1, y1, c.width, c.height, 0, 0, c.width, c.height);
       out = c.toDataURL("image/jpeg", 0.88);
     }
-    yt.lastRaw = src;
-    yt.last = out;
     yt.captures.push({ id: "c"+Date.now(), src: out });
-    yt.msg = "Image placée dans la zone de collage ✔ — ↩ Entière si la découpe est incorrecte";
+    yt.locked = true;
+    yt.msg = "Capture ajoutée ✔ — colle la suivante (découpe auto), ou 🔓 Cadre pour réajuster";
     updateYt();
-    try{ toast("Capture découpée et placée ✔"); }catch(_){}
+    try{ toast("Capture découpée ✔"); }catch(_){}
   };
   img.onerror = () => toast("❌ Image illisible");
-  img.src = src;
+  img.src = yt.stage;
 }
-function useFullPaste(){
-  if(!yt || !yt.lastRaw) return;
-  const full = { id: "c"+Date.now(), src: yt.lastRaw };
-  if(yt.captures.length) yt.captures[yt.captures.length-1] = full;
-  else yt.captures.push(full);
-  yt.last = yt.lastRaw;
-  yt.msg = "Image entière conservée (sans découpe)";
+/* Réception d'une image collée (capture d'écran) */
+function handlePastedImage(src){
+  if(!yt || !src || typeof src !== "string") return;
+  const wasLocked = yt.locked;
+  yt.stage = src;
+  if(wasLocked){
+    yt.msg = "Découpe automatique…";
+    updateYt();
+    const dimg = document.getElementById("cap-img");
+    const go = () => doCapture();
+    if(dimg && !dimg.complete) dimg.addEventListener("load", go, {once:true});
+    else go();
+  } else {
+    yt.msg = "Image affichée ✔ — règle le cadre dessus puis clique ✂️ Capturer";
+    updateYt();
+  }
+}
+function unlockFrame(){
+  if(!yt) return;
+  yt.locked = false;
+  yt.msg = "Cadre déverrouillé — déplace-le sur l'image puis ✂️ Capturer";
   updateYt();
 }
 function capFromFile(input){
@@ -613,8 +618,7 @@ function capDrag(kind, corner, stageId){
       window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp);
       window.removeEventListener("touchmove", onMove); window.removeEventListener("touchend", onUp);
       if(yt){
-        yt.frameSet = false;
-        yt.msg = "Cadre déplacé — clique 📸 Capturer pour le valider";
+        yt.msg = "Cadre réglé — clique ✂️ Capturer pour découper";
         updateYt();
       }
     };
@@ -651,12 +655,6 @@ function renderYt(){
       <div class="ytzone">
         <div class="ytvideo" id="yt-slot">
           <div id="yt-embed" style="position:absolute;inset:0"></div>
-          <div class="vsel" id="vsel" title="Cadre de découpe — déplace-le sur la zone à capturer">
-            <span class="h" style="left:-16px;top:-16px" onpointerdown="event.stopPropagation();capDrag('resize','tl','yt-slot')(event)"></span>
-            <span class="h" style="right:-16px;top:-16px" onpointerdown="event.stopPropagation();capDrag('resize','tr','yt-slot')(event)"></span>
-            <span class="h" style="left:-16px;bottom:-16px" onpointerdown="event.stopPropagation();capDrag('resize','bl','yt-slot')(event)"></span>
-            <span class="h" style="right:-16px;bottom:-16px" onpointerdown="event.stopPropagation();capDrag('resize','br','yt-slot')(event)"></span>
-          </div>
         </div>
         <div class="transport">
           <button class="btn big ghost" onclick="ytSeek(-5)">⏪ 5s</button>
@@ -669,53 +667,41 @@ function renderYt(){
       </div>
       <div class="ytzone">
         <div class="capbig">
-          <button class="btn big primary" onclick="doCapture()">📸 Capturer</button>
+          <button class="btn big primary" onclick="doCapture()">✂️ Capturer</button>
           <button class="btn big ghost" title="Coller l'image copiée" onclick="capFromClipboard()">📋 Coller</button>
           <label class="btn big ghost" style="cursor:pointer" title="Choisir une image (photothèque)">📁
             <input type="file" accept="image/*" style="display:none" onchange="capFromFile(this)">
           </label>
-          <span id="yt-entiere"></span>
+          <span id="yt-unlock"></span>
         </div>
-        <div class="pastestage" id="paste-zone" contenteditable="true" inputmode="none"></div>
+        <div class="pastestage" id="cap-stage" contenteditable="true" inputmode="none"></div>
         <p class="capmsg" id="yt-msg"></p>
         <div class="filmstrip" id="yt-film"></div>
         <div id="yt-addbtn"></div>
       </div>
     </div>
   </div>`;
-  const vsel = document.getElementById("vsel");
-  if(vsel) vsel.addEventListener("pointerdown", e => {
-    if(e.target && e.target.classList && e.target.classList.contains("h")) return;
-    capDrag("move", null, "yt-slot")(e);
-  });
-  /* Zone de collage — deux façons de recevoir l'image :
-     1) événement paste classique (traité au niveau document ci-dessus) ;
+  /* Zone de collage — plusieurs façons de recevoir l'image :
+     1) événement paste classique (traité au niveau document) ;
      2) SECOURS iPad : le menu « Coller » insère l'image nativement dans la zone
-        sans événement paste exploitable → on détecte l'<img> insérée ici,
-        on la récupère et on lance la découpe. */
-  const pz = document.getElementById("paste-zone");
+        sans événement paste exploitable → on détecte l'<img> insérée ici. */
+  const pz = document.getElementById("cap-stage");
   if(pz){
     pz.addEventListener("input", () => {
-      const inserted = pz.querySelectorAll("img");
+      const inserted = pz.querySelectorAll("img:not(#cap-img)");
       if(inserted.length){
         const src = inserted[inserted.length-1].getAttribute("src");
-        pz.innerHTML = "";
         pz.dataset.state = "";
         if(src){ try{ toast("Image insérée détectée ✔"); }catch(_){} handlePastedImage(src); }
-      } else if(!yt.last){
-        pz.innerHTML = "";
-        pz.dataset.state = "";
+        else pz.innerHTML = "";
       }
     });
-    /* SECOURS RENFORCÉ : même si Safari n'émet ni paste ni input exploitable,
-       toute image apparaissant dans la zone (insertion native) est détectée ici. */
     const mo = new MutationObserver(() => {
       try{
-        const inserted = pz.querySelectorAll("img");
+        const inserted = pz.querySelectorAll("img:not(#cap-img)");
         if(inserted.length){
           const src = inserted[inserted.length-1].getAttribute("src");
-          if(src && src !== yt.last && src !== yt.lastRaw){
-            pz.innerHTML = "";
+          if(src && src !== yt.stage){
             pz.dataset.state = "";
             toast("Image insérée détectée ✔");
             handlePastedImage(src);
@@ -734,28 +720,30 @@ function updateYt(){
   const sel = yt.sel;
   const title = document.getElementById("yt-title");
   if(title) title.textContent = link.title || "Atelier vidéo";
-  const vsel = document.getElementById("vsel");
-  if(vsel){
-    vsel.style.left = (sel.x*100)+"%"; vsel.style.top = (sel.y*100)+"%";
-    vsel.style.width = (sel.w*100)+"%"; vsel.style.height = (sel.h*100)+"%";
-    vsel.classList.toggle("set", !!yt.frameSet);
-  }
-  const ent = document.getElementById("yt-entiere");
-  if(ent) ent.innerHTML = yt.lastRaw ? `<button class="btn big ghost" title="Garder l'image entière (sans découpe)" onclick="useFullPaste()">↩ Entière</button>` : "";
-  const pz = document.getElementById("paste-zone");
+  const un = document.getElementById("yt-unlock");
+  if(un) un.innerHTML = yt.locked ? `<button class="btn big ghost" title="Réajuster le cadre" onclick="unlockFrame()">🔓 Cadre</button>` : "";
+  const pz = document.getElementById("cap-stage");
   if(pz){
-    pz.classList.toggle("armed", !!yt.frameSet);
-    const wanted = yt.last ? "img"+yt.last.length : (yt.frameSet ? "guide:on" : "guide:off");
+    const vselHtml = `<div class="vsel ${yt.locked?"set":""}" id="vsel" title="Cadre de découpe — déplace-le sur la zone à garder" onpointerdown="capDrag('move',null,'cap-stage')(event)">
+        <span class="h" style="left:-16px;top:-16px" onpointerdown="event.stopPropagation();capDrag('resize','tl','cap-stage')(event)"></span>
+        <span class="h" style="right:-16px;top:-16px" onpointerdown="event.stopPropagation();capDrag('resize','tr','cap-stage')(event)"></span>
+        <span class="h" style="left:-16px;bottom:-16px" onpointerdown="event.stopPropagation();capDrag('resize','bl','cap-stage')(event)"></span>
+        <span class="h" style="right:-16px;bottom:-16px" onpointerdown="event.stopPropagation();capDrag('resize','br','cap-stage')(event)"></span>
+      </div>`;
+    const wanted = yt.stage ? "img"+yt.stage.length : (yt.locked?"lock":"free");
     if(pz.dataset.state !== wanted){
       pz.dataset.state = wanted;
-      pz.innerHTML = yt.last ? `<img src="${yt.last}" alt="Dernière capture">`
+      pz.innerHTML = (yt.stage
+        ? `<img id="cap-img" src="${yt.stage}" alt="Capture collée">`
         : `<div style="padding:20px;text-align:center;color:var(--dim);font-size:14px;max-width:380px;line-height:1.8;pointer-events:none">
-            ${yt.frameSet
-              ? `📲 <strong style="color:var(--amber2)">Appui long ici → Coller</strong><br>(après avoir copié ta capture d'écran)`
-              : `1. ▶ Lance la vidéo jusqu'au bon moment<br>
-            2. ⏸ Pause · 3. Place le <strong style="color:var(--amber2)">cadre</strong> sur la zone<br>
-            4. 📸 Capturer · 5. Capture d'écran iPad · 6. Colle ici`}
-          </div>`;
+            📲 <strong style="color:var(--amber2)">Appui long ici → Coller</strong><br>
+            (lance la vidéo au bon moment, capture l'écran iPad,<br>copie-la, puis colle ici)
+          </div>`) + vselHtml;
+    }
+    const vsel = document.getElementById("vsel");
+    if(vsel){
+      vsel.style.left = (sel.x*100)+"%"; vsel.style.top = (sel.y*100)+"%";
+      vsel.style.width = (sel.w*100)+"%"; vsel.style.height = (sel.h*100)+"%";
     }
   }
   const m = document.getElementById("yt-msg");
